@@ -31,14 +31,26 @@ export default function Settings() {
 
   const handleSave = async () => {
     try {
-      const values = await form.validateFields()
+      // 先校验必填字段（API Key 仅在未配置时必填）
+      await form.validateFields()
+      // 用 getFieldsValue 拿真实值（不受 validateFields 内部状态延迟影响）
+      const values = form.getFieldsValue(true)
       // 如果已配置 API Key 且没改，不提交 apiKey（保留原加密值）
       if (settings.hasApiKey && !values.apiKey) {
         delete values.apiKey
       }
+      // 兜底：projectRoot 必须有值（否则后端写盘后会变空）
+      if (!values.projectRoot) {
+        message.error('请选择或填写项目根目录')
+        return
+      }
       setLoading(true)
-      await saveSettings(values)
+      const result = await saveSettings(values)
       setLoading(false)
+      if (!result || !result.success) {
+        message.error('保存失败：' + (result?.error || '未知错误'))
+        return
+      }
       setSaved(true)
       message.success('设置已保存')
       // 重新加载以拿到新的 hasApiKey 状态
@@ -48,7 +60,12 @@ export default function Settings() {
       setTimeout(() => setSaved(false), 2000)
     } catch (e: any) {
       setLoading(false)
-      message.error('保存失败：' + (e?.message || '未知错误'))
+      // antd validateFields 失败 - 显示第一个错误
+      if (e?.errorFields?.length) {
+        message.error('表单校验失败：' + e.errorFields[0].errors[0])
+      } else {
+        message.error('保存失败：' + (e?.message || '未知错误'))
+      }
     }
   }
 
@@ -90,19 +107,11 @@ export default function Settings() {
           <Form.Item
             name="projectRoot"
             label={<Space size={4}><FolderOpenOutlined style={{ color: '#1677ff' }} />项目根目录</Space>}
-            extra="所有项目将在此目录下创建和管理"
+            extra="所有项目将在此目录下创建和管理。可点右边文件夹图标弹窗选，也可直接输入完整路径后保存"
           >
             <Input
-              placeholder="选择项目根目录..."
-              style={{ cursor: 'pointer' }}
-              readOnly
-              onClick={async () => {
-                if (!window.electronAPI) return
-                const dir = await window.electronAPI.selectDir()
-                if (dir) {
-                  form.setFieldsValue({ projectRoot: dir })
-                }
-              }}
+              placeholder="/Users/yourname/Projects 或点右边图标选择..."
+              style={{ cursor: 'text' }}
               addonAfter={
                 <FolderOpenOutlined
                   style={{ cursor: 'pointer', color: '#1677ff' }}

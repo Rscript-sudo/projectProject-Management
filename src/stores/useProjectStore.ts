@@ -36,7 +36,7 @@ interface AppState {
   deleteProject: (path: string) => Promise<void>
   renameProject: (oldPath: string, newName: string) => Promise<{ success: boolean; error?: string }>
   loadSettings: () => Promise<void>
-  saveSettings: (settings: Settings) => Promise<void>
+  saveSettings: (settings: Partial<Settings>) => Promise<{ success: boolean; error?: string }>
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -141,11 +141,15 @@ export const useAppStore = create<AppState>((set, get) => ({
           autoOpenFile: true,
         }
         const settings = { ...defaults, ...saved }
+        const newRoot = settings.projectRoot || ''
+        // 检查根目录是否真的变了 → 决定要不要刷项目列表
+        const oldRoot = get().projectRoot
         set({
           settings,
-          projectRoot: settings.projectRoot || ''
+          projectRoot: newRoot,
         })
-        if (settings.projectRoot) {
+        // 根目录变了或首次加载 → 重新拉项目列表
+        if (newRoot && newRoot !== oldRoot) {
           await get().loadProjects()
         }
         return true
@@ -166,10 +170,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   saveSettings: async (settings) => {
     try {
       const api = await waitForElectronAPI()
-      await api.setSettings(settings)
-      set({ settings })
-    } catch (e) {
+      const result = await api.setSettings(settings)
+      if (!result || result.success === false) {
+        console.error('[saveSettings] 后端失败:', result?.error)
+        return { success: false, error: result?.error || '保存失败' }
+      }
+      // 同步顶层 projectRoot：settings 变 → store 顶层跟着变 → Home 页立刻刷新
+      const newRoot = settings.projectRoot || get().projectRoot
+      set({
+        settings: { ...get().settings, ...settings },
+        projectRoot: newRoot,
+      })
+      // 根目录变了 → 立刻刷项目列表（不依赖再 loadSettings 触发）
+      if (newRoot !== get().projectRoot || settings.projectRoot) {
+        await get().loadProjects()
+      }
+      return { success: true }
+    } catch (e: any) {
       console.error('Failed to save settings:', e)
+      return { success: false, error: e?.message || '未知错误' }
     }
   },
 }))
