@@ -1,6 +1,11 @@
 node_modules/
 dist/
 release/
+
+# Mac .app/.dmg 也在 release/ 里——Mac 本地构建产物不进 git（每个 .app 内部含
+# 整个 Electron Framework 二进制，~300MB，进 git 会撑爆仓库）。需要时跑
+# `npm run package:mac` 重新打。
+
 *.db
 *.db-wal
 *.db-shm
