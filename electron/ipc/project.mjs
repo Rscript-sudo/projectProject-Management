@@ -65,41 +65,25 @@ export function register(ipcMain) {
       { key: 'construction', label: '施工方案', file: '施工方案台账.json' },
       { key: 'log', label: '监理日志', file: '监理日志台账.json' },
     ]
-    try {
-      const projectName = path.basename(projectPath)
-      const dataDir = getProjectDataPath(projectName)
-      const result = {}
-      for (const { key, label, file } of LEDGER_FILES) {
-        const ledgerPath = path.join(dataDir, file)
-        let items = []
-        if (fs.existsSync(ledgerPath)) {
-          try {
-            const raw = fs.readFileSync(ledgerPath, 'utf8')
-            const data = JSON.parse(raw)
-            items = Array.isArray(data.items) ? data.items : []
-          } catch (e) {
-            console.error('[getProjectLedgers] Failed to read ledger file:', ledgerPath, e.message)
-            items = []
-          }
+    const projectName = path.basename(projectPath)
+    const dataDir = getProjectDataPath(projectName)
+    const result = {}
+    for (const { key, label, file } of LEDGER_FILES) {
+      const ledgerPath = path.join(dataDir, file)
+      let items = []
+      if (fs.existsSync(ledgerPath)) {
+        try {
+          const raw = fs.readFileSync(ledgerPath, 'utf8')
+          const data = JSON.parse(raw)
+          items = Array.isArray(data.items) ? data.items : []
+        } catch (e) {
+          console.error('[getProjectLedgers] Failed to read ledger file:', ledgerPath, e.message)
+          items = []
         }
-        result[key] = { label, file, items }
       }
-      return result
-    } catch (e) {
-      console.error('[getProjectLedgers]', projectPath, e.message)
-      return {}
+      result[key] = { label, file, items }
     }
-  })
-
-  ipcMain.handle('fs:readLedger', (_, projectPath, ledgerName) => {
-    try {
-      const projectName = path.basename(projectPath)
-      const ledgerPath = path.join(getProjectDataPath(projectName), ledgerName)
-      if (!fs.existsSync(ledgerPath)) return { items: [] }
-      return JSON.parse(fs.readFileSync(ledgerPath, 'utf8'))
-    } catch {
-      return { items: [] }
-    }
+    return result
   })
 
   ipcMain.handle('fs:writeLedger', safeCall((_, projectPath, ledgerName, data) => {

@@ -56,6 +56,7 @@ export default function PaymentView() {
   }, [apiReady, projectPath])
 
   const refresh = async () => {
+    if (!apiReady) return
     setLoading(true)
     try {
       const [list, sum] = await Promise.all([

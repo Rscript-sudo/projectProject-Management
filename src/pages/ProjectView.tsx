@@ -404,8 +404,8 @@ export default function ProjectView() {
         model: currentSettings.model,
       }
 
-      // 构造 IPC 参数
-      const ipcParams: any = {
+      // 构造 IPC 参数（apiKey 已在主进程持有，前端不再传入；新签名的 AIOptions 已将 apiKey 改为可选）
+      const ipcParams = {
         ...aiCfg,
         mode,
         projectName: currentProject?.name,
@@ -413,8 +413,13 @@ export default function ProjectView() {
         messages: aiMessages,
       }
 
-      // 优先走流式
-      const streamable = await window.electronAPI.callAIStream(ipcParams)
+      // 优先走流式 —— 套 30 秒超时，避免主进程 hang 时 await 永不返回
+      const streamable = await Promise.race([
+        window.electronAPI.callAIStream(ipcParams),
+        new Promise<{ success: false; error: string }>((resolve) =>
+          setTimeout(() => resolve({ success: false, error: '启动 AI 流式超时（30秒）' }), 30000)
+        ),
+      ])
 
       if (streamable.success) {
         const { requestId } = streamable

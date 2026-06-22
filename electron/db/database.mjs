@@ -23,6 +23,10 @@ export function getDb() {
   // 启用 WAL（写性能 + 读并发）
   _db.pragma('journal_mode = WAL')
   _db.pragma('foreign_keys = ON')
+  // 写性能与崩溃安全的折中：NORMAL 在 WAL 模式下足够安全（事务边界有 fsync）
+  _db.pragma('synchronous = NORMAL')
+  // 并发写时最多等锁 5 秒，避免 SQLITE_BUSY 直接失败
+  _db.pragma('busy_timeout = 5000')
 
   initSchema(_db)
   return _db
@@ -235,12 +239,24 @@ function initSchema(db) {
 
 /**
  * 关闭数据库（应用退出时调用）
+ * 先做 WAL checkpoint 把 WAL 文件刷回主库，避免强杀丢数据
+ * 返回 true 表示正常关闭，false 表示已经在关闭中（防止重入）
  */
 export function closeDb() {
-  if (_db) {
-    _db.close()
-    _db = null
+  if (!_db) return false
+  try {
+    // TRUNCATE 模式：checkpoint + 把 WAL 文件截断到 0，节省磁盘
+    _db.pragma('wal_checkpoint(TRUNCATE)')
+  } catch (e) {
+    console.error('[DB] WAL checkpoint failed:', e.message)
   }
+  try {
+    _db.close()
+  } catch (e) {
+    console.error('[DB] close failed:', e.message)
+  }
+  _db = null
+  return true
 }
 
 /**

@@ -3,6 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { safeCall } from './safe.mjs'
+import { getSettings } from './shared.mjs'
 import { DATA_TOOLS } from '../dataTools.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -39,15 +40,11 @@ export function register(ipcMain, mainWindow) {
   })
 
   // 复制路径到剪贴板
-  ipcMain.handle('shell:copyPath', async (_, targetPath) => {
-    try {
-      const { clipboard } = await import('electron')
-      clipboard.writeText(targetPath || '')
-      return { success: true }
-    } catch (e) {
-      return { success: false, error: e.message }
-    }
-  })
+  ipcMain.handle('shell:copyPath', safeCall(async (_, targetPath) => {
+    const { clipboard } = await import('electron')
+    clipboard.writeText(targetPath || '')
+    return { success: true }
+  }))
 
   ipcMain.handle('dialog:selectDir', async () => {
     const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] })
@@ -265,7 +262,8 @@ ${dataContext}
 
   // 流式 AI 调用 — 通过 webContents.send 推送每个 chunk
   // 新增参数：mode / projectName / dataToolIds — 用于数据预取后注入 prompt
-  ipcMain.handle('ai:stream', async (event, { url, apiKey, model, messages, mode, projectName, dataToolIds }) => {
+  // 安全：apiKey 不再从 IPC 参数传入，主进程从加密存储读取
+  ipcMain.handle('ai:stream', async (event, { url, model, messages, mode, projectName, dataToolIds }) => {
     const sender = event.sender
     const requestId = `ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     const controller = new AbortController()
@@ -275,6 +273,14 @@ ${dataContext}
     // 监听渲染进程主动中断
     const abortChannel = `ai:abort:${requestId}`
     ipcMain.once(abortChannel, () => controller.abort())
+
+    // 主进程持有 apiKey，不再从 IPC 接收
+    const apiKey = getSettings().apiKey
+    if (!apiKey) {
+      sender.send('ai:stream:chunk', { requestId, type: 'error', error: '未配置 API Key，请在设置中填写' })
+      sender.send('ai:stream:end', { requestId })
+      return { success: false, error: 'API Key 未配置', requestId }
+    }
 
     // ===== 数据预取：在调 LLM 前把项目实时数据注入 prompt =====
     let finalMessages = buildDataInjectedMessages(messages, mode, projectName, dataToolIds)
@@ -310,6 +316,13 @@ ${dataContext}
       let buffer = ''
 
       while (true) {
+        // 渲染进程已销毁（用户切页面/关闭窗口）→ 立即取消读取，释放连接
+        if (sender.isDestroyed()) {
+          try { await reader.cancel() } catch {}
+          console.log(`[ai:stream] sender 已销毁，主动中断流 (${requestId})`)
+          return { success: false, error: '渲染端已断开', requestId }
+        }
+
         const { done, value } = await reader.read()
         if (done) break
         buffer += decoder.decode(value, { stream: true })
@@ -329,6 +342,11 @@ ${dataContext}
               const json = JSON.parse(data)
               const content = json.choices?.[0]?.delta?.content || json.choices?.[0]?.message?.content || ''
               if (content) {
+                // 二次守卫：发之前再检查一次
+                if (sender.isDestroyed()) {
+                  try { await reader.cancel() } catch {}
+                  return { success: false, error: '渲染端已断开', requestId }
+                }
                 sender.send('ai:stream:chunk', { requestId, type: 'content', content })
               }
             } catch {
@@ -338,16 +356,22 @@ ${dataContext}
         }
       }
 
-      sender.send('ai:stream:end', { requestId })
+      // 正常结束：再检查一次 sender 再发 end（避免最后一条 end 丢到死信通道）
+      if (!sender.isDestroyed()) {
+        sender.send('ai:stream:end', { requestId })
+      }
       return { success: true, requestId }
     } catch (e) {
       clearTimeout(timeout)
-      if (e.name === 'AbortError') {
-        sender.send('ai:stream:chunk', { requestId, type: 'error', error: 'AI 请求超时（120秒）' })
-      } else {
-        sender.send('ai:stream:chunk', { requestId, type: 'error', error: e.message })
+      // sender 可能已销毁，静默吞掉发送错误
+      if (!sender.isDestroyed()) {
+        if (e.name === 'AbortError') {
+          sender.send('ai:stream:chunk', { requestId, type: 'error', error: 'AI 请求超时（120秒）' })
+        } else {
+          sender.send('ai:stream:chunk', { requestId, type: 'error', error: e.message })
+        }
+        sender.send('ai:stream:end', { requestId })
       }
-      sender.send('ai:stream:end', { requestId })
       return { success: false, error: e.message, requestId }
     }
   })
@@ -369,7 +393,12 @@ ${dataContext}
     return results
   }))
 
-  ipcMain.handle('ai:call', safeCall(async (_, { url, apiKey, model, messages, mode, projectName, dataToolIds }) => {
+  ipcMain.handle('ai:call', safeCall(async (_, { url, model, messages, mode, projectName, dataToolIds }) => {
+    // 主进程持有 apiKey，不再从 IPC 接收
+    const apiKey = getSettings().apiKey
+    if (!apiKey) {
+      return { success: false, error: 'API Key 未配置，请在设置中填写' }
+    }
     let finalMessages = buildDataInjectedMessages(messages, mode, projectName, dataToolIds)
     finalMessages = trimContext(finalMessages, model)
     const controller = new AbortController()

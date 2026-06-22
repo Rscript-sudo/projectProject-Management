@@ -70,6 +70,7 @@ export default function ContractView() {
   }, [apiReady, projectPath])
 
   const refresh = async () => {
+    if (!apiReady) return
     setLoading(true)
     try {
       const [cl, chl, cll, db] = await Promise.all([

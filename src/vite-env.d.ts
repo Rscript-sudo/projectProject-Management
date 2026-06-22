@@ -22,7 +22,8 @@ interface SaveDocOptions {
 interface AIOptions {
   url?: string
   baseUrl?: string
-  apiKey: string
+  // apiKey 已移至主进程加密存储，前端不再传入；保留字段兼容旧代码（被忽略）
+  apiKey?: string
   model: string
   messages: { role: string; content: string }[]
   provider?: string
@@ -122,7 +123,9 @@ export type AllLedgersData = Record<string, LedgerInfo>
 interface AppSettings {
   projectRoot: string
   aiProvider: 'deepseek' | 'minimax' | 'glm' | 'kimi' | 'qwen' | 'custom'
-  apiKey: string
+  // apiKey 已移至主进程加密存储，前端拿到的是脱敏版本（含 hasApiKey 字段）
+  apiKey?: string
+  hasApiKey?: boolean
   baseUrl: string
   model: string
   autoOpenFile: boolean
@@ -266,6 +269,7 @@ export interface ElectronAPI {
   searchRebuild: (progressCallback?: (current: number, total: number, name: string) => void) => Promise<{ success: boolean; docCount: number }>
   searchStatus: () => Promise<{ docCount: number; lastUpdated: string | null }>
   dataQuery: (options: { projectName: string; toolIds: string[] }) => Promise<Record<string, any>>
+  dbExport: () => Promise<{ success: boolean; path?: string; size?: number; exportedAt?: string; error?: string }>
 }
 
 declare global {

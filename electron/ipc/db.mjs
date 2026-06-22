@@ -3,10 +3,14 @@
  * 前端拿到的数据是 plain object（better-sqlite3 已自动转换）
  */
 
+import { dialog, app } from 'electron'
+import fs from 'fs'
+import path from 'path'
 import { safeCall } from './safe.mjs'
+import { getDb, closeDb } from '../db/database.mjs'
 import * as repo from '../db/repo.mjs'
 
-export function register(ipcMain) {
+export function register(ipcMain, mainWindow) {
   // ============ 项目元数据 ============
   ipcMain.handle('db:getProjectMeta', safeCall((_, name) => repo.getProjectMeta(name)))
   ipcMain.handle('db:upsertProjectMeta', safeCall((_, meta) => {
@@ -116,5 +120,44 @@ export function register(ipcMain) {
   ipcMain.handle('db:logAudit', safeCall((_, projectName, action, entityType, entityId, detail) => {
     repo.logAudit(projectName, action, entityType, entityId, detail)
     return { success: true }
+  }))
+
+  // ============ 数据库导出（备份）============
+  // 把 SQLite 主库（含 WAL）checkpoint 后拷到用户选的位置
+  // 注意：只导出 SQLite，JSON 文件（项目文件夹）由用户单独备份
+  ipcMain.handle('db:export', safeCall(async (_, mainWindow) => {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: '导出数据库备份',
+      defaultPath: `项目管理系统-备份-${new Date().toISOString().slice(0, 10)}.sqlite`,
+      filters: [
+        { name: 'SQLite 数据库', extensions: ['sqlite'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    })
+    if (result.canceled || !result.filePath) return { success: false, error: '用户取消' }
+
+    // 先把 WAL 刷回主库（必须在 closeDb 之前，因为 close 后 _db 为 null）
+    const db = getDb()
+    try {
+      db.pragma('wal_checkpoint(TRUNCATE)')
+    } catch (e) {
+      // checkpoint 失败不致命，继续导出
+      console.warn('[db:export] checkpoint 失败:', e.message)
+    }
+
+    // 用 better-sqlite3 的 backup API（原子且一致）
+    const targetPath = result.filePath
+    try {
+      await db.backup(targetPath)
+      const stats = fs.statSync(targetPath)
+      return {
+        success: true,
+        path: targetPath,
+        size: stats.size,
+        exportedAt: new Date().toISOString(),
+      }
+    } catch (e) {
+      return { success: false, error: '导出失败：' + e.message }
+    }
   }))
 }

@@ -63,11 +63,15 @@ export default function ProgressView() {
 
   useEffect(() => {
     if (!apiReady || !projectPath) return
-    window.electronAPI.progressMonthlyCompare({ projectPath, yearMonth })
+    // 异步竞态保护：再次确认 API 仍可用
+    const api = window.electronAPI
+    if (!api) return
+    api.progressMonthlyCompare({ projectPath, yearMonth })
       .then(setMonthly).catch(console.error)
   }, [apiReady, projectPath, yearMonth, nodes])
 
   const refresh = async () => {
+    if (!apiReady) return
     setLoading(true)
     try {
       const [list, g, d] = await Promise.all([
@@ -103,6 +107,10 @@ export default function ProgressView() {
   }
 
   const handleSave = async () => {
+    if (!apiReady) {
+      message.warning('系统尚未就绪，请稍后重试')
+      return
+    }
     if (!editForm.name) {
       message.warning('请输入节点名称')
       return
@@ -128,6 +136,10 @@ export default function ProgressView() {
       content: `节点"${node.name}"将被删除，相关横道图也会移除。`,
       okType: 'danger',
       onOk: async () => {
+        if (!apiReady) {
+          message.warning('系统尚未就绪，请稍后重试')
+          return
+        }
         await window.electronAPI.progressDelete({ id: node.id })
         message.success('已删除')
         refresh()

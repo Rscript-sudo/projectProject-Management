@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import { encryptSecret, decryptSecret } from './secret.mjs'
 
 export function getDefaultRoot() {
   return path.join(app.getPath('home'), 'Desktop')
@@ -226,7 +227,12 @@ export function getSettings() {
   try {
     if (fs.existsSync(settingsPath)) {
       const saved = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
-      return { ...getDefaultSettings(), ...saved }
+      const merged = { ...getDefaultSettings(), ...saved }
+      // 解密 apiKey（如果存的是加密形式），前端拿到明文只在主进程用
+      if (typeof merged.apiKey === 'object' && merged.apiKey) {
+        merged.apiKey = decryptSecret(merged.apiKey)
+      }
+      return merged
     }
   } catch (e) {
     console.error('[getSettings] Error:', e.message)
@@ -234,9 +240,31 @@ export function getSettings() {
   return getDefaultSettings()
 }
 
+/**
+ * 给前端用的脱敏 settings —— 不含明文 apiKey，只含 hasApiKey 标志
+ */
+export function getSettingsForFrontend() {
+  const settings = getSettings()
+  const { apiKey, ...rest } = settings
+  return {
+    ...rest,
+    hasApiKey: !!apiKey,
+  }
+}
+
 export function saveSettings(settings) {
   try {
-    fs.writeFileSync(getSettingsPath(), JSON.stringify(settings, null, 2), 'utf8')
+    const toSave = { ...settings }
+    // 如果前端传的是明文 apiKey，加密后落盘；不传或传空字符串则保留原值
+    if (typeof toSave.apiKey === 'string') {
+      if (toSave.apiKey === '') {
+        // 显式清空
+        delete toSave.apiKey
+      } else {
+        toSave.apiKey = encryptSecret(toSave.apiKey)
+      }
+    }
+    fs.writeFileSync(getSettingsPath(), JSON.stringify(toSave, null, 2), 'utf8')
     return { success: true }
   } catch (e) {
     console.error('[saveSettings] Error:', e.message)

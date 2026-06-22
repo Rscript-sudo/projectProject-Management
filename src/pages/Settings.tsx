@@ -32,11 +32,19 @@ export default function Settings() {
   const handleSave = async () => {
     try {
       const values = await form.validateFields()
+      // 如果已配置 API Key 且没改，不提交 apiKey（保留原加密值）
+      if (settings.hasApiKey && !values.apiKey) {
+        delete values.apiKey
+      }
       setLoading(true)
       await saveSettings(values)
       setLoading(false)
       setSaved(true)
       message.success('设置已保存')
+      // 重新加载以拿到新的 hasApiKey 状态
+      await loadSettings()
+      const updatedSettings = useAppStore.getState().settings
+      form.setFieldsValue({ ...updatedSettings, apiKey: '' })
       setTimeout(() => setSaved(false), 2000)
     } catch (e: any) {
       setLoading(false)
@@ -153,10 +161,14 @@ export default function Settings() {
             <Form.Item
               name="apiKey"
               label="API Key"
-              rules={[{ required: true, message: '请输入 API Key' }]}
-              extra="在对应 AI 平台获取"
+              rules={[{ required: !settings.hasApiKey, message: '请输入 API Key' }]}
+              extra={
+                settings.hasApiKey
+                  ? <Text type="success">✓ 已配置（出于安全，加密存储，不显示明文）</Text>
+                  : '在对应 AI 平台获取'
+              }
             >
-              <Input.Password placeholder="sk-..." />
+              <Input.Password placeholder={settings.hasApiKey ? '已配置，留空保持不变' : 'sk-...'} />
             </Form.Item>
 
             <Form.Item
@@ -282,6 +294,44 @@ export default function Settings() {
               </a>
             ))}
           </div>
+        </Card>
+
+        {/* ===== 数据维护 ===== */}
+        <Card
+          title={<Space><FolderOpenOutlined /><span>数据维护</span></Space>}
+          size="small"
+        >
+          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+            <div>
+              <Text strong>导出数据库备份</Text>
+              <br />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                把所有项目数据导出为单个 .sqlite 文件（不含已生成的 Word/Excel 文档）。建议每周或重要操作后做一次。
+              </Text>
+            </div>
+            <Button
+              icon={<FolderOpenOutlined />}
+              onClick={async () => {
+                if (!window.electronAPI) {
+                  message.error('系统未就绪')
+                  return
+                }
+                try {
+                  const result = await window.electronAPI.dbExport()
+                  if (result.success) {
+                    const sizeMB = ((result.size || 0) / 1024 / 1024).toFixed(2)
+                    message.success(`已导出到：${result.path}（${sizeMB} MB）`)
+                  } else {
+                    message.warning(result.error || '导出未完成')
+                  }
+                } catch (e: any) {
+                  message.error('导出失败：' + (e?.message || '未知错误'))
+                }
+              }}
+            >
+              导出数据库备份
+            </Button>
+          </Space>
         </Card>
 
         {/* ===== 保存按钮 ===== */}

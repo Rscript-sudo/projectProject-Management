@@ -27,5 +27,5 @@ export function registerAll(ipcMain, mainWindow) {
   registerPayment(ipcMain)
   registerContract(ipcMain)
   registerPhoto(ipcMain)
-  registerDb(ipcMain)
+  registerDb(ipcMain, mainWindow)
 }

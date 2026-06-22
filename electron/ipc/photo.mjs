@@ -7,6 +7,7 @@
 import path from 'path'
 import fs from 'fs'
 import { safeCall } from './safe.mjs'
+import { getSettings } from './shared.mjs'
 import * as repo from '../db/repo.mjs'
 
 // 支持的图片扩展名
@@ -196,8 +197,9 @@ export function register(ipcMain) {
         `  ${i + idx + 1}. 文件名="${f.name}"  路径线索="${f.locationHint}"  日期=${f.shootDate}`
       ).join('\n')
 
-      // 如果没有配置 AI，用路径推断（降级方案）
-      if (!aiConfig?.apiKey) {
+      // 如果没有配置 AI（前端 hasApiKey=false 或显式禁用），用路径推断（降级方案）
+      const apiKey = aiConfig?.apiKey || getSettings().apiKey
+      if (!apiKey) {
         for (const f of batch) {
           results.push({
             srcPath: f.path,
@@ -220,7 +222,7 @@ export function register(ipcMain) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${aiConfig.apiKey || ''}`,
+            'Authorization': `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
             model: aiConfig.model || 'deepseek-chat',

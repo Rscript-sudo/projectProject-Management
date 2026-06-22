@@ -101,6 +101,7 @@ const api = {
   dbListSimpleLedger: (name, type) => ipcRenderer.invoke('db:listSimpleLedger', name, type),
   dbInsertSimpleLedger: (name, type, item) => ipcRenderer.invoke('db:insertSimpleLedger', name, type, item),
   dbLogAudit: (projectName, action, entityType, entityId, detail) => ipcRenderer.invoke('db:logAudit', projectName, action, entityType, entityId, detail),
+  dbExport: () => ipcRenderer.invoke('db:export'),
   readLedger: (projectPath, ledgerName) => ipcRenderer.invoke('fs:readLedger', projectPath, ledgerName),
   writeLedger: (projectPath, ledgerName, data) => ipcRenderer.invoke('fs:writeLedger', projectPath, ledgerName, data),
   openFile: (filePath) => ipcRenderer.invoke('shell:openFile', filePath),

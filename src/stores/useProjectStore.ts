@@ -12,7 +12,8 @@ interface ProjectInfo {
 interface Settings {
   projectRoot: string
   aiProvider: 'deepseek' | 'minimax' | 'glm' | 'kimi' | 'qwen' | 'custom'
-  apiKey: string
+  apiKey?: string        // 不再存明文，主进程加密持有
+  hasApiKey?: boolean    // 前端用此判断是否已配置
   baseUrl: string
   model: string
   autoOpenFile: boolean
