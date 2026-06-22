@@ -39,13 +39,11 @@ jobs:
         run: npx electron-rebuild -f -w better-sqlite3
 
       # 5. 构建前端 + electron-builder 出 Windows 包
-      #    --publish never：不自动发到 GitHub Release，只产出 artifacts
+      #    --publish never：不依赖 electron-builder 自带的发布逻辑（用 action-gh-release 更可控）
       - name: Build Windows installer
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run build -- --win --publish never
 
-      # 6. 上传产物到 Actions 页面（保留 30 天）
+      # 6. 上传产物到 Actions 页面（保留 30 天，方便手动下载）
       - name: Upload EXE artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -55,3 +53,31 @@ jobs:
             release/latest.yml
             release/*.blockmap
           retention-days: 30
+
+      # 7. 自动创建 GitHub Release 并 attach 产物（仅 tag 触发时）
+      #    只有 v* tag 才发布，手动 workflow_dispatch 不发
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            ## 项目文档管理系统 ${{ github.ref_name }}
+
+            📦 **下载下方附件**，安装包 / 绿色版二选一：
+
+            - `项目文档管理系统 Setup ${{ github.ref_name }}.exe` —— NSIS 安装包（推荐）
+            - `项目文档管理系统 ${{ github.ref_name }}.exe` —— Portable 绿色版
+
+            ⚠️ 首次运行可能被 SmartScreen 拦截，点"更多信息 → 仍要运行"。
+
+            📋 完整更新说明见 [RELEASE_NOTES_${{ github.ref_name }}.md](https://github.com/${{ github.repository }}/blob/main/RELEASE_NOTES_${{ github.ref_name }}.md)
+          files: |
+            release/*.exe
+            release/latest.yml
+            release/*.blockmap
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
