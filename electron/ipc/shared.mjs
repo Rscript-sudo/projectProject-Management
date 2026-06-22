@@ -115,17 +115,10 @@ export function ensureProjectIndex(rootPath) {
   const index = readProjectIndex()
   if (!rootPath || !fs.existsSync(rootPath)) return index
 
-  const onDisk = fs.readdirSync(rootPath, { withFileTypes: true })
-    .filter(e => e.isDirectory())
-    .map(e => ({ name: e.name, path: path.join(rootPath, e.name) }))
-
+  // 项目 = 用户在 index 里显式注册的（通过 fs:createProject 创建的），
+  // NOT 根目录下的所有子目录。自动扫描根目录会把"投稿/培训课件"这种普通文件夹当项目，
+  // 业务定义错误。只保留 index 里有的 + 路径还存在的。
   const valid = index.projects.filter(p => fs.existsSync(p.path))
-  const registered = new Set(valid.map(p => p.path))
-  for (const dir of onDisk) {
-    if (!registered.has(dir.path)) {
-      valid.push({ name: dir.name, path: dir.path, addedAt: new Date().toISOString() })
-    }
-  }
 
   if (valid.length !== index.projects.length) {
     writeProjectIndex({ projects: valid })

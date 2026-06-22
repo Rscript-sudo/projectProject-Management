@@ -107,7 +107,19 @@ export default function Settings() {
           <Form.Item
             name="projectRoot"
             label={<Space size={4}><FolderOpenOutlined style={{ color: '#1677ff' }} />项目根目录</Space>}
-            extra="所有项目将在此目录下创建和管理。可点右边文件夹图标弹窗选，也可直接输入完整路径后保存"
+            extra={
+              <span>
+                所有项目将在此目录下创建和管理。可点右边文件夹图标弹窗选，也可直接输入完整路径后保存。
+                <Button
+                  type="link"
+                  size="small"
+                  style={{ padding: '0 4px', height: 'auto' }}
+                  onClick={() => form.setFieldsValue({ projectRoot: '/Users/micfree/Desktop' })}
+                >
+                  重置为桌面
+                </Button>
+              </span>
+            }
           >
             <Input
               placeholder="/Users/yourname/Projects 或点右边图标选择..."
