@@ -1,0 +1,45 @@
+{
+  "name": "监理联系单",
+  "doc_type": "contact",
+  "engine": "docx",
+  "template": "./监理联系单模版.docx",
+  "output": {
+    "dir": "03_实施阶段/06_往来函件/03_工程联系单/原始稿/",
+    "naming": "{YYYYMMDD}_LX-D_{PROJECT_CODE}_{SUBJECT_SNIPPET}.docx"
+  },
+  "counter_key": "contact_sheet",
+  "placeholders": {
+    "{{项目名称}}": {
+      "source": "env",
+      "key": "PROJECT_NAME"
+    },
+    "{{致单位}}": {
+      "source": "env",
+      "key": "CONTRACTOR"
+    },
+    "{{事由}}": {
+      "source": "param",
+      "key": "subject",
+      "default": ""
+    },
+    "{{文件编号}}": {
+      "source": "computed",
+      "key": "COUNTER",
+      "default": ""
+    },
+    "{{正文内容}}": {
+      "source": "param",
+      "key": "body_content",
+      "default": ""
+    }
+  },
+  "triggers": [
+    "联系单",
+    "联系函",
+    "contact"
+  ],
+  "requires": [
+    "GLOBAL_RULES"
+  ],
+  "light_mode": true
+}

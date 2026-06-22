@@ -1,0 +1,46 @@
+{
+  "name": "监理整改通知书",
+  "doc_type": "rectification",
+  "engine": "docx",
+  "template": "./监理整改通知书模版.docx",
+  "output": {
+    "dir": "03_实施阶段/06_往来函件/01_监理整改通知书/原始稿/",
+    "naming": "{YYYYMMDD}_ZG-TZ_{PROJECT_CODE}_{SUBJECT_SNIPPET}.docx"
+  },
+  "counter_key": "rectification_notice",
+  "placeholders": {
+    "{{项目名称}}": {
+      "source": "env",
+      "key": "PROJECT_NAME"
+    },
+    "{{致单位}}": {
+      "source": "env",
+      "key": "CONTRACTOR"
+    },
+    "{{事由}}": {
+      "source": "param",
+      "key": "subject",
+      "default": ""
+    },
+    "{{文件编号}}": {
+      "source": "computed",
+      "key": "COUNTER",
+      "default": ""
+    },
+    "{{正文内容}}": {
+      "source": "param",
+      "key": "body_content",
+      "default": ""
+    }
+  },
+  "triggers": [
+    "整改通知",
+    "整改单",
+    "rectification",
+    "整改通知书"
+  ],
+  "requires": [
+    "GLOBAL_RULES"
+  ],
+  "light_mode": true
+}

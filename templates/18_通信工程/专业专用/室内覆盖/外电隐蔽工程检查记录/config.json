@@ -1,0 +1,32 @@
+{
+  "name": "E-JZPT-8「外电隐蔽工程检查记录」",
+  "doc_type": "JZPT_E-JZPT-8「外电隐蔽工程检查记录」",
+  "engine": "copy",
+  "template": "./「外电隐蔽工程检查记录」_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_JZ_{PROJECT_CODE}_外电隐蔽工程检查记录.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-JZPT-8「外电隐蔽工程检查记录」",
+    "JZPT",
+    "JZPT 外电隐蔽工程检查记录",
+    "JZPT_外电隐蔽工程检查记录",
+    "JZPT　外电隐蔽工程检查记录",
+    "JZPT外电隐蔽工程检查记录",
+    "外电隐蔽工程检查记录」",
+    "室内覆盖",
+    "室内覆盖 外电隐蔽工程检查记录",
+    "室内覆盖_外电隐蔽工程检查记录",
+    "室内覆盖　外电隐蔽工程检查记录",
+    "室内覆盖外电隐蔽工程检查记录",
+    "室内覆盖外电隐蔽工程检查记录」"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

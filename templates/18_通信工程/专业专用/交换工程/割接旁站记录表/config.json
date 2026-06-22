@@ -1,0 +1,31 @@
+{
+  "name": "E-JH-05割接旁站记录表",
+  "doc_type": "JH_E-JH-05割接旁站记录表",
+  "engine": "copy",
+  "template": "./割接旁站记录表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_JH割_{PROJECT_CODE}_TX_JH割接旁站记录表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-JH-05割接旁站记录表",
+    "JH",
+    "JH 割接旁站记录表",
+    "JH_割接旁站记录表",
+    "JH　割接旁站记录表",
+    "JH割接旁站记录表",
+    "交换工程",
+    "交换工程 割接旁站记录表",
+    "交换工程_割接旁站记录表",
+    "交换工程　割接旁站记录表",
+    "交换工程割接旁站记录表",
+    "割接旁站记录表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

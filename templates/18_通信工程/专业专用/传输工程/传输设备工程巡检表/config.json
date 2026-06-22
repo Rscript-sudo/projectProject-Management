@@ -1,0 +1,31 @@
+{
+  "name": "E-CS-06传输设备工程巡检表",
+  "doc_type": "CS_E-CS-06传输设备工程巡检表",
+  "engine": "copy",
+  "template": "./传输设备工程巡检表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_CS传_{PROJECT_CODE}_TX_CS传输设备工程巡检表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "CS",
+    "CS 传输设备工程巡检表",
+    "CS_传输设备工程巡检表",
+    "CS　传输设备工程巡检表",
+    "CS传输设备工程巡检表",
+    "E-CS-06传输设备工程巡检表",
+    "传输工程",
+    "传输工程 传输设备工程巡检表",
+    "传输工程_传输设备工程巡检表",
+    "传输工程　传输设备工程巡检表",
+    "传输工程传输设备工程巡检表",
+    "传输设备工程巡检表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

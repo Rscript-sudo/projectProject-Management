@@ -1,0 +1,38 @@
+{
+  "name": "E-DY-04「割接旁站记录表」",
+  "doc_type": "DY_E-DY-04「割接旁站记录表」",
+  "engine": "copy",
+  "template": "./「割接旁站记录表」_模版.xlsx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_DY_{PROJECT_CODE}_割接旁站记录表.xlsx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "DY",
+    "DY 割接旁站记录表",
+    "DY_割接旁站记录表",
+    "DY　割接旁站记录表",
+    "DY割接旁站记录表",
+    "E-DY-04「割接旁站记录表」",
+    "割接旁站记录表」",
+    "电源工程",
+    "电源工程 割接旁站记录表",
+    "电源工程_割接旁站记录表",
+    "电源工程　割接旁站记录表",
+    "电源工程割接旁站记录表",
+    "电源工程割接旁站记录表」"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ],
+  "placeholder_cells": [
+    "A2",
+    "D2",
+    "C3",
+    "D3"
+  ]
+}

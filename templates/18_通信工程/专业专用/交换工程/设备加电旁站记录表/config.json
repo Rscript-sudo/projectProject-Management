@@ -1,0 +1,31 @@
+{
+  "name": "E-JH-04设备加电旁站记录表",
+  "doc_type": "JH_E-JH-04设备加电旁站记录表",
+  "engine": "copy",
+  "template": "./设备加电旁站记录表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_JH设_{PROJECT_CODE}_TX_JH设备加电旁站记录表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-JH-04设备加电旁站记录表",
+    "JH",
+    "JH 设备加电旁站记录表",
+    "JH_设备加电旁站记录表",
+    "JH　设备加电旁站记录表",
+    "JH设备加电旁站记录表",
+    "交换工程",
+    "交换工程 设备加电旁站记录表",
+    "交换工程_设备加电旁站记录表",
+    "交换工程　设备加电旁站记录表",
+    "交换工程设备加电旁站记录表",
+    "设备加电旁站记录表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "name": "E-XXXT-13详细设计文件监理审核意见表",
+  "doc_type": "IT_E-XXXT-13详细设计文件监理审核意见表",
+  "engine": "copy",
+  "template": "./详细设计文件监理审核意见表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_IT_XXT_{PROJECT_CODE}_IT_XXT3详细设计文件监理审核意见表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-XXXT-13详细设计文件监理审核意见表",
+    "IT",
+    "IT 详细设计文件监理审核意见表",
+    "IT_详细设计文件监理审核意见表",
+    "IT　详细设计文件监理审核意见表",
+    "IT详细设计文件监理审核意见表",
+    "信息系统",
+    "信息系统 详细设计文件监理审核意见表",
+    "信息系统_详细设计文件监理审核意见表",
+    "信息系统　详细设计文件监理审核意见表",
+    "信息系统详细设计文件监理审核意见表",
+    "详细设计文件监理审核意见表"
+  ],
+  "is_professional": true,
+  "category": "03_信息化工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

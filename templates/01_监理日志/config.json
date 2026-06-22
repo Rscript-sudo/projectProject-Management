@@ -1,0 +1,74 @@
+{
+  "name": "监理日志",
+  "doc_type": "log",
+  "engine": "docx",
+  "template": "./监理日志模版.docx",
+  "output": {
+    "dir": "03_实施阶段/01_监理日志/01_{YYYYMM}/",
+    "naming": "{YYYYMMDD}_JL-RZ_{PROJECT_CODE}_监理日志.docx"
+  },
+  "counter_key": "supervision_log",
+  "placeholders": {
+    "{{项目名称}}": {
+      "source": "env",
+      "key": "PROJECT_NAME"
+    },
+    "{{日期}}": {
+      "source": "param",
+      "key": "date",
+      "default": "TODAY"
+    },
+    "{{星期几}}": {
+      "source": "computed",
+      "key": "WEEKDAY"
+    },
+    "{{天气}}": {
+      "source": "param",
+      "key": "weather",
+      "default": "晴"
+    },
+    "{{气温}}": {
+      "source": "param",
+      "key": "temperature",
+      "default": "20℃~28℃"
+    },
+    "{{施工部位}}": {
+      "source": "param",
+      "key": "work_site",
+      "default": ""
+    },
+    "{{参与人员}}": {
+      "source": "param",
+      "key": "participants",
+      "default": "监理2名,施工人员若干"
+    },
+    "{{今日内容}}": {
+      "source": "param",
+      "key": "work_content",
+      "default": ""
+    },
+    "{{核心工作落实}}": {
+      "source": "param",
+      "key": "core_work",
+      "default": ""
+    },
+    "{{协调解决情况}}": {
+      "source": "param",
+      "key": "issues",
+      "default": ""
+    },
+    "{{其他事项}}": {
+      "source": "param",
+      "key": "other_notes",
+      "default": ""
+    }
+  },
+  "triggers": [
+    "监理日志",
+    "log"
+  ],
+  "requires": [
+    "GLOBAL_RULES"
+  ],
+  "light_mode": true
+}

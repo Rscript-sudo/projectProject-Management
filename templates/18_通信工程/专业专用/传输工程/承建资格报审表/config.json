@@ -1,0 +1,31 @@
+{
+  "name": "E-CS-02承建资格报审表",
+  "doc_type": "CS_E-CS-02承建资格报审表",
+  "engine": "copy",
+  "template": "./承建资格报审表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_CS承_{PROJECT_CODE}_TX_CS承建资格报审表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "CS",
+    "CS 承建资格报审表",
+    "CS_承建资格报审表",
+    "CS　承建资格报审表",
+    "CS承建资格报审表",
+    "E-CS-02承建资格报审表",
+    "传输工程",
+    "传输工程 承建资格报审表",
+    "传输工程_承建资格报审表",
+    "传输工程　承建资格报审表",
+    "传输工程承建资格报审表",
+    "承建资格报审表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

@@ -1,0 +1,306 @@
+{
+  "version": "2.3.0",
+  "created": "2026-05-11",
+  "updated": "2026-05-17",
+  "description": "全局DOCX文档格式规范（v2.3 向GB/T 9704-2012党政公文标准对齐）",
+  "source": "基于 DOCX文件字体及目录结构规范（智能体适配版）.md + GB/T 9704-2012",
+  "note": "所有数值单位约定：pt=磅值（1pt=1/72英寸），EMU=英文计量单位（1pt=12700EMU），cm=厘米（1cm=360000EMU）。规范中所有数值（除特别注明外）默认单位均为pt。",
+
+  "allowed_fonts": ["宋体", "黑体", "楷体_GB2312", "仿宋", "仿宋_GB2312", "方正小标宋简体"],
+  "EMU_reference": {
+    "PT_TO_EMU": 12700,
+    "CM_TO_EMU": 360000,
+    "NOTE": "字号 sz=xx 在 docx 中以 half-pt 为单位，故 sz=32 = 16pt"
+  },
+
+  "page_setup": {
+    "top": 3.7,
+    "bottom": 3.5,
+    "left": 2.8,
+    "right": 2.6,
+    "unit": "cm",
+    "note": "GB/T 9704-2012 标准A4页边距（略有调整：上下3.7/3.5，左右2.8/2.6）"
+  },
+
+  "line_spacing": {
+    "type": "fixed",
+    "value": 28,
+    "unit": "pt",
+    "paragraph_gap": 0,
+    "note": "固定28磅行距（国标标准），段落之间紧贴（paragraph_gap=0）"
+  },
+
+  "typefaces": {
+    "hei": "黑体",
+    "kaiti_gb": "楷体_GB2312",
+    "songti": "宋体",
+    "xiaobiaosong": "方正小标宋简体",
+    "fangsong": "仿宋",
+    "fangsong_gb": "仿宋_GB2312"
+  },
+
+  "font_fallback": {
+    "方正小标宋简体": ["宋体", "黑体"],
+    "楷体_GB2312": ["楷体", "宋体"],
+    "仿宋_GB2312": ["仿宋", "宋体"],
+    "仿宋": ["宋体"],
+    "黑体": ["宋体"],
+    "宋体": ["默认字体"]
+  },
+
+  "styles": {
+    "cover_title": {
+      "description": "封面-文档全称，方正小标宋简体二号(22pt)居中不加粗",
+      "font": "方正小标宋简体",
+      "font_size": 22,
+      "bold": false,
+      "align": "center",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 0,
+      "left_indent": 0
+    },
+    "cover_unit_info": {
+      "description": "封面-编制单位/部门，仿宋_GB2312三号(16pt)居中",
+      "font": "仿宋_GB2312",
+      "font_size": 16,
+      "bold": false,
+      "align": "center",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 0,
+      "left_indent": 0
+    },
+    "cover_report_date": {
+      "description": "封面-编制日期，仿宋_GB2312三号(16pt)，首行缩进5字符(80pt)，右对齐",
+      "font": "仿宋_GB2312",
+      "font_size": 16,
+      "bold": false,
+      "align": "justify",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 80,
+      "left_indent": 0,
+      "unit_note": "首行缩进80pt ≈ 5个中文宽度"
+    },
+    "h1": {
+      "description": "一级标题（三号黑体15pt不加粗），编号：一、二、三、",
+      "font": "黑体",
+      "font_size": 15,
+      "bold": false,
+      "align": "left",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 0,
+      "left_indent": 0
+    },
+    "h2": {
+      "description": "二级标题（三号楷体_GB2312 16pt加粗），编号：（一）（二）（三）",
+      "font": "楷体_GB2312",
+      "font_size": 16,
+      "bold": true,
+      "align": "left",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 0,
+      "left_indent": 0
+    },
+    "h3": {
+      "description": "三级标题（三号仿宋_GB2312 16pt不加粗），编号：1. 2. 3.",
+      "font": "仿宋_GB2312",
+      "font_size": 16,
+      "bold": false,
+      "align": "left",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 0,
+      "left_indent": 0
+    },
+    "h4": {
+      "description": "四级标题（三号仿宋_GB2312 16pt不加粗），编号：（1）（2）（3）",
+      "font": "仿宋_GB2312",
+      "font_size": 16,
+      "bold": false,
+      "align": "left",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 0,
+      "left_indent": 0
+    },
+    "body": {
+      "description": "正文文本，三号仿宋_GB2312(16pt)，首行缩进1字符(15pt)，两端对齐",
+      "font": "仿宋_GB2312",
+      "font_size": 16,
+      "bold": false,
+      "align": "justify",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 15,
+      "left_indent": 0,
+      "unit_note": "首行缩进15pt ≈ 1个中文宽度"
+    },
+    "body_no_indent": {
+      "description": "正文文本无缩进，三号仿宋_GB2312(16pt)，两端对齐，用于统计说明等连续段落",
+      "font": "仿宋_GB2312",
+      "font_size": 16,
+      "bold": false,
+      "align": "justify",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 0,
+      "left_indent": 0,
+      "note": "与body区别：无首行缩进，用于多个连续段落组成的统计/说明文本"
+    },
+    "numbered": {
+      "description": "编号项（三号仿宋_GB2312 16pt，悬挂缩进1字符）",
+      "font": "仿宋_GB2312",
+      "font_size": 16,
+      "bold": false,
+      "align": "justify",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 15,
+      "left_indent": 15,
+      "unit_note": "悬挂缩进：首行缩进15pt + 左缩进15pt，形成悬挂效果"
+    },
+    "closing": {
+      "description": "落款（编制人/审核人/审批人），三号仿宋_GB2312(16pt)左对齐",
+      "font": "仿宋_GB2312",
+      "font_size": 16,
+      "bold": false,
+      "align": "left",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 0,
+      "left_indent": 0
+    },
+    "appendix_title": {
+      "description": "附录/附件标题，三号黑体(15pt)加粗",
+      "font": "黑体",
+      "font_size": 15,
+      "bold": true,
+      "align": "left",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 0,
+      "left_indent": 0
+    },
+    "chart_title": {
+      "description": "图表标题，小四黑体(12pt)居中，格式：图1-1 XX / 表1-1 XX",
+      "font": "黑体",
+      "font_size": 12,
+      "bold": true,
+      "align": "center",
+      "space_before": 14,
+      "space_after": 14,
+      "first_line_indent": 0,
+      "left_indent": 0
+    },
+    "table_header": {
+      "description": "表格表头，五号黑体(10.5pt)加粗居中",
+      "font": "黑体",
+      "font_size": 10.5,
+      "bold": true,
+      "align": "center",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 0,
+      "left_indent": 0
+    },
+    "table_body": {
+      "description": "表格内文字，五号仿宋_GB2312(10.5pt)",
+      "font": "仿宋_GB2312",
+      "font_size": 10.5,
+      "bold": false,
+      "align": "center",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 0,
+      "left_indent": 0
+    },
+    "note": {
+      "description": "注释/备注，五号仿宋_GB2312(10.5pt)，行距1.2，前缀：注：",
+      "font": "仿宋_GB2312",
+      "font_size": 10.5,
+      "bold": false,
+      "align": "left",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 0,
+      "left_indent": 0,
+      "line_spacing": {"type": "multiple", "value": 1.2}
+    },
+    "page_number": {
+      "description": "页码，宋体四号(14pt)，奇数页右下空1字，偶数页左下空1字",
+      "font": "宋体",
+      "font_size": 14,
+      "bold": false,
+      "align": "center",
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 0,
+      "left_indent": 0,
+      "odd_even_offset": true,
+      "note": "奇偶页错位：奇数页右空1字，偶数页左空1字，撑满版心"
+    },
+    "blank": {
+      "description": "空段落（占位空行），保持与正文同字体",
+      "font": "仿宋_GB2312",
+      "font_size": 16,
+      "bold": false,
+      "space_before": 0,
+      "space_after": 0,
+      "first_line_indent": 0,
+      "left_indent": 0
+    }
+  },
+
+  "type_detection": {
+    "h1_pattern": "^\\s*[一二三四五六七八九十]+[、，。]",
+    "h2_pattern": "^\\s*[（(][一二三四五六七八九十][）)]",
+    "h3_pattern": "^\\s*\\d+\\.\\s",
+    "h4_pattern": "^\\s*[（(]\\d+[）)][^）]",
+    "h4_pattern": "^\\s*（\\d+）\\s",
+    "numbered_pattern": "^\\s*\\d+[.、]",
+    "numbered_confirm": {
+      "left_indent_min": 10.0,
+      "left_indent_max": 25.0,
+      "unit": "pt",
+      "primary_rule": "正则匹配优先，缩进作为辅助验证",
+      "note": "编号项判定主要依赖正则匹配 numbered_pattern，缩进范围仅作辅助判断"
+    },
+    "body_no_indent_keywords": ["统计", "金额", "万元", "比例", "进度", "到货", "安装"],
+    "cover_title_keywords": ["文档全称", "报告", "方案", "说明书", "规范", "制度", "监理规划", "监理细则", "监理周报", "监理月报", "会议纪要"],
+    "cover_unit_keywords": ["编制单位：", "编制部门：", "单位名称：", "甲方", "乙方", "丙方"],
+    "cover_report_date_keywords": ["报告日期：", "编制日期：", "日期："],
+    "closing_keywords": ["编制人", "审核人", "审批人", "批准人", "总监理工程师"],
+    "appendix_keywords": ["附录", "附件", "现场影像", "附图", "附表"],
+    "chart_title_prefix": "^(图|表)\\d+[\\-—]",
+    "note_prefix": "^注[：:]",
+    "page_number_keywords": ["页码", "footer"]
+  },
+
+  "page_break": {
+    "description": "分页控制配置",
+    "cover_to_body": true,
+    "appendix_before": true,
+    "section_break_before_h1": false,
+    "page_break_markers": ["---分页---", "分页", "pagebreak"],
+    "note": "cover_to_body和appendix_before默认开启；也可在文档中用page_break_markers标记分页位置"
+  },
+
+  "header_numbering": {
+    "h1_prefix": ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"],
+    "h1_format": "一、二、三、（中文大写+顿号）",
+    "h2_format": "（一）、（二）、（三）、（括号+中文数字）",
+    "h3_format": "1. 2. 3. （阿拉伯数字+点）",
+    "h4_format": "（1）、（2）、（括号+阿拉伯数字）",
+    "note": "编号与标题间空1个半角空格，标题末尾无标点；标题层级不超过四级"
+  },
+
+  "override_rules": {
+    "note": "若样式内嵌 line_spacing，优先使用样式内嵌值；否则使用顶层 line_spacing",
+    "font_fallback": "若系统无指定字体，按 font_fallback 链自动降级",
+    "allowed_fonts_only": "所有段落字体必须在 allowed_fonts 清单内，否则强制替换"
+  }
+}

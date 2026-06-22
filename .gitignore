@@ -1,0 +1,15 @@
+node_modules/
+dist/
+release/
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
+*.tmp
+*.temp
+*.log
+test.txt
+screenshot*.png
+screenshot*.jpg
+app_snapshot.txt
+.claude/

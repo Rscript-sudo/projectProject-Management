@@ -1,0 +1,32 @@
+{
+  "name": "工程量统计表",
+  "doc_type": "DY_工程量统计表",
+  "engine": "copy",
+  "template": "./工程量统计表_模版.docx",
+  "output": {
+    "naming": "{YYYYMMDD}_DL_工量_{PROJECT_CODE}_工程量统计表.docx",
+    "dir": "02_准备阶段/04_开工报审/"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "DY",
+    "DY 工程量统计表",
+    "DY_工程量统计表",
+    "DY　工程量统计表",
+    "DY工程量统计表",
+    "E-DY-06「工程量统计表」",
+    "工程量统计表",
+    "电力工程",
+    "电力工程 工程量统计表",
+    "电力工程_工程量统计表",
+    "电力工程　工程量统计表",
+    "电力工程工程量统计表",
+    "电源工程"
+  ],
+  "is_professional": true,
+  "category": "04_电力工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

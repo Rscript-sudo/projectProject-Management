@@ -1,0 +1,95 @@
+{
+  "name": "进度分析报告",
+  "doc_type": "progress_report",
+  "engine": "docx",
+  "template": "./进度分析报告_模版.docx",
+  "output": {
+    "naming": "{YYYYMMDD}_JD-FX_{PROJECT_CODE}_进度分析报告.docx",
+    "dir": "03_实施阶段/08_项目进度/"
+  },
+  "counter_key": null,
+  "placeholders": {
+    "{{项目名称}}": {
+      "source": "env",
+      "key": "PROJECT_NAME"
+    },
+    "{{项目代码}}": {
+      "source": "env",
+      "key": "PROJECT_CODE"
+    },
+    "{{报告日期}}": {
+      "source": "computed",
+      "key": "TODAY"
+    },
+    "{{报告期}}": {
+      "source": "param",
+      "key": "report_period",
+      "default": ""
+    },
+    "{{总体进度}}": {
+      "source": "param",
+      "key": "overall_progress",
+      "default": ""
+    },
+    "{{进度偏差}}": {
+      "source": "param",
+      "key": "schedule_variance",
+      "default": ""
+    },
+    "{{偏差原因}}": {
+      "source": "param",
+      "key": "variance_reason",
+      "default": ""
+    },
+    "{{风险提示}}": {
+      "source": "param",
+      "key": "risk_hints",
+      "default": ""
+    },
+    "{{建议措施}}": {
+      "source": "param",
+      "key": "suggested_measures",
+      "default": ""
+    },
+    "{{下月计划}}": {
+      "source": "param",
+      "key": "next_plan",
+      "default": ""
+    },
+    "{{监理单位}}": {
+      "source": "env",
+      "key": "SUPERVISOR_UNIT"
+    },
+    "{{编制人}}": {
+      "source": "param",
+      "key": "creator",
+      "default": "虚竹"
+    },
+    "{{审核人}}": {
+      "source": "param",
+      "key": "reviewer",
+      "default": ""
+    },
+    "{{批准人}}": {
+      "source": "param",
+      "key": "approver",
+      "default": ""
+    },
+    "{{签章日期}}": {
+      "source": "computed",
+      "key": "TODAY"
+    }
+  },
+  "triggers": [
+    "进度分析",
+    "进度报告",
+    "项目进度分析",
+    "进度汇报"
+  ],
+  "is_professional": false,
+  "category": "通用模板",
+  "requires": [
+    "GLOBAL_RULES"
+  ],
+  "light_mode": true
+}

@@ -1,0 +1,21 @@
+{
+  "name": "承建资格报审表",
+  "doc_type": "承建资格报审表",
+  "engine": "copy",
+  "template": "./通信工程_承建资格报审表.docx",
+  "output": {
+    "naming": "{{YYYYMMDD}}_TX-{{PROJECT_CODE}}_{doc_name}.docx",
+    "dir": "03_实施阶段/"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "承建资格报审表",
+    "通信 承建资格报审表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

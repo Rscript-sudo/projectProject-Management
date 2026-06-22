@@ -1,0 +1,32 @@
+{
+  "name": "E-JZPT-1「地网工程现场勘查记录」",
+  "doc_type": "JZPT_E-JZPT-1「地网工程现场勘查记录」",
+  "engine": "copy",
+  "template": "./「地网工程现场勘查记录」_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_JZ_{PROJECT_CODE}_地网工程现场勘查记录.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-JZPT-1「地网工程现场勘查记录」",
+    "JZPT",
+    "JZPT 地网工程现场勘查记录",
+    "JZPT_地网工程现场勘查记录",
+    "JZPT　地网工程现场勘查记录",
+    "JZPT地网工程现场勘查记录",
+    "地网工程现场勘查记录」",
+    "室内覆盖",
+    "室内覆盖 地网工程现场勘查记录",
+    "室内覆盖_地网工程现场勘查记录",
+    "室内覆盖　地网工程现场勘查记录",
+    "室内覆盖地网工程现场勘查记录",
+    "室内覆盖地网工程现场勘查记录」"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

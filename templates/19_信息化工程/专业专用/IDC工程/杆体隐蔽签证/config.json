@@ -1,0 +1,31 @@
+{
+  "name": "E-SPJK-04杆体隐蔽签证",
+  "doc_type": "SPJK_E-SPJK-04杆体隐蔽签证",
+  "engine": "copy",
+  "template": "./杆体隐蔽签证_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_IT_IDC_{PROJECT_CODE}_IT_IDC4杆体隐蔽签证.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-SPJK-04杆体隐蔽签证",
+    "IDC工程",
+    "IDC工程 杆体隐蔽签证",
+    "IDC工程_杆体隐蔽签证",
+    "IDC工程　杆体隐蔽签证",
+    "IDC工程杆体隐蔽签证",
+    "SPJK",
+    "SPJK 杆体隐蔽签证",
+    "SPJK_杆体隐蔽签证",
+    "SPJK　杆体隐蔽签证",
+    "SPJK杆体隐蔽签证",
+    "杆体隐蔽签证"
+  ],
+  "is_professional": true,
+  "category": "03_信息化工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "name": "E-LYZN-06工程质量检查报验表",
+  "doc_type": "LYZN_E-LYZN-06工程质量检查报验表",
+  "engine": "copy",
+  "template": "./工程质量检查报验表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_IT_LYZN_{PROJECT_CODE}_IT_LYZN6工程质量检查报验表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-LYZN-06工程质量检查报验表",
+    "LYZN",
+    "LYZN 工程质量检查报验表",
+    "LYZN_工程质量检查报验表",
+    "LYZN　工程质量检查报验表",
+    "LYZN工程质量检查报验表",
+    "工程质量检查报验表",
+    "楼宇智能",
+    "楼宇智能 工程质量检查报验表",
+    "楼宇智能_工程质量检查报验表",
+    "楼宇智能　工程质量检查报验表",
+    "楼宇智能工程质量检查报验表"
+  ],
+  "is_professional": true,
+  "category": "03_信息化工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

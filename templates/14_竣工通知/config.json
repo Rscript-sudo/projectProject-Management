@@ -1,0 +1,57 @@
+{
+  "name": "竣工通知",
+  "doc_type": "completion_notice",
+  "engine": "docx",
+  "template": "./竣工通知模版.docx",
+  "output": {
+    "dir": "04_验收阶段/05_竣工移交/",
+    "naming": "{YYYYMMDD}_JG-TZ_{PROJECT_CODE}_竣工验收通知.docx"
+  },
+  "counter_key": "completion_notice",
+  "placeholders": {
+    "{{项目名称}}": {
+      "source": "env",
+      "key": "PROJECT_NAME"
+    },
+    "{{致送单位}}": {
+      "source": "env",
+      "key": "CONTRACTOR"
+    },
+    "{{事由}}": {
+      "source": "param",
+      "key": "subject",
+      "default": ""
+    },
+    "{{正文内容}}": {
+      "source": "param",
+      "key": "body_content",
+      "default": ""
+    },
+    "{{附件清单}}": {
+      "source": "param",
+      "key": "attachments",
+      "default": "无"
+    },
+    "{{监理单位}}": {
+      "source": "env",
+      "key": "SUPERVISOR_UNIT"
+    },
+    "{{总监姓名}}": {
+      "source": "env",
+      "key": "CHIEF_ENGINEER"
+    },
+    "{{日期}}": {
+      "source": "computed",
+      "key": "TODAY"
+    }
+  },
+  "triggers": [
+    "竣工通知",
+    "竣工报验",
+    "竣工验收"
+  ],
+  "requires": [
+    "GLOBAL_RULES"
+  ],
+  "light_mode": true
+}

@@ -1,0 +1,31 @@
+{
+  "name": "E-JH-02承建资格报审表",
+  "doc_type": "JH_E-JH-02承建资格报审表",
+  "engine": "copy",
+  "template": "./承建资格报审表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_JH承_{PROJECT_CODE}_TX_JH承建资格报审表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-JH-02承建资格报审表",
+    "JH",
+    "JH 承建资格报审表",
+    "JH_承建资格报审表",
+    "JH　承建资格报审表",
+    "JH承建资格报审表",
+    "交换工程",
+    "交换工程 承建资格报审表",
+    "交换工程_承建资格报审表",
+    "交换工程　承建资格报审表",
+    "交换工程承建资格报审表",
+    "承建资格报审表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

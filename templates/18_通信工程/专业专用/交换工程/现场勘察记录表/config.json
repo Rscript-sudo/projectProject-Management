@@ -1,0 +1,31 @@
+{
+  "name": "E-JH-01现场勘察记录表",
+  "doc_type": "JH_E-JH-01现场勘察记录表",
+  "engine": "copy",
+  "template": "./现场勘察记录表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_JH现_{PROJECT_CODE}_TX_JH现场勘察记录表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-JH-01现场勘察记录表",
+    "JH",
+    "JH 现场勘察记录表",
+    "JH_现场勘察记录表",
+    "JH　现场勘察记录表",
+    "JH现场勘察记录表",
+    "交换工程",
+    "交换工程 现场勘察记录表",
+    "交换工程_现场勘察记录表",
+    "交换工程　现场勘察记录表",
+    "交换工程现场勘察记录表",
+    "现场勘察记录表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

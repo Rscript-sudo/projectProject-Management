@@ -1,0 +1,26 @@
+{
+  "name": "开工条件检查表.docx",
+  "doc_type": "IT_E-XXXT-03-开工条件检查表",
+  "engine": "copy",
+  "template": "./开工条件检查表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_IT_XXT开工条件检查表_{PROJECT_CODE}_开工条件检查表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "IT",
+    "IT_开工条件检查表.docx",
+    "IT开工条件检查表.docx",
+    "信息系统",
+    "信息系统_开工条件检查表.docx",
+    "信息系统开工条件检查表.docx",
+    "开工条件检查表.docx"
+  ],
+  "is_professional": true,
+  "category": "03_信息化工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

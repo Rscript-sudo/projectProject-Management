@@ -1,0 +1,21 @@
+{
+  "name": "割接旁站记录表",
+  "doc_type": "割接旁站记录表",
+  "engine": "copy",
+  "template": "./通信工程_割接旁站记录表.docx",
+  "output": {
+    "naming": "{{YYYYMMDD}}_TX-{{PROJECT_CODE}}_{doc_name}.docx",
+    "dir": "03_实施阶段/"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "割接旁站记录表",
+    "通信 割接旁站记录表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

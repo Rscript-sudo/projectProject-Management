@@ -1,0 +1,31 @@
+{
+  "name": "E-WXSB-06高空作业旁站记录表",
+  "doc_type": "WXSB_E-WXSB-06高空作业旁站记录表",
+  "engine": "copy",
+  "template": "./高空作业旁站记录表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_WX_{PROJECT_CODE}_TX_WX6高空作业旁站记录表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-WXSB-06高空作业旁站记录表",
+    "WXSB",
+    "WXSB 高空作业旁站记录表",
+    "WXSB_高空作业旁站记录表",
+    "WXSB　高空作业旁站记录表",
+    "WXSB高空作业旁站记录表",
+    "无线设备",
+    "无线设备 高空作业旁站记录表",
+    "无线设备_高空作业旁站记录表",
+    "无线设备　高空作业旁站记录表",
+    "无线设备高空作业旁站记录表",
+    "高空作业旁站记录表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "name": "E-LYZN-07工程量统计表",
+  "doc_type": "LYZN_E-LYZN-07工程量统计表",
+  "engine": "copy",
+  "template": "./工程量统计表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_IT_LYZN_{PROJECT_CODE}_IT_LYZN7工程量统计表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-LYZN-07工程量统计表",
+    "LYZN",
+    "LYZN 工程量统计表",
+    "LYZN_工程量统计表",
+    "LYZN　工程量统计表",
+    "LYZN工程量统计表",
+    "工程量统计表",
+    "楼宇智能",
+    "楼宇智能 工程量统计表",
+    "楼宇智能_工程量统计表",
+    "楼宇智能　工程量统计表",
+    "楼宇智能工程量统计表"
+  ],
+  "is_professional": true,
+  "category": "03_信息化工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

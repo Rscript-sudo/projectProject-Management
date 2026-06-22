@@ -1,0 +1,31 @@
+{
+  "name": "E-JZPT-2「电源工程现场勘察记录」DYk",
+  "doc_type": "JZPT_E-JZPT-2「电源工程现场勘察记录」DYk",
+  "engine": "copy",
+  "template": "./「电源工程现场勘察记录」DYk_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_JZ_{PROJECT_CODE}_电源工程现场勘察记录.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-JZPT-2「电源工程现场勘察记录」DYk",
+    "JZPT",
+    "JZPT 电源工程现场勘察记录」DYk",
+    "JZPT_电源工程现场勘察记录」DYk",
+    "JZPT　电源工程现场勘察记录」DYk",
+    "JZPT电源工程现场勘察记录」DYk",
+    "室内覆盖",
+    "室内覆盖 电源工程现场勘察记录」DYk",
+    "室内覆盖_电源工程现场勘察记录」DYk",
+    "室内覆盖　电源工程现场勘察记录」DYk",
+    "室内覆盖电源工程现场勘察记录」DYk",
+    "电源工程现场勘察记录」DYk"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

@@ -1,0 +1,116 @@
+{
+  "name": "监理月报",
+  "doc_type": "monthly",
+  "engine": "docx",
+  "template": "./监理月报模版.docx",
+  "output": {
+    "dir": "03_实施阶段/03_监理月报/",
+    "naming": "{YYYYMMDD}_JL-YB_{PROJECT_CODE}_监理月报.docx"
+  },
+  "counter_key": null,
+  "placeholders": {
+    "{{项目名称}}": {
+      "source": "env",
+      "key": "PROJECT_NAME"
+    },
+    "{{甲方单位}}": {
+      "source": "env",
+      "key": "OWNER"
+    },
+    "{{乙方单位}}": {
+      "source": "env",
+      "key": "CONTRACTOR"
+    },
+    "{{监理单位}}": {
+      "source": "env",
+      "key": "SUPERVISOR_UNIT"
+    },
+    "{{总监姓名}}": {
+      "source": "env",
+      "key": "CHIEF_ENGINEER"
+    },
+    "{{日期}}": {
+      "source": "computed",
+      "key": "TODAY"
+    },
+    "{{日期范围}}": {
+      "source": "param",
+      "key": "date_range",
+      "default": ""
+    },
+    "{{月份}}": {
+      "source": "param",
+      "key": "month_number",
+      "default": ""
+    },
+    "{{形象进度说明}}": {
+      "source": "param",
+      "key": "progress_summary",
+      "default": ""
+    },
+    "{{本月进度详情}}": {
+      "source": "param",
+      "key": "monthly_detail",
+      "default": ""
+    },
+    "{{本月完成工程量}}": {
+      "source": "param",
+      "key": "monthly_quantity",
+      "default": ""
+    },
+    "{{累计完成情况}}": {
+      "source": "param",
+      "key": "cumulative_progress",
+      "default": ""
+    },
+    "{{到货安装统计}}": {
+      "source": "param",
+      "key": "delivery_stats",
+      "default": ""
+    },
+    "{{本月投资情况}}": {
+      "source": "param",
+      "key": "monthly_investment",
+      "default": ""
+    },
+    "{{本月质量描述}}": {
+      "source": "param",
+      "key": "quality_status",
+      "default": ""
+    },
+    "{{本月安全描述}}": {
+      "source": "param",
+      "key": "safety_status",
+      "default": ""
+    },
+    "{{存在问题}}": {
+      "source": "param",
+      "key": "problems",
+      "default": ""
+    },
+    "{{监理履职情况}}": {
+      "source": "param",
+      "key": "supervisor_performance",
+      "default": ""
+    },
+    "{{监理建议}}": {
+      "source": "param",
+      "key": "supervisor_suggestions",
+      "default": ""
+    },
+    "{{下月计划}}": {
+      "source": "param",
+      "key": "next_month_plan",
+      "default": ""
+    }
+  },
+  "triggers": [
+    "监理月报",
+    "月报",
+    "monthly"
+  ],
+  "requires": [
+    "GLOBAL_RULES"
+  ],
+  "light_mode": true
+}

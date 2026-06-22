@@ -1,0 +1,31 @@
+{
+  "name": "E-CS-08传输专业工程质量检查表",
+  "doc_type": "CS_E-CS-08传输专业工程质量检查表",
+  "engine": "copy",
+  "template": "./传输专业工程质量检查表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_CS传_{PROJECT_CODE}_TX_CS传输专业工程质量检查表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "CS",
+    "CS 传输专业工程质量检查表",
+    "CS_传输专业工程质量检查表",
+    "CS　传输专业工程质量检查表",
+    "CS传输专业工程质量检查表",
+    "E-CS-08传输专业工程质量检查表",
+    "传输专业工程质量检查表",
+    "传输工程",
+    "传输工程 传输专业工程质量检查表",
+    "传输工程_传输专业工程质量检查表",
+    "传输工程　传输专业工程质量检查表",
+    "传输工程传输专业工程质量检查表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

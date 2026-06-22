@@ -1,0 +1,36 @@
+{
+  "name": "总监理工程师任命书",
+  "doc_type": "chief_appointment",
+  "engine": "xlsx",
+  "template": "./总监理工程师任命书_模版.xlsx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/04_总监任命书/",
+    "naming": "{YYYYMMDD}_ZJ-RM_{PROJECT_CODE}_总监理工程师任命书.xlsx"
+  },
+  "counter_key": "总监任命",
+  "placeholders": {
+    "{{项目名称}}": {
+      "source": "env",
+      "key": "PROJECT_NAME"
+    },
+    "{{建设单位}}": {
+      "source": "env",
+      "key": "OWNER"
+    },
+    "{{总监理工程师}}": {
+      "source": "env",
+      "key": "CHIEF_ENGINEER"
+    }
+  },
+  "triggers": [
+    "总监任命",
+    "任命书",
+    "chief_appointment"
+  ],
+  "placeholder_cells": [
+    "F4",
+    "C5",
+    "G8"
+  ],
+  "light_mode": true
+}

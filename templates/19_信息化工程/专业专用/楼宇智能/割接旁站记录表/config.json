@@ -1,0 +1,31 @@
+{
+  "name": "E-LYZN-05割接旁站记录表",
+  "doc_type": "LYZN_E-LYZN-05割接旁站记录表",
+  "engine": "copy",
+  "template": "./割接旁站记录表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_IT_LYZN_{PROJECT_CODE}_IT_LYZN5割接旁站记录表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-LYZN-05割接旁站记录表",
+    "LYZN",
+    "LYZN 割接旁站记录表",
+    "LYZN_割接旁站记录表",
+    "LYZN　割接旁站记录表",
+    "LYZN割接旁站记录表",
+    "割接旁站记录表",
+    "楼宇智能",
+    "楼宇智能 割接旁站记录表",
+    "楼宇智能_割接旁站记录表",
+    "楼宇智能　割接旁站记录表",
+    "楼宇智能割接旁站记录表"
+  ],
+  "is_professional": true,
+  "category": "03_信息化工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "name": "E-CS-04加电旁站记录表",
+  "doc_type": "CS_E-CS-04加电旁站记录表",
+  "engine": "copy",
+  "template": "./加电旁站记录表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_CS加_{PROJECT_CODE}_TX_CS加电旁站记录表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "CS",
+    "CS 加电旁站记录表",
+    "CS_加电旁站记录表",
+    "CS　加电旁站记录表",
+    "CS加电旁站记录表",
+    "E-CS-04加电旁站记录表",
+    "传输工程",
+    "传输工程 加电旁站记录表",
+    "传输工程_加电旁站记录表",
+    "传输工程　加电旁站记录表",
+    "传输工程加电旁站记录表",
+    "加电旁站记录表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

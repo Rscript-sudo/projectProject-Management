@@ -1,0 +1,43 @@
+{
+  "name": "工程变更单",
+  "doc_type": "change_order",
+  "engine": "xlsx",
+  "template": "./工程变更单_模版.xlsx",
+  "output": {
+    "dir": "03_实施阶段/06_往来函件/04_工程函件/原始稿/",
+    "naming": "{YYYYMMDD}_LX-H_{PROJECT_CODE}_工程变更单.xlsx"
+  },
+  "counter_key": "工程变更单",
+  "placeholders": {
+    "{{项目名称}}": {
+      "source": "env",
+      "key": "PROJECT_NAME"
+    },
+    "{{致单位}}": {
+      "source": "env",
+      "key": "CONTRACTOR"
+    },
+    "{{变更原因}}": {
+      "source": "param",
+      "key": "change_reason",
+      "default": ""
+    },
+    "{{变更内容}}": {
+      "source": "param",
+      "key": "change_content",
+      "default": ""
+    }
+  },
+  "placeholder_cells": [
+    "G4",
+    "C5",
+    "E7",
+    "C8"
+  ],
+  "triggers": [
+    "工程变更",
+    "变更单",
+    "change_order"
+  ],
+  "light_mode": true
+}

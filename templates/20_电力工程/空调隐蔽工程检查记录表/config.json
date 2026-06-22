@@ -1,0 +1,39 @@
+{
+  "name": "空调隐蔽工程检查记录表",
+  "doc_type": "DY_空调隐蔽工程检查记录表",
+  "engine": "copy",
+  "template": "./空调隐蔽工程检查记录表_模版.xlsx",
+  "output": {
+    "naming": "{YYYYMMDD}_DL_空调_{PROJECT_CODE}_空调隐蔽工程检查记录表.xlsx",
+    "dir": "02_准备阶段/04_开工报审/"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "DY",
+    "DY 空调隐蔽工程检查记录表",
+    "DY_空调隐蔽工程检查记录表",
+    "DY　空调隐蔽工程检查记录表",
+    "DY空调隐蔽工程检查记录表",
+    "E-DY-13「空调隐蔽工程检查记录表」",
+    "电力工程",
+    "电力工程 空调隐蔽工程检查记录表",
+    "电力工程_空调隐蔽工程检查记录表",
+    "电力工程　空调隐蔽工程检查记录表",
+    "电力工程空调隐蔽工程检查记录表",
+    "电源工程",
+    "空调隐蔽工程检查记录表"
+  ],
+  "is_professional": true,
+  "category": "04_电力工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ],
+  "placeholder_cells": [
+    "A3",
+    "F3",
+    "F4",
+    "G4",
+    "A26"
+  ]
+}

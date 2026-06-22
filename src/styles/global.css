@@ -1,0 +1,148 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d9d9d9;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #bfbfbf;
+}
+
+/* 项目目录树样式 — 图标紧跟目录名 */
+.project-dir-tree.ant-tree {
+  background: transparent;
+}
+
+.project-dir-tree .ant-tree-treenode {
+  padding: 0 !important;
+  border-radius: 0;
+  align-items: center;
+}
+
+.project-dir-tree .ant-tree-treenode:hover {
+  background: #e6f4ff;
+}
+
+.project-dir-tree .ant-tree-treenode.ant-tree-treenode-selected,
+.project-dir-tree .ant-tree-treenode.ant-tree-treenode-selected:hover {
+  background: #d6e8ff;
+}
+
+.project-dir-tree .ant-tree-node-content-wrapper {
+  min-height: 22px !important;
+  line-height: 22px !important;
+  padding: 0 8px 0 2px !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  transition: none !important;
+  display: flex !important;
+  align-items: center;
+  flex: 1;
+}
+
+.project-dir-tree .ant-tree-node-content-wrapper:hover {
+  background: transparent !important;
+}
+
+.project-dir-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
+  background: transparent !important;
+}
+
+.project-dir-tree .ant-tree-indent {
+  display: flex;
+}
+
+.project-dir-tree .ant-tree-indent-unit {
+  width: 12px;
+}
+
+.project-dir-tree .ant-tree-switcher {
+  width: 14px;
+  height: 22px;
+  line-height: 22px;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.project-dir-tree .ant-tree-switcher svg {
+  font-size: 8px;
+  color: #aaa;
+}
+
+.project-dir-tree .ant-tree-title {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.project-dir-tree .ant-tree-node-content-wrapper .ant-tree-iconEle {
+  display: none !important;
+}
+
+/* 子项数量标签 */
+.project-dir-tree .tree-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  font-size: 9px;
+  color: #aaa;
+  background: #eee;
+  border-radius: 7px;
+  line-height: 13px;
+  vertical-align: middle;
+}
+
+/* 文件删除按钮 */
+.project-dir-tree .file-delete-btn {
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  font-size: 11;
+  color: #fff;
+  background: #ff4d4f;
+  border: none;
+  line-height: 1;
+  gap: 2px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+}
+
+.project-dir-tree .file-delete-btn:hover {
+  background: #ff7875;
+}
+
+.project-dir-tree .file-delete-btn:active {
+  background: #ff4d4f;
+  opacity: 0.9;
+}

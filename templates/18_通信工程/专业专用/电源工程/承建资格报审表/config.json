@@ -1,0 +1,31 @@
+{
+  "name": "E-DY-02承建资格报审表",
+  "doc_type": "DY_E-DY-02承建资格报审表",
+  "engine": "copy",
+  "template": "./承建资格报审表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_DY承_{PROJECT_CODE}_TX_DY承建资格报审表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "DY",
+    "DY 承建资格报审表",
+    "DY_承建资格报审表",
+    "DY　承建资格报审表",
+    "DY承建资格报审表",
+    "E-DY-02承建资格报审表",
+    "承建资格报审表",
+    "电源工程",
+    "电源工程 承建资格报审表",
+    "电源工程_承建资格报审表",
+    "电源工程　承建资格报审表",
+    "电源工程承建资格报审表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

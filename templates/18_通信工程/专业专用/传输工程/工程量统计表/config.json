@@ -1,0 +1,31 @@
+{
+  "name": "E-CS-07工程量统计表",
+  "doc_type": "CS_E-CS-07工程量统计表",
+  "engine": "copy",
+  "template": "./工程量统计表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_CS工_{PROJECT_CODE}_TX_CS工程量统计表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "CS",
+    "CS 工程量统计表",
+    "CS_工程量统计表",
+    "CS　工程量统计表",
+    "CS工程量统计表",
+    "E-CS-07工程量统计表",
+    "传输工程",
+    "传输工程 工程量统计表",
+    "传输工程_工程量统计表",
+    "传输工程　工程量统计表",
+    "传输工程工程量统计表",
+    "工程量统计表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

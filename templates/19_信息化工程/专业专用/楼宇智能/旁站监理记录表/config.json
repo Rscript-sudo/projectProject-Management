@@ -1,0 +1,31 @@
+{
+  "name": "E-LYZN-04旁站监理记录表",
+  "doc_type": "LYZN_E-LYZN-04旁站监理记录表",
+  "engine": "copy",
+  "template": "./旁站监理记录表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_IT_LYZN_{PROJECT_CODE}_IT_LYZN4旁站监理记录表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-LYZN-04旁站监理记录表",
+    "LYZN",
+    "LYZN 旁站监理记录表",
+    "LYZN_旁站监理记录表",
+    "LYZN　旁站监理记录表",
+    "LYZN旁站监理记录表",
+    "旁站监理记录表",
+    "楼宇智能",
+    "楼宇智能 旁站监理记录表",
+    "楼宇智能_旁站监理记录表",
+    "楼宇智能　旁站监理记录表",
+    "楼宇智能旁站监理记录表"
+  ],
+  "is_professional": true,
+  "category": "03_信息化工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

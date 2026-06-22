@@ -1,0 +1,31 @@
+{
+  "name": "E-XXXT-16集成测试报告监理审核意见",
+  "doc_type": "IT_E-XXXT-16集成测试报告监理审核意见",
+  "engine": "copy",
+  "template": "./集成测试报告监理审核意见_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_IT_XXT_{PROJECT_CODE}_IT_XXT6集成测试报告监理审核意见.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-XXXT-16集成测试报告监理审核意见",
+    "IT",
+    "IT 集成测试报告监理审核意见",
+    "IT_集成测试报告监理审核意见",
+    "IT　集成测试报告监理审核意见",
+    "IT集成测试报告监理审核意见",
+    "信息系统",
+    "信息系统 集成测试报告监理审核意见",
+    "信息系统_集成测试报告监理审核意见",
+    "信息系统　集成测试报告监理审核意见",
+    "信息系统集成测试报告监理审核意见",
+    "集成测试报告监理审核意见"
+  ],
+  "is_professional": true,
+  "category": "03_信息化工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

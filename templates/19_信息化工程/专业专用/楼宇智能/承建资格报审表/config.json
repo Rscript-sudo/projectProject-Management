@@ -1,0 +1,31 @@
+{
+  "name": "E-LYZN-02承建资格报审表",
+  "doc_type": "LYZN_E-LYZN-02承建资格报审表",
+  "engine": "copy",
+  "template": "./承建资格报审表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_IT_LYZN_{PROJECT_CODE}_IT_LYZN2承建资格报审表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-LYZN-02承建资格报审表",
+    "LYZN",
+    "LYZN 承建资格报审表",
+    "LYZN_承建资格报审表",
+    "LYZN　承建资格报审表",
+    "LYZN承建资格报审表",
+    "承建资格报审表",
+    "楼宇智能",
+    "楼宇智能 承建资格报审表",
+    "楼宇智能_承建资格报审表",
+    "楼宇智能　承建资格报审表",
+    "楼宇智能承建资格报审表"
+  ],
+  "is_professional": true,
+  "category": "03_信息化工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "name": "开工条件检查表",
+  "doc_type": "ZDW_开工条件检查表",
+  "engine": "copy",
+  "template": "./E-ZDW-01-开工条件检查表.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_开工条件检查表_{PROJECT_CODE}_开工条件检查表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "ZDW",
+    "ZDW 开工条件检查表",
+    "ZDW_开工条件检查表",
+    "ZDW　开工条件检查表",
+    "ZDW开工条件检查表",
+    "开工条件检查表",
+    "驻地网FTTX",
+    "驻地网FTTX 开工条件检查表",
+    "驻地网FTTX_开工条件检查表",
+    "驻地网FTTX　开工条件检查表",
+    "驻地网FTTX开工条件检查表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

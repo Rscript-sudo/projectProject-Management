@@ -1,0 +1,91 @@
+{
+  "name": "监理周报",
+  "doc_type": "weekly",
+  "engine": "docx",
+  "template": "./监理周报模版.docx",
+  "output": {
+    "dir": "03_实施阶段/02_监理周报/",
+    "naming": "{YYYYMMDD}_JL-ZB_{PROJECT_CODE}_{week_number}监理周报.docx"
+  },
+  "counter_key": null,
+  "placeholders": {
+    "{{项目名称}}": {
+      "source": "env",
+      "key": "PROJECT_NAME"
+    },
+    "{{甲方单位}}": {
+      "source": "env",
+      "key": "OWNER"
+    },
+    "{{乙方单位}}": {
+      "source": "env",
+      "key": "CONTRACTOR"
+    },
+    "{{监理单位}}": {
+      "source": "env",
+      "key": "SUPERVISOR_UNIT"
+    },
+    "{{总监姓名}}": {
+      "source": "env",
+      "key": "CHIEF_ENGINEER"
+    },
+    "{{日期}}": {
+      "source": "computed",
+      "key": "TODAY"
+    },
+    "{{日期范围}}": {
+      "source": "param",
+      "key": "date_range",
+      "default": ""
+    },
+    "{{周数}}": {
+      "source": "param",
+      "key": "week_number",
+      "default": ""
+    },
+    "{{形象进度说明}}": {
+      "source": "param",
+      "key": "progress_summary",
+      "default": ""
+    },
+    "{{周进度详情}}": {
+      "source": "param",
+      "key": "weekly_detail",
+      "default": ""
+    },
+    "{{到货安装统计}}": {
+      "source": "param",
+      "key": "delivery_stats",
+      "default": ""
+    },
+    "{{安全质量描述}}": {
+      "source": "param",
+      "key": "safety_quality",
+      "default": ""
+    },
+    "{{存在问题}}": {
+      "source": "param",
+      "key": "problems",
+      "default": ""
+    },
+    "{{下周计划}}": {
+      "source": "param",
+      "key": "next_week_plan",
+      "default": ""
+    },
+    "{{监理建议}}": {
+      "source": "param",
+      "key": "supervisor_suggestions",
+      "default": ""
+    }
+  },
+  "triggers": [
+    "监理周报",
+    "周报",
+    "weekly"
+  ],
+  "requires": [
+    "GLOBAL_RULES"
+  ],
+  "light_mode": true
+}

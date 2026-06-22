@@ -1,0 +1,21 @@
+{
+  "name": "现场勘察记录表",
+  "doc_type": "现场勘察记录表",
+  "engine": "copy",
+  "template": "./通信工程_现场勘察记录表.docx",
+  "output": {
+    "naming": "{{YYYYMMDD}}_TX-{{PROJECT_CODE}}_{doc_name}.docx",
+    "dir": "03_实施阶段/"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "现场勘察记录表",
+    "通信 现场勘察记录表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

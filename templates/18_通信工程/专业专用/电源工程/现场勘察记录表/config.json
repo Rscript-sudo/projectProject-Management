@@ -1,0 +1,31 @@
+{
+  "name": "E-DY-01现场勘察记录表",
+  "doc_type": "DY_E-DY-01现场勘察记录表",
+  "engine": "copy",
+  "template": "./现场勘察记录表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_DY现_{PROJECT_CODE}_TX_DY现场勘察记录表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "DY",
+    "DY 现场勘察记录表",
+    "DY_现场勘察记录表",
+    "DY　现场勘察记录表",
+    "DY现场勘察记录表",
+    "E-DY-01现场勘察记录表",
+    "现场勘察记录表",
+    "电源工程",
+    "电源工程 现场勘察记录表",
+    "电源工程_现场勘察记录表",
+    "电源工程　现场勘察记录表",
+    "电源工程现场勘察记录表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

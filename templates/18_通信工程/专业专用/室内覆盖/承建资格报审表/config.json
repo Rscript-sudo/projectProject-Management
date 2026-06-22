@@ -1,0 +1,32 @@
+{
+  "name": "E-JZPT-11「承建资格报审表」",
+  "doc_type": "JZPT_E-JZPT-11「承建资格报审表」",
+  "engine": "copy",
+  "template": "./「承建资格报审表」_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_JZ_{PROJECT_CODE}_承建资格报审表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-JZPT-11「承建资格报审表」",
+    "JZPT",
+    "JZPT 承建资格报审表",
+    "JZPT_承建资格报审表",
+    "JZPT　承建资格报审表",
+    "JZPT承建资格报审表",
+    "室内覆盖",
+    "室内覆盖 承建资格报审表",
+    "室内覆盖_承建资格报审表",
+    "室内覆盖　承建资格报审表",
+    "室内覆盖承建资格报审表",
+    "室内覆盖承建资格报审表」",
+    "承建资格报审表」"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

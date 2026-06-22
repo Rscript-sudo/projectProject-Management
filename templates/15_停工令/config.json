@@ -1,0 +1,62 @@
+{
+  "name": "停工令",
+  "doc_type": "stop_work_order",
+  "engine": "docx",
+  "template": "./停工令模版.docx",
+  "output": {
+    "dir": "03_实施阶段/06_往来函件/05_停工令/原始稿/",
+    "naming": "{YYYYMMDD}_TG-LM_{PROJECT_CODE}_停工令.docx"
+  },
+  "counter_key": "stop_work_order",
+  "placeholders": {
+    "{{项目名称}}": {
+      "source": "env",
+      "key": "PROJECT_NAME"
+    },
+    "{{致送单位}}": {
+      "source": "env",
+      "key": "CONTRACTOR"
+    },
+    "{{文件编号}}": {
+      "source": "computed",
+      "key": "COUNTER",
+      "default": ""
+    },
+    "{{停工原因}}": {
+      "source": "param",
+      "key": "stop_reason",
+      "default": ""
+    },
+    "{{依据条款}}": {
+      "source": "param",
+      "key": "basis",
+      "default": ""
+    },
+    "{{整改要求}}": {
+      "source": "param",
+      "key": "requirements",
+      "default": ""
+    },
+    "{{监理单位}}": {
+      "source": "env",
+      "key": "SUPERVISOR_UNIT"
+    },
+    "{{总监姓名}}": {
+      "source": "env",
+      "key": "CHIEF_ENGINEER"
+    },
+    "{{日期}}": {
+      "source": "computed",
+      "key": "TODAY"
+    }
+  },
+  "triggers": [
+    "停工令",
+    "停工通知",
+    "暂停施工"
+  ],
+  "requires": [
+    "GLOBAL_RULES"
+  ],
+  "light_mode": true
+}

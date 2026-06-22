@@ -1,0 +1,31 @@
+{
+  "name": "E-WXSB-05割接旁站记录表",
+  "doc_type": "WXSB_E-WXSB-05割接旁站记录表",
+  "engine": "copy",
+  "template": "./割接旁站记录表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_WX_{PROJECT_CODE}_TX_WX5割接旁站记录表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-WXSB-05割接旁站记录表",
+    "WXSB",
+    "WXSB 割接旁站记录表",
+    "WXSB_割接旁站记录表",
+    "WXSB　割接旁站记录表",
+    "WXSB割接旁站记录表",
+    "割接旁站记录表",
+    "无线设备",
+    "无线设备 割接旁站记录表",
+    "无线设备_割接旁站记录表",
+    "无线设备　割接旁站记录表",
+    "无线设备割接旁站记录表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

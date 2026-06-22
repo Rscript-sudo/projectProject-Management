@@ -1,0 +1,31 @@
+{
+  "name": "E-XXXT-22软件配置管理监理报告",
+  "doc_type": "IT_E-XXXT-22软件配置管理监理报告",
+  "engine": "copy",
+  "template": "./软件配置管理监理报告_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_IT_XXT_{PROJECT_CODE}_IT_XXT2软件配置管理监理报告.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-XXXT-22软件配置管理监理报告",
+    "IT",
+    "IT 软件配置管理监理报告",
+    "IT_软件配置管理监理报告",
+    "IT　软件配置管理监理报告",
+    "IT软件配置管理监理报告",
+    "信息系统",
+    "信息系统 软件配置管理监理报告",
+    "信息系统_软件配置管理监理报告",
+    "信息系统　软件配置管理监理报告",
+    "信息系统软件配置管理监理报告",
+    "软件配置管理监理报告"
+  ],
+  "is_professional": true,
+  "category": "03_信息化工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

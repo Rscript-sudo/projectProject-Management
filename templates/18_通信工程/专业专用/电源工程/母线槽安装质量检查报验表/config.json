@@ -1,0 +1,31 @@
+{
+  "name": "E-DY-09母线槽安装质量检查报验表",
+  "doc_type": "DY_E-DY-09母线槽安装质量检查报验表",
+  "engine": "copy",
+  "template": "./母线槽安装质量检查报验表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_DY母_{PROJECT_CODE}_TX_DY母线槽安装质量检查报验表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "DY",
+    "DY 母线槽安装质量检查报验表",
+    "DY_母线槽安装质量检查报验表",
+    "DY　母线槽安装质量检查报验表",
+    "DY母线槽安装质量检查报验表",
+    "E-DY-09母线槽安装质量检查报验表",
+    "母线槽安装质量检查报验表",
+    "电源工程",
+    "电源工程 母线槽安装质量检查报验表",
+    "电源工程_母线槽安装质量检查报验表",
+    "电源工程　母线槽安装质量检查报验表",
+    "电源工程母线槽安装质量检查报验表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

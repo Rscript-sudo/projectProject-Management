@@ -1,0 +1,31 @@
+{
+  "name": "E-CS-01现场勘察记录表",
+  "doc_type": "CS_E-CS-01现场勘察记录表",
+  "engine": "copy",
+  "template": "./现场勘察记录表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_CS现_{PROJECT_CODE}_TX_CS现场勘察记录表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "CS",
+    "CS 现场勘察记录表",
+    "CS_现场勘察记录表",
+    "CS　现场勘察记录表",
+    "CS现场勘察记录表",
+    "E-CS-01现场勘察记录表",
+    "传输工程",
+    "传输工程 现场勘察记录表",
+    "传输工程_现场勘察记录表",
+    "传输工程　现场勘察记录表",
+    "传输工程现场勘察记录表",
+    "现场勘察记录表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

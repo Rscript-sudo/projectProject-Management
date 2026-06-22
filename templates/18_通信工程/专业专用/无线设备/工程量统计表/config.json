@@ -1,0 +1,31 @@
+{
+  "name": "E-WXSB-07工程量统计表",
+  "doc_type": "WXSB_E-WXSB-07工程量统计表",
+  "engine": "copy",
+  "template": "./工程量统计表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_WX_{PROJECT_CODE}_TX_WX7工程量统计表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-WXSB-07工程量统计表",
+    "WXSB",
+    "WXSB 工程量统计表",
+    "WXSB_工程量统计表",
+    "WXSB　工程量统计表",
+    "WXSB工程量统计表",
+    "工程量统计表",
+    "无线设备",
+    "无线设备 工程量统计表",
+    "无线设备_工程量统计表",
+    "无线设备　工程量统计表",
+    "无线设备工程量统计表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

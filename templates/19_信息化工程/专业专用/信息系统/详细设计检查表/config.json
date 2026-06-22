@@ -1,0 +1,31 @@
+{
+  "name": "E-XXXT-12详细设计检查表",
+  "doc_type": "IT_E-XXXT-12详细设计检查表",
+  "engine": "copy",
+  "template": "./详细设计检查表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_IT_XXT_{PROJECT_CODE}_IT_XXT2详细设计检查表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-XXXT-12详细设计检查表",
+    "IT",
+    "IT 详细设计检查表",
+    "IT_详细设计检查表",
+    "IT　详细设计检查表",
+    "IT详细设计检查表",
+    "信息系统",
+    "信息系统 详细设计检查表",
+    "信息系统_详细设计检查表",
+    "信息系统　详细设计检查表",
+    "信息系统详细设计检查表",
+    "详细设计检查表"
+  ],
+  "is_professional": true,
+  "category": "03_信息化工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

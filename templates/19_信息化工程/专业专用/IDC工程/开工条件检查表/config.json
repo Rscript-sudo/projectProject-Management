@@ -1,0 +1,31 @@
+{
+  "name": "E-SPJK-03开工条件检查表",
+  "doc_type": "SPJK_E-SPJK-03开工条件检查表",
+  "engine": "copy",
+  "template": "./开工条件检查表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_IT_IDC_{PROJECT_CODE}_IT_IDC3开工条件检查表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-SPJK-03开工条件检查表",
+    "IDC工程",
+    "IDC工程 开工条件检查表",
+    "IDC工程_开工条件检查表",
+    "IDC工程　开工条件检查表",
+    "IDC工程开工条件检查表",
+    "SPJK",
+    "SPJK 开工条件检查表",
+    "SPJK_开工条件检查表",
+    "SPJK　开工条件检查表",
+    "SPJK开工条件检查表",
+    "开工条件检查表"
+  ],
+  "is_professional": true,
+  "category": "03_信息化工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "name": "工程款支付证书",
+  "doc_type": "payment_certificate",
+  "engine": "docx",
+  "template": "./工程款支付证书模版.docx",
+  "output": {
+    "dir": "03_实施阶段/06_往来函件/06_支付证书/原始稿/",
+    "naming": "{YYYYMMDD}_ZF-ZS_{PROJECT_CODE}_工程款支付证书.docx"
+  },
+  "counter_key": "payment_certificate",
+  "placeholders": {
+    "{{项目名称}}": {
+      "source": "env",
+      "key": "PROJECT_NAME"
+    },
+    "{{致送单位}}": {
+      "source": "env",
+      "key": "CONTRACTOR"
+    },
+    "{{大写金额}}": {
+      "source": "param",
+      "key": "amount_upper",
+      "default": ""
+    },
+    "{{小写金额}}": {
+      "source": "param",
+      "key": "amount_lower",
+      "default": ""
+    },
+    "{{审核金额}}": {
+      "source": "param",
+      "key": "approved_amount",
+      "default": ""
+    },
+    "{{累计金额}}": {
+      "source": "param",
+      "key": "cumulative_amount",
+      "default": ""
+    },
+    "{{累计比例}}": {
+      "source": "param",
+      "key": "cumulative_percent",
+      "default": ""
+    },
+    "{{监理单位}}": {
+      "source": "env",
+      "key": "SUPERVISOR_UNIT"
+    },
+    "{{总监姓名}}": {
+      "source": "env",
+      "key": "CHIEF_ENGINEER"
+    },
+    "{{日期}}": {
+      "source": "computed",
+      "key": "TODAY"
+    }
+  },
+  "triggers": [
+    "支付证书",
+    "工程款支付"
+  ],
+  "requires": [
+    "GLOBAL_RULES"
+  ],
+  "light_mode": true
+}

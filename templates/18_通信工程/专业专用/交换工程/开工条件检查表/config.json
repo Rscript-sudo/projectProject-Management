@@ -1,0 +1,31 @@
+{
+  "name": "E-JH-03开工条件检查表",
+  "doc_type": "JH_E-JH-03开工条件检查表",
+  "engine": "copy",
+  "template": "./开工条件检查表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_JH开_{PROJECT_CODE}_TX_JH开工条件检查表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-JH-03开工条件检查表",
+    "JH",
+    "JH 开工条件检查表",
+    "JH_开工条件检查表",
+    "JH　开工条件检查表",
+    "JH开工条件检查表",
+    "交换工程",
+    "交换工程 开工条件检查表",
+    "交换工程_开工条件检查表",
+    "交换工程　开工条件检查表",
+    "交换工程开工条件检查表",
+    "开工条件检查表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

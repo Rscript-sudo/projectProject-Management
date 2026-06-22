@@ -1,0 +1,39 @@
+{
+  "name": "E-WXSB-08硬件安装工艺检查记录表",
+  "doc_type": "WXSB_E-WXSB-08硬件安装工艺检查记录表",
+  "engine": "copy",
+  "template": "./硬件安装工艺检查记录表_模版.xlsx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_WX_{PROJECT_CODE}_TX_WX8硬件安装工艺检查记录表.xlsx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-WXSB-08硬件安装工艺检查记录表",
+    "WXSB",
+    "WXSB 硬件安装工艺检查记录表",
+    "WXSB_硬件安装工艺检查记录表",
+    "WXSB　硬件安装工艺检查记录表",
+    "WXSB硬件安装工艺检查记录表",
+    "无线设备",
+    "无线设备 硬件安装工艺检查记录表",
+    "无线设备_硬件安装工艺检查记录表",
+    "无线设备　硬件安装工艺检查记录表",
+    "无线设备硬件安装工艺检查记录表",
+    "硬件安装工艺检查记录表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ],
+  "placeholder_cells": [
+    "B3",
+    "D3",
+    "B4",
+    "D4",
+    "B42",
+    "B44"
+  ]
+}

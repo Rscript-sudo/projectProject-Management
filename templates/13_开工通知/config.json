@@ -1,0 +1,56 @@
+{
+  "name": "开工通知",
+  "doc_type": "startup_notice",
+  "engine": "docx",
+  "template": "./开工通知模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_KG-TZ_{PROJECT_CODE}_开工通知.docx"
+  },
+  "counter_key": "startup_notice",
+  "placeholders": {
+    "{{项目名称}}": {
+      "source": "env",
+      "key": "PROJECT_NAME"
+    },
+    "{{致送单位}}": {
+      "source": "env",
+      "key": "CONTRACTOR"
+    },
+    "{{事由}}": {
+      "source": "param",
+      "key": "subject",
+      "default": ""
+    },
+    "{{正文内容}}": {
+      "source": "param",
+      "key": "body_content",
+      "default": ""
+    },
+    "{{附件清单}}": {
+      "source": "param",
+      "key": "attachments",
+      "default": "无"
+    },
+    "{{监理单位}}": {
+      "source": "env",
+      "key": "SUPERVISOR_UNIT"
+    },
+    "{{总监姓名}}": {
+      "source": "env",
+      "key": "CHIEF_ENGINEER"
+    },
+    "{{日期}}": {
+      "source": "computed",
+      "key": "TODAY"
+    }
+  },
+  "triggers": [
+    "开工通知",
+    "开工令"
+  ],
+  "requires": [
+    "GLOBAL_RULES"
+  ],
+  "light_mode": true
+}

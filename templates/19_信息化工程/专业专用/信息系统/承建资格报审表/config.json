@@ -1,0 +1,31 @@
+{
+  "name": "E-XXXT-01承建资格报审表",
+  "doc_type": "IT_E-XXXT-01承建资格报审表",
+  "engine": "copy",
+  "template": "./承建资格报审表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_IT_XXT_{PROJECT_CODE}_IT_XXT1承建资格报审表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-XXXT-01承建资格报审表",
+    "IT",
+    "IT 承建资格报审表",
+    "IT_承建资格报审表",
+    "IT　承建资格报审表",
+    "IT承建资格报审表",
+    "信息系统",
+    "信息系统 承建资格报审表",
+    "信息系统_承建资格报审表",
+    "信息系统　承建资格报审表",
+    "信息系统承建资格报审表",
+    "承建资格报审表"
+  ],
+  "is_professional": true,
+  "category": "03_信息化工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

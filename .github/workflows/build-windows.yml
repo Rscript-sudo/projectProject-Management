@@ -1,0 +1,57 @@
+name: Build Windows EXE
+
+# 触发条件：
+#   1. 推送 v* 形式的 tag（例如 v1.0.0） → 自动出包
+#   2. 手动在 GitHub Actions 页面点 "Run workflow"
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 允许上传产物到 Release（后续启用 publish 时需要）
+
+jobs:
+  build-windows:
+    name: Build Windows x64 EXE
+    runs-on: windows-latest
+
+    steps:
+      # 1. 拉代码
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. 装 Node.js 20（与本地开发版本一致）
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # 3. 装依赖（npm ci 严格按 package-lock.json）
+      - name: Install dependencies
+        run: npm ci
+
+      # 4. 关键步骤：重新编译 better-sqlite3 原生模块
+      #    Windows runner 上预装了 Python + VS Build Tools，可直接编译
+      - name: Rebuild native modules for Electron
+        run: npx electron-rebuild -f -w better-sqlite3
+
+      # 5. 构建前端 + electron-builder 出 Windows 包
+      #    --publish never：不自动发到 GitHub Release，只产出 artifacts
+      - name: Build Windows installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run build -- --win --publish never
+
+      # 6. 上传产物到 Actions 页面（保留 30 天）
+      - name: Upload EXE artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe-${{ github.ref_name }}
+          path: |
+            release/*.exe
+            release/latest.yml
+            release/*.blockmap
+          retention-days: 30

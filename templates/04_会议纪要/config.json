@@ -1,0 +1,65 @@
+{
+  "name": "会议纪要",
+  "doc_type": "minutes",
+  "engine": "docx",
+  "template": "./会议纪要模版.docx",
+  "output": {
+    "dir": "03_实施阶段/04_会议纪要/",
+    "naming": "{YYYYMMDD}_HY-JY_{PROJECT_CODE}_会议纪要.docx"
+  },
+  "counter_key": "meeting_minutes",
+  "placeholders": {
+    "{{项目名称}}": {
+      "source": "env",
+      "key": "PROJECT_NAME"
+    },
+    "{{会议主题}}": {
+      "source": "param",
+      "key": "meeting_topic",
+      "default": ""
+    },
+    "{{会议时间}}": {
+      "source": "param",
+      "key": "meeting_time",
+      "default": ""
+    },
+    "{{会议地点}}": {
+      "source": "param",
+      "key": "meeting_location",
+      "default": ""
+    },
+    "{{主持人}}": {
+      "source": "param",
+      "key": "host",
+      "default": ""
+    },
+    "{{参加人员}}": {
+      "source": "param",
+      "key": "attendees",
+      "default": "见签到表"
+    },
+    "{{记录人}}": {
+      "source": "param",
+      "key": "recorder",
+      "default": ""
+    },
+    "{{会议主要内容}}": {
+      "source": "param",
+      "key": "meeting_content",
+      "default": ""
+    },
+    "{{日期}}": {
+      "source": "computed",
+      "key": "TODAY"
+    }
+  },
+  "triggers": [
+    "会议纪要",
+    "会议记录",
+    "minutes"
+  ],
+  "requires": [
+    "GLOBAL_RULES"
+  ],
+  "light_mode": false
+}

@@ -1,0 +1,21 @@
+{
+  "name": "工程量统计表",
+  "doc_type": "工程量统计表",
+  "engine": "copy",
+  "template": "./通信工程_工程量统计表.docx",
+  "output": {
+    "naming": "{{YYYYMMDD}}_TX-{{PROJECT_CODE}}_{doc_name}.docx",
+    "dir": "03_实施阶段/"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "工程量统计表",
+    "通信 工程量统计表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

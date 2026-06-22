@@ -1,0 +1,37 @@
+{
+  "name": "承建资格报审表",
+  "doc_type": "qualification_review",
+  "engine": "docx",
+  "template": "./承建资格报审表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/02_承建资格报审/",
+    "naming": "{YYYYMMDD}_CJ-BS_{PROJECT_CODE}_承建资格报审表.docx"
+  },
+  "counter_key": "承建资格报审",
+  "placeholders": {
+    "{{项目名称}}": {
+      "source": "env",
+      "key": "PROJECT_NAME"
+    },
+    "{{文件编号}}": {
+      "source": "computed",
+      "key": "COUNTER",
+      "default": ""
+    },
+    "{{致单位}}": {
+      "source": "env",
+      "key": "SUPERVISOR_UNIT"
+    },
+    "{{承建内容}}": {
+      "source": "param",
+      "key": "qualification_content",
+      "default": ""
+    }
+  },
+  "triggers": [
+    "承建资格报审",
+    "资格报审",
+    "qualification_review"
+  ],
+  "light_mode": true
+}

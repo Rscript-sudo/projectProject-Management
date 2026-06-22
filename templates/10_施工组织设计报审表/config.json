@@ -1,0 +1,33 @@
+{
+  "name": "施工组织设计报审表",
+  "doc_type": "construction_plan_review",
+  "engine": "docx",
+  "template": "./施工组织设计报审表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/03_施工组织设计报审/",
+    "naming": "{YYYYMMDD}_SG-BS_{PROJECT_CODE}_施工组织设计报审表.docx"
+  },
+  "counter_key": "施工组织设计报审",
+  "placeholders": {
+    "{{项目名称}}": {
+      "source": "env",
+      "key": "PROJECT_NAME"
+    },
+    "{{文件编号}}": {
+      "source": "computed",
+      "key": "COUNTER",
+      "default": ""
+    },
+    "{{致单位}}": {
+      "source": "env",
+      "key": "SUPERVISOR_UNIT"
+    }
+  },
+  "triggers": [
+    "施工组织设计报审",
+    "施组报审",
+    "方案报审",
+    "construction_plan_review"
+  ],
+  "light_mode": true
+}

@@ -1,0 +1,31 @@
+{
+  "name": "E-CS-03开工条件检查表",
+  "doc_type": "CS_E-CS-03开工条件检查表",
+  "engine": "copy",
+  "template": "./开工条件检查表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_CS开_{PROJECT_CODE}_TX_CS开工条件检查表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "CS",
+    "CS 开工条件检查表",
+    "CS_开工条件检查表",
+    "CS　开工条件检查表",
+    "CS开工条件检查表",
+    "E-CS-03开工条件检查表",
+    "传输工程",
+    "传输工程 开工条件检查表",
+    "传输工程_开工条件检查表",
+    "传输工程　开工条件检查表",
+    "传输工程开工条件检查表",
+    "开工条件检查表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

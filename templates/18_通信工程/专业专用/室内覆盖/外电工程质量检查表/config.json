@@ -1,0 +1,32 @@
+{
+  "name": "E-JZPT-6「外电工程质量检查表」",
+  "doc_type": "JZPT_E-JZPT-6「外电工程质量检查表」",
+  "engine": "copy",
+  "template": "./「外电工程质量检查表」_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_JZ_{PROJECT_CODE}_外电工程质量检查表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-JZPT-6「外电工程质量检查表」",
+    "JZPT",
+    "JZPT 外电工程质量检查表",
+    "JZPT_外电工程质量检查表",
+    "JZPT　外电工程质量检查表",
+    "JZPT外电工程质量检查表",
+    "外电工程质量检查表」",
+    "室内覆盖",
+    "室内覆盖 外电工程质量检查表",
+    "室内覆盖_外电工程质量检查表",
+    "室内覆盖　外电工程质量检查表",
+    "室内覆盖外电工程质量检查表",
+    "室内覆盖外电工程质量检查表」"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "name": "E-JH-07工程量统计表",
+  "doc_type": "JH_E-JH-07工程量统计表",
+  "engine": "copy",
+  "template": "./工程量统计表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_JH工_{PROJECT_CODE}_TX_JH工程量统计表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "E-JH-07工程量统计表",
+    "JH",
+    "JH 工程量统计表",
+    "JH_工程量统计表",
+    "JH　工程量统计表",
+    "JH工程量统计表",
+    "交换工程",
+    "交换工程 工程量统计表",
+    "交换工程_工程量统计表",
+    "交换工程　工程量统计表",
+    "交换工程工程量统计表",
+    "工程量统计表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}

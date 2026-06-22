@@ -1,0 +1,31 @@
+{
+  "name": "E-DY-08柴油发电机质量检查报验表",
+  "doc_type": "DY_E-DY-08柴油发电机质量检查报验表",
+  "engine": "copy",
+  "template": "./柴油发电机质量检查报验表_模版.docx",
+  "output": {
+    "dir": "02_准备阶段/04_开工报审/",
+    "naming": "{YYYYMMDD}_TX_DY柴_{PROJECT_CODE}_TX_DY柴油发电机质量检查报验表.docx"
+  },
+  "counter_key": null,
+  "placeholders": {},
+  "triggers": [
+    "DY",
+    "DY 柴油发电机质量检查报验表",
+    "DY_柴油发电机质量检查报验表",
+    "DY　柴油发电机质量检查报验表",
+    "DY柴油发电机质量检查报验表",
+    "E-DY-08柴油发电机质量检查报验表",
+    "柴油发电机质量检查报验表",
+    "电源工程",
+    "电源工程 柴油发电机质量检查报验表",
+    "电源工程_柴油发电机质量检查报验表",
+    "电源工程　柴油发电机质量检查报验表",
+    "电源工程柴油发电机质量检查报验表"
+  ],
+  "is_professional": true,
+  "category": "01_通信工程",
+  "requires": [
+    "GLOBAL_RULES"
+  ]
+}
