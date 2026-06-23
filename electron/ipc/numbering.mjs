@@ -6,7 +6,7 @@
 import path from 'path'
 import fs from 'fs'
 import { safeCall } from './safe.mjs'
-import { getProjectDataPath } from './shared.mjs'
+import { getProjectDataPath, ensureDir } from './shared.mjs'
 
 // 项目级写锁，防止 getAndIncrementNumber 的 TOCTOU 竞态
 const projectLocks = new Map()
@@ -203,6 +203,8 @@ export function getEffectiveRules(projectName) {
  */
 export function saveNumberingRules(projectName, numbering) {
   const dataDir = getProjectDataPath(projectName)
+  // 防御性补建：dataDir 不存在就建，config.json 不存在就先建空对象
+  ensureDir(dataDir)
   const configPath = path.join(dataDir, 'project.config.json')
 
   let config = {}

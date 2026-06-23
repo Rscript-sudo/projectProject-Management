@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Typography, Input, Button, Space, Spin, Modal, Form, Select, Tag, App, Dropdown } from 'antd'
-import { SendOutlined, RobotOutlined, FileTextOutlined, SaveOutlined, ReloadOutlined, FilePdfOutlined, SettingOutlined, FolderOpenOutlined, HomeOutlined, EditOutlined, CloseOutlined, SearchOutlined, BookOutlined } from '@ant-design/icons'
+import { SendOutlined, RobotOutlined, FileTextOutlined, SaveOutlined, ReloadOutlined, FilePdfOutlined, SettingOutlined, FolderOpenOutlined, HomeOutlined, EditOutlined, CloseOutlined, SearchOutlined, BookOutlined, EyeOutlined } from '@ant-design/icons'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
 import { identifyDocType, identifyMode, buildChatPrompt, inferDataTools, postProcessTimeFields, generateFileName, getDocSavePath, providerConfigs, buildDocPrompt, callAI, extractSubject } from '../services/aiService'
@@ -25,7 +25,7 @@ export default function ProjectView() {
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams] = useSearchParams()
-  const { currentProject, settings, projectRoot, loadSettings } = useAppStore()
+  const { currentProject, setCurrentProject, projects, settings, projectRoot, loadSettings } = useAppStore()
   const { message } = App.useApp()
 
   // 本地状态
@@ -655,7 +655,9 @@ export default function ProjectView() {
         }}>
           <Space size={4}>
             <FolderOpenOutlined style={{ color: '#1677ff', fontSize: 13 }} />
-            <Text strong ellipsis style={{ fontSize: 12, maxWidth: 160 }}>全部项目</Text>
+            <Text strong ellipsis style={{ fontSize: 12, maxWidth: 160 }}>
+              {currentProject?.name || '未选定项目'}
+            </Text>
           </Space>
           <Space size={2}>
             <Button
@@ -748,9 +750,39 @@ export default function ProjectView() {
           <RobotOutlined style={{ color: '#1677ff', fontSize: 13 }} />
           <Text strong style={{ fontSize: 12 }}>AI 助手</Text>
           <Text type="secondary" style={{ fontSize: 11, marginRight: 4 }}>— 问规范 · 查数据 · 写文档</Text>
-          <Tag color="#1677ff" style={{ fontSize: 10, lineHeight: '18px', height: 20, margin: 0, borderRadius: 10 }}>
-            {currentProject?.name || '未选择项目'}
-          </Tag>
+          {/* 项目选择器：决定所有 AI 辅助的工作项目 */}
+          <Select
+            size="small"
+            value={currentProject?.path || undefined}
+            placeholder="选定项目"
+            style={{ minWidth: 160, maxWidth: 220 }}
+            onChange={(path) => {
+              const proj = projects.find(p => p.path === path)
+              if (proj) setCurrentProject(proj)
+            }}
+            popupMatchSelectWidth={false}
+            dropdownStyle={{ minWidth: 220 }}
+            suffixIcon={<FolderOpenOutlined style={{ fontSize: 11 }} />}
+          >
+            {projects.map(p => (
+              <Select.Option key={p.path} value={p.path}>
+                <Space size={4}>
+                  <FolderOpenOutlined style={{ fontSize: 11, color: currentProject?.path === p.path ? '#1677ff' : '#999' }} />
+                  <span style={{ fontSize: 12 }}>{p.name}</span>
+                </Space>
+              </Select.Option>
+            ))}
+            {projects.length === 0 && (
+              <Select.Option key="__empty__" value="__empty__" disabled>
+                <span style={{ fontSize: 12, color: '#999' }}>暂无项目（先到首页创建）</span>
+              </Select.Option>
+            )}
+          </Select>
+          {currentProject && (
+            <Tag color="#1677ff" style={{ fontSize: 10, lineHeight: '18px', height: 20, margin: 0, borderRadius: 10 }}>
+              ✓ 当前
+            </Tag>
+          )}
           {loading && progressStage && (
             <Tag style={{ fontSize: 10, lineHeight: '18px', height: 20, margin: 0, borderRadius: 10, background: '#fff7e6', border: '1px solid #ffd591', color: '#d46b08' }}>
               {progressStage === 'analyzing' ? '分析中' : progressStage === 'generating' ? '生成中' : '处理中'}
@@ -1154,6 +1186,46 @@ export default function ProjectView() {
                       </Button>
                       <Button type="primary" size="small" icon={<SaveOutlined />} onClick={handleSave} loading={generating}>
                         {generating ? '保存中...' : '保存'}
+                      </Button>
+                      <Button
+                        size="small"
+                        type="text"
+                        icon={<EyeOutlined />}
+                        title="保存到临时目录并用本地办公软件打开预览"
+                        loading={generating}
+                        onClick={async () => {
+                          if (!currentProject || !previewContent) return
+                          const { docType } = previewContent
+                          const content = editMode ? editableContent : previewContent.content
+                          const subDir = getDocSavePath(docType)
+                          const subject = extractSubject(previewContent.userInput || lastInput)
+                          const fileName = generateFileName(docType, currentProject.name, subject || docType)
+                          // 保存到项目目录，但用临时 fileName 后缀避免污染正式目录
+                          setGenerating(true)
+                          try {
+                            const result = await window.electronAPI.saveDoc({
+                              projectPath: currentProject.path,
+                              subDir,
+                              fileName,
+                              content,
+                              docType,
+                              projectName: currentProject.name,
+                              userInput: previewContent.userInput || lastInput,
+                            })
+                            if (result.success && result.path) {
+                              window.electronAPI.openFile(result.path)
+                              message.success('已在本地办公软件打开')
+                            } else {
+                              message.error('保存失败：' + (result.error || '未知错误'))
+                            }
+                          } catch (e: any) {
+                            message.error('预览失败：' + (e?.message || '未知错误'))
+                          } finally {
+                            setGenerating(false)
+                          }
+                        }}
+                      >
+                        预览
                       </Button>
                       <Button
                         size="small"

@@ -123,6 +123,22 @@ export function ensureProjectIndex(rootPath) {
   if (valid.length !== index.projects.length) {
     writeProjectIndex({ projects: valid })
   }
+
+  // 防御性补建：如果项目是从外部手工放进 index 的（不是 createProject 流程创建的），
+  // dataDir 和 project.config.json 可能缺失。尝试补建一次，避免后续保存 ENOENT。
+  for (const p of valid) {
+    const dataDir = getProjectDataPath(p.name)
+    const configPath = path.join(dataDir, 'project.config.json')
+    if (!fs.existsSync(configPath)) {
+      try {
+        createProjectStructure(p.path, p.name, '通用')
+        console.log(`[ensureProjectIndex] 补建数据目录: ${p.name}`)
+      } catch (e) {
+        console.warn(`[ensureProjectIndex] 补建失败 ${p.name}:`, e.message)
+      }
+    }
+  }
+
   return { projects: valid }
 }
 
