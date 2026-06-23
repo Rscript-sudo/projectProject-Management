@@ -170,20 +170,22 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   saveSettings: async (settings) => {
     try {
+      // 剔除前端 store 才有的运行时字段，避免脏数据写回主进程
+      const { hasApiKey, apiKeyDecryptError, ...payload } = settings as any
       const api = await waitForElectronAPI()
-      const result = await api.setSettings(settings)
+      const result = await api.setSettings(payload)
       if (!result || result.success === false) {
         console.error('[saveSettings] 后端失败:', result?.error)
         return { success: false, error: result?.error || '保存失败' }
       }
       // 同步顶层 projectRoot：settings 变 → store 顶层跟着变 → Home 页立刻刷新
-      const newRoot = settings.projectRoot || get().projectRoot
+      const newRoot = payload.projectRoot || get().projectRoot
       set({
-        settings: { ...get().settings, ...settings },
+        settings: { ...get().settings, ...payload },
         projectRoot: newRoot,
       })
       // 根目录变了 → 立刻刷项目列表（不依赖再 loadSettings 触发）
-      if (newRoot !== get().projectRoot || settings.projectRoot) {
+      if (newRoot !== get().projectRoot || payload.projectRoot) {
         await get().loadProjects()
       }
       return { success: true }

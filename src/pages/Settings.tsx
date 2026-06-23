@@ -208,6 +208,31 @@ export default function Settings() {
               <Input.Password placeholder={settings.hasApiKey ? '已配置，留空保持不变' : 'sk-...'} />
             </Form.Item>
 
+            {/* 诊断按钮：检查 safeStorage 是否真的能加解密 */}
+            <Form.Item style={{ marginBottom: 0, marginTop: -8 }}>
+              <Button
+                size="small"
+                type="link"
+                onClick={async () => {
+                  if (!window.electronAPI?.diagnoseStorage) {
+                    message.error('诊断接口不可用')
+                    return
+                  }
+                  const result = await window.electronAPI.diagnoseStorage()
+                  console.log('[诊断] safeStorage:', result)
+                  if (!result.available) {
+                    message.error('❌ 系统不支持加密存储 (Keychain/DPAPI 不可用)')
+                  } else if (result.encryptTest !== 'ok' || result.decryptTest !== 'ok') {
+                    message.error(`❌ 加密/解密 round-trip 失败: encrypt=${result.encryptTest}, decrypt=${result.decryptTest}`)
+                  } else {
+                    message.success(`✓ 加密存储正常 (backend=${result.backend})`)
+                  }
+                }}
+              >
+                🔍 点击诊断加密存储
+              </Button>
+            </Form.Item>
+
             <Form.Item
               name="baseUrl"
               label="API 地址"

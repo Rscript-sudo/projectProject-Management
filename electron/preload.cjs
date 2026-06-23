@@ -108,6 +108,7 @@ const api = {
   openPath: (dirPath) => ipcRenderer.invoke('shell:openPath', dirPath),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (settings) => ipcRenderer.invoke('settings:set', settings),
+  diagnoseStorage: () => ipcRenderer.invoke('settings:diagnose'),
   getTemplateCatalog: () => ipcRenderer.invoke('fs:getTemplateCatalog'),
   selectSavePath: (defaultPath) => ipcRenderer.invoke('dialog:selectSavePath', defaultPath),
   getProjectDataPath: (projectPath) => ipcRenderer.invoke('fs:getProjectDataPath', projectPath),

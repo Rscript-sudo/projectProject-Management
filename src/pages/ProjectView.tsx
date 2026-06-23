@@ -137,12 +137,12 @@ export default function ProjectView() {
     }
   }, [currentProject])
 
-  // 确保 settings 已加载
+  // 确保 settings 已加载（用 hasApiKey 而不是 apiKey，因为 apiKey 是脱敏字段永远是 undefined）
   useEffect(() => {
-    if (!settings.apiKey) {
+    if (!settings.hasApiKey && !settings.apiKeyDecryptError) {
       loadSettings()
     }
-  }, [settings.apiKey, loadSettings])
+  }, [settings.hasApiKey, settings.apiKeyDecryptError, loadSettings])
 
   // 加载目录树（显示所有项目）
   useEffect(() => {
@@ -239,8 +239,14 @@ export default function ProjectView() {
     if (!trimmedInput || loading) return
 
     const currentSettings = useAppStore.getState().settings
-    if (!currentSettings.apiKey) {
+    // 注意：settings 是脱敏版（主进程持有真实 apiKey），前端用 hasApiKey 判断
+    // 别再用 currentSettings.apiKey — 它永远 undefined
+    if (!currentSettings.hasApiKey) {
       message.error('请先在设置中配置 AI API Key')
+      return
+    }
+    if (currentSettings.apiKeyDecryptError) {
+      message.error('已配置的 API Key 无法解密，请到【设置】页重新输入')
       return
     }
 
@@ -260,7 +266,8 @@ export default function ProjectView() {
         const result = await window.electronAPI.photoAiArchive({
           projectPath: currentProject.path,
           scanDir: attachedFolder.path,
-          aiConfig: { apiKey: currentSettings.apiKey, baseUrl: currentSettings.baseUrl, model: currentSettings.model },
+          // 不传 apiKey，主进程自己持有
+          aiConfig: { baseUrl: currentSettings.baseUrl, model: currentSettings.model },
         })
         const content = result.success
           ? `✅ **照片整理完成**\n\n共扫描 **${result.total}** 张照片\n已归档 **${result.archived}** 张\n\n${(result.months || []).map(m => '📁 ' + m).join('\n') || ''}\n\n${result.summary || ''}`
@@ -399,7 +406,7 @@ export default function ProjectView() {
 
       const aiCfg = {
         provider: currentSettings.aiProvider as any,
-        apiKey: currentSettings.apiKey,
+        // 不再传 apiKey —— 主进程自己持有（脱敏设计）
         baseUrl: currentSettings.baseUrl,
         model: currentSettings.model,
       }

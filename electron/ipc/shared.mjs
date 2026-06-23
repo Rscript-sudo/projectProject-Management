@@ -250,12 +250,17 @@ export function getSettingsForFrontend() {
     ...rest,
     hasApiKey: !!apiKey && !apiKeyDecryptError,
     apiKeyDecryptError,
+    // 明文存储标志（true = 不用加密，直接落明文）
+    apiKeyStoredPlain: !!(apiKey && typeof settings.apiKey === 'object' && settings.apiKey.plain),
   }
 }
 
 export function saveSettings(settings) {
   try {
     const toSave = { ...settings }
+    // 剔除前端透传的运行时字段——这些不应该落盘
+    delete toSave.hasApiKey
+    delete toSave.apiKeyDecryptError
     // 如果前端传的是明文 apiKey，加密后落盘；不传或传空字符串则保留原值
     if (typeof toSave.apiKey === 'string') {
       if (toSave.apiKey === '') {
