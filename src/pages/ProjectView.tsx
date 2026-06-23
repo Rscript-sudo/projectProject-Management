@@ -1201,15 +1201,14 @@ export default function ProjectView() {
                           const subject = extractSubject(previewContent.userInput || lastInput)
                           // 走虚竹 v2.0 文件名
                           const fileNameInfo = await generateFileName(docType, currentProject.name, subject || docType)
-                          const fileName = fileNameInfo.fileName
-                          // 保存到项目目录，但走临时 subDir 避免污染正式目录
-                          const tempSubDir = `__preview__/${fileNameInfo.subDir || getDocSavePath(docType)}`
+                          // 预览版加 .preview 后缀（v1.1.1 修复：不再走 __preview__/ 子目录，直接放正式目录让老板能看到）
+                          const previewFileName = fileNameInfo.fileName.replace(/\.docx$/, '.preview.docx')
                           setGenerating(true)
                           try {
                             const result = await window.electronAPI.saveDoc({
                               projectPath: currentProject.path,
-                              subDir: tempSubDir,
-                              fileName,
+                              subDir: fileNameInfo.subDir || getDocSavePath(docType),
+                              fileName: previewFileName,
                               content,
                               docType,
                               projectName: currentProject.name,
@@ -1217,7 +1216,7 @@ export default function ProjectView() {
                             })
                             if (result.success && result.path) {
                               window.electronAPI.openFile(result.path)
-                              message.success('已在本地办公软件打开')
+                              message.success('已在本地办公软件打开预览版（文件名带 .preview 后缀）')
                             } else {
                               message.error('保存失败：' + (result.error || '未知错误'))
                             }
