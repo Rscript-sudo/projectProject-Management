@@ -35,7 +35,7 @@ export default function ProjectView() {
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [progressStage, setProgressStage] = useState<string>('')
-  const [previewContent, setPreviewContent] = useState<{ docType: string; content: string; userInput: string } | null>(null)
+  const [previewContent, setPreviewContent] = useState<{ docType: string; content: string; userInput: string; meta?: any } | null>(null)
   const [savedPath, setSavedPath] = useState('')
   const apiReady = useElectronAPI()
   const [lastInput, setLastInput] = useState('')
@@ -557,24 +557,25 @@ export default function ProjectView() {
       const { docType } = previewContent
       // 编辑模式下使用编辑后的内容
       const content = editMode ? editableContent : previewContent.content
-      const subDir = getDocSavePath(docType)
       const subject = extractSubject(previewContent.userInput || lastInput)
-      const fileName = generateFileName(docType, currentProject.name, subject || docType)
+      // 预览用的文件名（前端也展示给老板看）
+      const fileNameInfo = await generateFileName(docType, currentProject.name, subject || docType)
+      const fileName = fileNameInfo.fileName
 
-      // 直接保存到默认路径，不需用户选择
+      // 直接保存到默认路径（IPC 端按虚竹 v2.0 重新生成标准文件名+路径）
       const result = await window.electronAPI.saveDoc({
         projectPath: currentProject.path,
-        subDir,
-        fileName,
         content: content,
         docType: docType,
         projectName: currentProject.name,
         userInput: subject,
+        customSummary: subject || docType,
+        meta: previewContent.meta,
       })
 
       if (result.success) {
-        const savedFilePath = result.path || `${currentProject.path}/${subDir}/${fileName}`
-        message.success(`文档已保存`)
+        const savedFilePath = result.path || (result.subDir && result.fileName ? `${currentProject.path}/${result.subDir}/${result.fileName}` : `${currentProject.path}/${fileNameInfo.subDir || ''}/${fileName}`)
+        message.success(`文档已保存：${result.fileName || fileName}`)
         setSavedPath(savedFilePath)
         setEditMode(false)
         if (settings.autoOpenFile && result.path) {
@@ -1197,15 +1198,17 @@ export default function ProjectView() {
                           if (!currentProject || !previewContent) return
                           const { docType } = previewContent
                           const content = editMode ? editableContent : previewContent.content
-                          const subDir = getDocSavePath(docType)
                           const subject = extractSubject(previewContent.userInput || lastInput)
-                          const fileName = generateFileName(docType, currentProject.name, subject || docType)
-                          // 保存到项目目录，但用临时 fileName 后缀避免污染正式目录
+                          // 走虚竹 v2.0 文件名
+                          const fileNameInfo = await generateFileName(docType, currentProject.name, subject || docType)
+                          const fileName = fileNameInfo.fileName
+                          // 保存到项目目录，但走临时 subDir 避免污染正式目录
+                          const tempSubDir = `__preview__/${fileNameInfo.subDir || getDocSavePath(docType)}`
                           setGenerating(true)
                           try {
                             const result = await window.electronAPI.saveDoc({
                               projectPath: currentProject.path,
-                              subDir,
+                              subDir: tempSubDir,
                               fileName,
                               content,
                               docType,
@@ -1234,9 +1237,10 @@ export default function ProjectView() {
                         onClick={async () => {
                           if (!currentProject || !previewContent) return
                           const content = editMode ? editableContent : previewContent.content
-                          const subDir = getDocSavePath(previewContent.docType)
                           const subject = extractSubject(previewContent.userInput || lastInput)
-                          const fileName = generateFileName(previewContent.docType, currentProject.name, subject || previewContent.docType)
+                          const fileNameInfo = await generateFileName(previewContent.docType, currentProject.name, subject || previewContent.docType)
+                          const fileName = fileNameInfo.fileName
+                          const subDir = fileNameInfo.subDir || getDocSavePath(previewContent.docType)
                           setGenerating(true)
                           try {
                             const result = await window.electronAPI.exportPDF({
@@ -1247,6 +1251,7 @@ export default function ProjectView() {
                               docType: previewContent.docType,
                               projectName: currentProject.name,
                               userInput: subject,
+                              customSummary: subject,
                             })
                             if (result.success) {
                               message.success('PDF 已导出')

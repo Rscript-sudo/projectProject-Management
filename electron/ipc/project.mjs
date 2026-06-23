@@ -2,7 +2,7 @@ import { shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { safeCall } from './safe.mjs'
-import { ensureDir, ensureProjectIndex, readProjectIndex, writeProjectIndex, createProjectStructure, getProjectDataPath, ensureProjectDataDir, getDefaultRoot, getSettings } from './shared.mjs'
+import { ensureDir, ensureProjectIndex, readProjectIndex, writeProjectIndex, createProjectStructure, getProjectDataPath, ensureProjectDataDir, getDefaultRoot, getSettings, generateProjectCodeFromName } from './shared.mjs'
 
 export function register(ipcMain) {
   ipcMain.handle('fs:getRoot', () => {
@@ -41,10 +41,15 @@ export function register(ipcMain) {
   ipcMain.handle('fs:readProjectConfig', (_, projectPath) => {
     try {
       const configPath = path.join(getProjectDataPath(path.basename(projectPath)), 'project.config.json')
-      if (!fs.existsSync(configPath)) return { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '通用' }
-      return JSON.parse(fs.readFileSync(configPath, 'utf8'))
+      if (!fs.existsSync(configPath)) return { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '通用', projectCode: 'PROJECT' }
+      const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+      // 旧项目兼容：没有 projectCode 时按项目名兜底
+      if (!cfg.projectCode) {
+        cfg.projectCode = generateProjectCodeFromName(path.basename(projectPath))
+      }
+      return cfg
     } catch {
-      return { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '通用' }
+      return { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '通用', projectCode: 'PROJECT' }
     }
   })
 

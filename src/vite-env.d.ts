@@ -10,13 +10,27 @@ export interface DirNode {
 
 interface SaveDocOptions {
   projectPath: string
-  subDir: string
-  fileName: string
+  subDir?: string               // 虚竹 v2.0：可选，由 IPC 端按 docType 算
+  fileName?: string             // 虚竹 v2.0：可选，由 IPC 端按 buildFileName 生成
   content: string
   docType: string
   projectName: string
   userInput: string
   savePath?: string
+  customSummary?: string        // 虚竹 v2.0：摘要内容（事由等）
+  version?: string              // 虚竹 v2.0：修订版本，如 'V2'/'V3'
+  meta?: any                    // 台账登记用业务字段
+}
+
+export interface BuildFileNameResult {
+  fileName: string
+  subDir: string
+  code: string
+  projectCode: string
+  summary: string
+  date: string
+  version?: string
+  ext: string
 }
 
 interface AIOptions {
@@ -154,7 +168,14 @@ export interface ElectronAPI {
   deleteProject: (projectPath: string) => Promise<{ success: boolean; error?: string }>
   renameProject: (oldPath: string, newName: string) => Promise<{ success: boolean; path?: string; error?: string }>
   unbindProject: (projectPath: string) => Promise<{ success: boolean; removed?: boolean; error?: string }>
-  saveDoc: (options: SaveDocOptions) => Promise<{ success: boolean; path?: string; error?: string }>
+  saveDoc: (options: SaveDocOptions) => Promise<{
+    success: boolean
+    path?: string
+    fileName?: string
+    subDir?: string
+    filenameMeta?: BuildFileNameResult
+    error?: string
+  }>
   callAI: (options: AIOptions) => Promise<AIResult>
   callAIStream: (options: AIOptions) => Promise<{ success: boolean; error?: string; requestId?: string }>
   abortAIStream: (requestId: string) => void
@@ -205,11 +226,11 @@ export interface ElectronAPI {
   openFile: (filePath: string) => Promise<{ success: boolean; error?: string }>
   openPath: (dirPath: string) => Promise<{ success: boolean; error?: string }>
   getSettings: () => Promise<AppSettings>
-  setSettings: (settings: AppSettings) => Promise<{ success: boolean }>
+  setSettings: (settings: AppSettings) => Promise<{ success: boolean; error?: string }>
   getTemplateCatalog: () => Promise<TemplateItem[]>
   selectSavePath: (defaultPath: string) => Promise<string | null>
   getProjectDataPath: (projectPath: string) => Promise<string>
-  readProjectConfig: (projectPath: string) => Promise<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string }>
+  readProjectConfig: (projectPath: string) => Promise<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; projectCode?: string }>
   writeProjectConfig: (projectPath: string, config: object) => Promise<{ success: boolean; error?: string }>
   deleteFile: (filePath: string) => Promise<{ success: boolean; error?: string }>
   renameFile: (filePath: string, newName: string) => Promise<{ success: boolean; path?: string; error?: string }>
@@ -254,14 +275,39 @@ export interface ElectronAPI {
   scanAllProjectsCompleteness: (rootPath: string) => Promise<AllProjectsDashboard>
   exportPDF: (options: {
     projectPath: string
-    subDir: string
-    fileName: string
+    subDir?: string
+    fileName?: string
     content: string
     docType: string
     projectName: string
     userInput: string
-  }) => Promise<{ success: boolean; path?: string; error?: string }>
+    customSummary?: string
+  }) => Promise<{ success: boolean; path?: string; fileName?: string; subDir?: string; error?: string }>
   previewNumber: (docType: string, projectName: string) => Promise<{ number: string }>
+  buildFileName: (opts: {
+    docType: string
+    projectName: string
+    customSummary?: string
+    version?: string
+    dateMs?: number
+  }) => Promise<BuildFileNameResult>
+  nextDocVersion: (opts: {
+    projectPath: string
+    docType: string
+    summary: string
+  }) => Promise<string>
+  getDocCodes: () => Promise<Record<string, string>>
+  setProjectCode: (projectName: string, projectCode: string) => Promise<{ success: boolean; projectCode: string }>
+  diagnoseStorage: () => Promise<{
+    available: boolean
+    backend: string
+    encryptTest: string
+    decryptTest: string
+    keychainService?: string
+    appName?: string
+    error?: string
+    note?: string
+  }>
   getNextNumber: (docType: string, projectName: string) => Promise<{ number: string }>
   getNumberingRules: (projectName: string) => Promise<Record<string, any>>
   saveNumberingRules: (projectName: string, numbering: Record<string, any>) => Promise<{ success: boolean }>

@@ -49,7 +49,7 @@ export default function Home() {
   const [creating, setCreating] = useState(false)
 
   // Project config
-  const [projectConfig, setProjectConfig] = useState({ contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '通用' })
+  const [projectConfig, setProjectConfig] = useState({ contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '通用', projectCode: 'PROJECT' })
   const [editMode, setEditMode] = useState(false)
   const [configForm] = Form.useForm()
 
@@ -72,10 +72,10 @@ export default function Home() {
     if (!window.electronAPI) return
     try {
       const config = await window.electronAPI.readProjectConfig(projectPath)
-      setProjectConfig(config)
+      setProjectConfig({ projectCode: 'PROJECT', ...(config as any) })
       configForm.setFieldsValue(config)
     } catch (e) {
-      const defaults = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '通用' }
+      const defaults = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '通用', projectCode: 'PROJECT' }
       setProjectConfig(defaults)
       configForm.setFieldsValue(defaults)
     }
@@ -127,11 +127,12 @@ export default function Home() {
     if (window.electronAPI) {
       window.electronAPI.readProjectConfig(project.path)
         .then(config => {
-          setProjectConfig(config)
-          configForm.setFieldsValue(config)
+          const cfg = { projectCode: 'PROJECT', ...(config as any) }
+          setProjectConfig(cfg)
+          configForm.setFieldsValue(cfg)
         })
         .catch(() => {
-          const defaults = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '通用' }
+          const defaults = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '通用', projectCode: 'PROJECT' }
           setProjectConfig(defaults)
           configForm.setFieldsValue(defaults)
         })
@@ -611,6 +612,11 @@ export default function Home() {
                     </Form.Item>
                     <Form.Item name="chiefEngineer" label="总监理工程师" style={{ marginBottom: 8 }}>
                       <Input placeholder="如：张三" style={{ fontSize: 12 }} />
+                    </Form.Item>
+                    <Form.Item name="projectCode" label="项目码（虚竹v2.0命名）" style={{ marginBottom: 8 }}
+                      tooltip="用于生成文件名，如 PJ804。中文项目名会自动生成；可手动改成标准码（如 PJ803）"
+                      rules={[{ pattern: /^[A-Za-z0-9_]+$/, message: '只允许字母/数字/下划线' }]}>
+                      <Input placeholder="PJ804" style={{ fontSize: 12 }} />
                     </Form.Item>
                     <Form.Item name="projectType" label="项目类型" style={{ marginBottom: 10 }}>
                       <Select

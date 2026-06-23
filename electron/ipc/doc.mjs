@@ -3,6 +3,7 @@ import fs from 'fs'
 import { app, BrowserWindow } from 'electron'
 import { ensureDir, getProjectDataPath, updateLedger } from './shared.mjs'
 import { getAndIncrementNumber } from './numbering.mjs'
+import { buildFileName, getSubDir as getFilenameSubDir, nextVersion } from './filename.mjs'
 
 function getTemplatesDir() {
   if (app.isPackaged) {
@@ -12,12 +13,34 @@ function getTemplatesDir() {
 }
 
 export function register(ipcMain) {
-  ipcMain.handle('fs:saveDoc', async (_, { projectPath, subDir, fileName, content, docType, projectName, userInput, savePath: customSavePath, meta }) => {
+  ipcMain.handle('fs:saveDoc', async (_, { projectPath, subDir, fileName, content, docType, projectName, userInput, savePath: customSavePath, meta, customSummary, version }) => {
     try {
-      const savePath = customSavePath || path.join(projectPath, subDir, fileName)
+      // ===== 文件名生成（虚竹 v2.0）=====
+      // 优先级：前端传的 fileName > filename.mjs 自动生成
+      let finalFileName = fileName
+      let finalSubDir = subDir
+      let filenameMeta = null
+      if (!finalFileName) {
+        // 自动决定修订版本（如果没传 version 且用了 customSummary）
+        let autoVersion = version
+        if (!autoVersion && customSummary) {
+          autoVersion = nextVersion(projectPath, docType, customSummary)
+        }
+        const built = buildFileName({
+          docType,
+          projectName,
+          customSummary: customSummary || '',
+          version: autoVersion,
+        })
+        finalFileName = built.fileName
+        finalSubDir = subDir || getFilenameSubDir(docType)
+        filenameMeta = built
+      }
+
+      const savePath = customSavePath || path.join(projectPath, finalSubDir, finalFileName)
       ensureDir(path.dirname(savePath))
 
-      console.log('[saveDoc] Saving:', { docType, projectName, fileName })
+      console.log('[saveDoc] Saving:', { docType, projectName, fileName: finalFileName, subDir: finalSubDir, ...(filenameMeta || {}) })
 
       const templatesDir = getTemplatesDir()
       const { findTemplate, buildPlaceholderData, renderTemplate, renderXlsxTemplate, formatDocx } = await import('../templateService.mjs')
@@ -64,14 +87,14 @@ export function register(ipcMain) {
         }
 
         fs.writeFileSync(savePath, buffer)
-        await updateLedger(projectPath, subDir, fileName, docType, meta)
+        await updateLedger(projectPath, finalSubDir, finalFileName, docType, meta)
         console.log('[saveDoc] Template saved OK:', savePath, 'size:', buffer.length)
 
         if (engine !== 'xlsx') {
           await formatDocx(savePath, true)
         }
 
-        return { success: true, path: savePath }
+        return { success: true, path: savePath, fileName: finalFileName, subDir: finalSubDir, filenameMeta }
       }
 
       // 降级方案：无模板时直接创建 docx
@@ -92,22 +115,30 @@ export function register(ipcMain) {
       const buffer = await Packer.toBuffer(doc)
       fs.writeFileSync(savePath, buffer)
 
-      await updateLedger(projectPath, subDir, fileName, docType, meta)
+      await updateLedger(projectPath, finalSubDir, finalFileName, docType, meta)
       console.log('[saveDoc] Fallback saved OK:', savePath, 'size:', buffer.length)
 
       await formatDocx(savePath, false)
 
-      return { success: true, path: savePath }
+      return { success: true, path: savePath, fileName: finalFileName, subDir: finalSubDir, filenameMeta }
     } catch (e) {
       console.error('[saveDoc] Error:', e.message, e.stack)
       return { success: false, error: e.message }
     }
   })
 
-  ipcMain.handle('fs:exportPDF', async (_, { projectPath, subDir, fileName, content, docType, projectName, userInput }) => {
+  ipcMain.handle('fs:exportPDF', async (_, { projectPath, subDir, fileName, content, docType, projectName, userInput, customSummary }) => {
     try {
-      const pdfFileName = fileName.replace(/\.docx$/, '.pdf')
-      const savePath = path.join(projectPath, subDir, pdfFileName)
+      // 文件名生成（虚竹 v2.0）—— 同步 fs:saveDoc 逻辑
+      let finalFileName = fileName
+      let finalSubDir = subDir
+      if (!finalFileName) {
+        const built = buildFileName({ docType, projectName, customSummary: customSummary || '' })
+        finalFileName = built.fileName
+        finalSubDir = subDir || getFilenameSubDir(docType)
+      }
+      const pdfFileName = finalFileName.replace(/\.(docx|xlsx)$/, '.pdf')
+      const savePath = path.join(projectPath, finalSubDir, pdfFileName)
       ensureDir(path.dirname(savePath))
 
       const templatesDir = getTemplatesDir()
@@ -199,9 +230,9 @@ export function register(ipcMain) {
 
       fs.writeFileSync(savePath, pdfData)
       hiddenWin.destroy()
-      await updateLedger(projectPath, subDir, pdfFileName, docType)
+      await updateLedger(projectPath, finalSubDir, pdfFileName, docType)
 
-      return { success: true, path: savePath }
+      return { success: true, path: savePath, fileName: pdfFileName, subDir: finalSubDir }
     } catch (e) {
       console.error('[exportPDF] Error:', e.message)
       return { success: false, error: e.message }

@@ -82,8 +82,29 @@ export function createProjectStructure(projectPath, projectName, projectType = '
 
   const configPath = path.join(dataDir, 'project.config.json')
   if (!fs.existsSync(configPath)) {
-    fs.writeFileSync(configPath, JSON.stringify({ contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType }, null, 2), 'utf8')
+    // 初次创建：自动生成 projectCode（虚竹 v2.0 项目码规则）
+    const projectCode = generateProjectCodeFromName(projectName)
+    fs.writeFileSync(configPath, JSON.stringify({
+      contractor: '',
+      ownerUnit: '',
+      supervisorUnit: '',
+      chiefEngineer: '',
+      projectType,
+      projectCode,
+    }, null, 2), 'utf8')
   }
+}
+
+// 复用 filename.mjs 的项目码生成（避免重复实现）
+export function generateProjectCodeFromName(projectName) {
+  if (!projectName) return 'PROJECT'
+  const m = projectName.match(/^([A-Z][A-Z0-9]+)_/)
+  if (m) return m[1].replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 16) || 'PROJECT'
+  const numMatch = projectName.match(/(\d+)/)
+  if (numMatch) return `PJ${numMatch[1]}`
+  const alphanum = projectName.slice(0, 8).replace(/[^A-Za-z0-9]/g, '')
+  if (alphanum) return alphanum.toUpperCase()
+  return 'PROJECT'
 }
 
 // ===== 项目注册索引 =====

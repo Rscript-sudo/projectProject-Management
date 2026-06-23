@@ -5,7 +5,8 @@ export type AIProvider = 'deepseek' | 'minimax' | 'glm' | 'kimi' | 'qwen' | 'cus
 
 export interface AIConfig {
   provider: AIProvider
-  apiKey: string
+  // v1.0.6 脱敏设计：apiKey 已迁至主进程安全存储，前端不再持有
+  apiKey?: string
   baseUrl: string
   model: string
 }
@@ -124,10 +125,31 @@ export function identifyDocType(input: string): { type: string; confidence: numb
   return { type: '通用文档', confidence: 0.3, mode: 'B' }
 }
 
-// 生成文档文件名
-export function generateFileName(docType: string, projectName: string, description: string): string {
-  const date = new Date().toISOString().split('T')[0].replace(/-/g, '')
+// 生成文档文件名 — 调主进程 IPC（虚竹 v2.0 唯一真相源）
+// 返回 { fileName, subDir, code, projectCode, summary, date, version, ext }
+export async function generateFileName(
+  docType: string,
+  projectName: string,
+  description: string,
+  version: string = ''
+): Promise<{ fileName: string; subDir?: string; code?: string; projectCode?: string; summary?: string; date?: string; version?: string; ext?: string }> {
+  if (window.electronAPI?.buildFileName) {
+    try {
+      const result = await window.electronAPI.buildFileName({
+        docType,
+        projectName,
+        customSummary: description,
+        version,
+      })
+      return result
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e)
+      console.warn('[generateFileName] IPC failed, fallback:', errMsg)
+    }
+  }
 
+  // 兜底（无 IPC 时）：本地拼，保留旧行为
+  const date = new Date().toISOString().split('T')[0].replace(/-/g, '')
   const typeCodes: Record<string, string> = {
     '整改通知书': 'ZG-TZ',
     '安全通知书': 'JL-TZ',
@@ -136,15 +158,15 @@ export function generateFileName(docType: string, projectName: string, descripti
     '监理周报': 'JL-ZB',
     '监理月报': 'JL-YB',
     '监理日志': 'JL-RZ',
-    '停工令': 'LX-TD',
+    '停工令': 'TG-LM',
     '通用文档': 'DOC',
   }
-
   const code = typeCodes[docType] || 'DOC'
   const projCode = extractProjectCode(projectName)
   const desc = sanitizeFileName(description.slice(0, 15) || docType)
-
-  return `${date}_${code}_${projCode}_${desc}.docx`
+  const versionSuffix = version ? `_${version}` : ''
+  const fileName = `${date}_${code}_${projCode}_${desc}${versionSuffix}.docx`
+  return { fileName, code, projectCode: projCode, summary: desc, date }
 }
 
 // ===== 三类模式意图分类 =====
