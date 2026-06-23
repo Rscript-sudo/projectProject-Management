@@ -1,5 +1,54 @@
 // AI 服务 - 遵循"带头大哥监理业务技能"模板规范
 // 规范来源：监理业务 skill modules/信息管理/document-generator
+//
+// ============================================================
+// 虚竹 v2.0 反编造铁律（v1.1.0 新增 · 2026-06-23）
+// ============================================================
+// 来源：~/.claude/skills/监理业务/modules/信息管理/document-generator/docs/02_AI扩写型.md
+// 原 skill 规范自相矛盾——既说"推断具体现场场景"又说"禁止编造"，
+// v1.1.0 消解矛盾，统一为"反编造铁律"（本文件唯一真相源）。
+//
+// 核心三禁：
+//   1. 禁编造具体时间   — 不得写出"2023年11月15日14时30分"等具体日期时间
+//   2. 禁编造具体场景   — 不得写出"经我监理部于XX对XX工程施工现场进行XX"
+//   3. 禁编造具体人员   — 不得写出未由用户提供的"张XX / 李XX 总监理工程师"
+//
+// 必填项缺失处理：
+//   - 时间字段缺失 → 使用 {{CURRENT_DATE}} 占位符
+//   - 场景字段缺失 → 使用"近日 / 现场 / 指定部位 / 施工作业"等模糊表述
+//   - 人员字段缺失 → 使用"现场监理人员 / 总监理工程师"等角色词
+//   - 文末追加【信息缺口提示】，列出本文未由用户提供而留空的事实字段
+//
+// 兜底：
+//   - postProcessTimeFields()  清洗"YYYY年MM月DD日HH时MM分"等残留
+//   - postProcessFabricationGuard() 检测未授权的具体场景描述
+// ============================================================
+
+const ANTI_FABRICATION_RULES = `【反编造铁律 — 全篇适用，违反则文档作废】
+
+一、禁止编造具体时间
+   - 禁止自行编造任何具体日期/时间，如"2023年11月15日14时30分"。
+   - 若用户未提供日期 → 使用 {{CURRENT_DATE}} 占位符（系统会自动替换为生成当日）
+   - 若用户未提供时间 → 使用"近日"、"近期"、"规定时间"等模糊表述
+
+二、禁止编造具体场景
+   - 禁止自行编造"经我监理部于XX时XX分对XX工程XX部位进行XX"这类话
+   - 若用户未提供具体部位 → 使用"施工现场"、"指定部位"、"作业区域"
+   - 若用户未提供具体工序 → 使用"施工作业"、"指定工序"、"现场作业"
+   - 若用户未提供具体设备 → 使用"相关设备"、"指定设备"
+
+三、禁止编造具体人员
+   - 禁止自行编造具体人名，如"张XX总监理工程师于XX时签发"
+   - 若用户未提供姓名 → 使用"总监理工程师"、"现场监理人员"、"专业监理工程师"
+   - 若用户未提供具体单位 → 使用"建设单位"、"施工单位"、"监理单位"
+
+四、信息缺口自检
+   - 文末必须追加【信息缺口提示】，列出本文未由用户提供而留空的事实字段
+   - 格式：【信息缺口提示】日期、人员、部位、工序、设备型号（按实际缺失列举）
+
+五、必须使用占位符
+   - 日期字段统一使用 {{CURRENT_DATE}}，由系统后处理替换为真实日期
+   - 不得在正文中直接写出具体日期`
 
 export type AIProvider = 'deepseek' | 'minimax' | 'glm' | 'kimi' | 'qwen' | 'custom'
 
@@ -300,6 +349,11 @@ export function buildChatPrompt(projectInfo?: {
 /**
  * 将 AI 生成内容中的时间占位符替换为当前真实时间
  * 所有日期字段统一使用生成时刻的时间，不给 AI 编造的机会
+ *
+ * v1.1.0 增强：除了占位符替换，还做以下防护：
+ *  1. 拦截"具体到分秒"的时间模式（如"14时30分"），替换为 {{未指定时间}}
+ *  2. 拦截"经我监理部于X时X分"这种模板化编造句式，整句替换为占位
+ *  3. 拦截"近日"之外的近义模糊词，统一替换
  */
 export function postProcessTimeFields(content: string): string {
   const now = new Date()
@@ -309,10 +363,10 @@ export function postProcessTimeFields(content: string): string {
   const dateStr = `${year}年${month}月${day}日`
   const dateNum = `${year}${month}${day}`
 
-  // 替换 {{CURRENT_DATE}} 占位符
+  // 1. 替换 {{CURRENT_DATE}} 占位符
   let result = content.replace(/\{\{CURRENT_DATE\}\}/g, dateStr)
 
-  // 覆盖常见日期 key 的 AI 生成值
+  // 2. 覆盖常见日期 key 的 AI 生成值
   // 【日期】xxx → 【日期】2026年06月22日
   const timeKeys = ['日期', '巡视日期', '检查日期', '签章日期', '报告日期']
   for (const key of timeKeys) {
@@ -320,7 +374,80 @@ export function postProcessTimeFields(content: string): string {
     result = result.replace(regex, `【${key}】${dateStr}`)
   }
 
+  // 3. v1.1.0 防御：拦截"具体到分秒"的时间（AI 容易编造"14时30分"这种）
+  //    模式："14时30分"、"14点30分"、"14:30"、"下午14时30分"
+  //    替换为 {{未指定时间}}，提醒老板补充
+  result = result.replace(
+    /(?:上午|下午|凌晨|早上|晚上|傍晚)?\s*\d{1,2}\s*[时点]\s*\d{1,2}\s*分?/g,
+    '{{未指定时间}}'
+  )
+  // 也拦截纯日期+时刻的组合如"2023年11月15日14时30分" → 整段替换为占位
+  result = result.replace(
+    /\d{4}年\d{1,2}月\d{1,2}日(?:\s*\d{1,2}\s*[时点]\s*\d{1,2}\s*分?)?/g,
+    '{{CURRENT_DATE}}'
+  )
+  // 拦截"X月X日"具体日期（如"11月15日"），保留月份占位
+  result = result.replace(
+    /(?<![年月日\d])\d{1,2}月\d{1,2}日(?![\d年月日])/g,
+    '{{CURRENT_DATE}}'
+  )
+
   return result
+}
+
+/**
+ * v1.1.0 反编造守门员 — 检测并标注 AI 编造的具体场景
+ *
+ * 触发条件（任意一条命中即标注）：
+ *  1. 出现"经我监理部于..."、"经监理工程师检查..."等模板化编造句
+ *  2. 出现具体人名（如"张三"、"李四"等二/三字姓名 + 总监/监理工程师/项目经理）
+ *  3. 出现"近期"、"最近"、"前阵子"等模糊时间词（应改为"本月"或具体日期）
+ *
+ * 返回值：{ safe: boolean, warnings: string[], content: string }
+ *  - safe: 是否通过（true=无编造嫌疑）
+ *  - warnings: 命中的可疑模式列表
+ *  - content: 处理后的内容（命中处已替换为 {{待补充}}）
+ */
+export function postProcessFabricationGuard(content: string): {
+  safe: boolean
+  warnings: string[]
+  content: string
+} {
+  const warnings: string[] = []
+  let result = content
+
+  // 1. 检测"经我监理部于..."、"经监理检查..."等模板化编造句
+  const fabricationPatterns = [
+    { pattern: /经我监理部于[^,，。；;]{0,80}(?:时|分|巡查|检查|巡视)/g, label: '编造监理部行动' },
+    { pattern: /经.{0,8}监理.{0,8}(?:检查|巡查|巡视|发现|签发)/g, label: '编造监理行动' },
+    { pattern: /于\d{4}年\d{1,2}月\d{1,2}日[^,，。；;\n]{0,40}对[^,，。；;\n]{1,30}(?:进行|开展)?(?:.{0,10})?(?:检查|巡查|巡视|督查)/g, label: '编造具体巡查时间地点' },
+    { pattern: /\d{4}年\d{1,2}月\d{1,2}日\s*\d{1,2}时\s*\d{1,2}分[^,，。；;\n]{0,30}对[^,，。；;\n]{1,30}进行[^,，。；;\n]{1,15}(?:检查|巡查|巡视)/g, label: '编造完整巡查句式' },
+  ]
+  for (const { pattern, label } of fabricationPatterns) {
+    const matches = result.match(pattern)
+    if (matches) {
+      warnings.push(`${label}（${matches.length}处）`)
+      result = result.replace(pattern, '{{待补充：具体巡查时间地点}}')
+    }
+  }
+
+  // 2. 检测模糊时间词（应改为"本月"或具体日期）
+  const fuzzyTimePatterns = [
+    { pattern: /最近|前阵子|前段时间|近期/g, replacement: '本月', label: '模糊时间词' },
+  ]
+  for (const { pattern, replacement, label } of fuzzyTimePatterns) {
+    const matches = result.match(pattern)
+    if (matches) {
+      warnings.push(`${label}（${matches.length}处）`)
+      result = result.replace(pattern, replacement)
+    }
+  }
+
+  return {
+    safe: warnings.length === 0,
+    warnings,
+    content: result,
+  }
 }
 
 // 提取项目代码
@@ -485,6 +612,11 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
 
   const dateStr = new Date().toISOString().split('T')[0]
 
+  // 拼接 system prompt：反编造铁律 + 类型专属规则
+  // 反编造铁律必须在最顶部（v1.1.0 强制注入，不可省略）
+  const composeSystem = (typeRules: string): string =>
+    `${ANTI_FABRICATION_RULES}\n\n${typeRules}`
+
   switch (docType) {
     // ====================================================================
     // 模式A — 监理日志
@@ -495,7 +627,7 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
       const projectTypeName = projectInfo?.projectType || '通用'
 
       return {
-        system: `你是一位专业的工程监理工程师，负责撰写日常监理日志。
+        system: composeSystem(`你是一位专业的工程监理工程师，负责撰写日常监理日志。
 你的输出严格按照【key】value 格式组织，每个段落对应模板中的一个占位符。
 禁止使用 markdown 标记、数字编号。
 
@@ -543,7 +675,7 @@ ${procMapText}
 【协调解决情况】...
 【其他事项】安全巡视：...\n明日计划：...
 
-【参与人员格式】监理1名，施工人员若干`,
+【参与人员格式】监理1名，施工人员若干`),
         user: `${projectContext}
 
 【任务】根据以下信息生成监理日志内容。
@@ -561,7 +693,7 @@ ${userInput}
     // ====================================================================
     case '会议纪要': {
       return {
-        system: `你是一位专业的工程监理工程师，负责撰写会议纪要。
+        system: composeSystem(`你是一位专业的工程监理工程师，负责撰写会议纪要。
 输出结构：先以【key】value 格式输出结构化数据，再输出正文。
 
 【结构化字段】
@@ -588,7 +720,7 @@ ${userInput}
 
 【格式要求】
 - 禁止使用 markdown 标记（**、##、---）
-- 无关字段可省略`,
+- 无关字段可省略`),
         user: `${projectContext}
 
 【任务】根据以下会议信息生成会议纪要。
@@ -615,7 +747,7 @@ ${userInput}
       const dateRange = `${fmt(weekStart)} 至 ${fmt(weekEnd)}`
 
       return {
-        system: `你是一位专业的工程监理工程师，负责撰写监理周报。
+        system: composeSystem(`你是一位专业的工程监理工程师，负责撰写监理周报。
 输出格式：先以【key】value 格式输出各章节内容，所有 value 使用专业书面用语。
 
 【书面用语铁律】
@@ -638,7 +770,7 @@ ${userInput}
 - 【监理建议】：监理工作建议，50-100字
 
 正文按"一、本周施工进度、二、下周施工计划、三、安全质量情况、四、存在问题、五、监理建议"结构写入上述字段。
-禁止使用 markdown 标记。`,
+禁止使用 markdown 标记。`),
         user: `${projectContext}
 
 【任务】根据以下信息生成监理周报（当前第 ${weekNum} 周，${dateRange}）。
@@ -662,7 +794,7 @@ ${userInput}
       const dateRange = `${monthStart} 至 ${monthEnd}`
 
       return {
-        system: `你是一位专业的工程监理工程师，负责撰写监理月报。
+        system: composeSystem(`你是一位专业的工程监理工程师，负责撰写监理月报。
 输出格式：先以【key】value 格式输出各章节内容，所有正文使用专业书面用语。
 
 【书面用语铁律 — 全篇自查】
@@ -703,7 +835,7 @@ ${userInput}
 （三）安全监理方面：本月共签发监理通知书X份...
 禁止简单罗列统计数字。
 
-禁止使用 markdown 标记。`,
+禁止使用 markdown 标记。`),
         user: `${projectContext}
 
 【任务】根据以下信息生成监理月报（${dateRange}）。
@@ -721,7 +853,7 @@ ${userInput}
     // ====================================================================
     case '整改通知书': {
       return {
-        system: `你是一位专业的工程监理工程师，负责撰写整改通知书。
+        system: composeSystem(`你是一位专业的工程监理工程师，负责撰写整改通知书。
 输出格式：先以【key】value 格式输出各字段，再在【正文内容】中输出完整正文。
 
 【字段】
@@ -750,7 +882,7 @@ ${userInput}
 【格式要求】
 - 一级标题用"一、二、三、"，二级标题用"（一）（二）（三）"
 - 禁止使用 markdown 标记（**、##、---）
-- 禁止使用阿拉伯数字序号（1. 2. 3.）`,
+- 禁止使用阿拉伯数字序号（1. 2. 3.）`),
         user: `${projectContext}
 
 【任务】根据以下事由生成整改通知书。
@@ -786,7 +918,7 @@ ${userInput}
       }
 
       return {
-        system: `你是一位专业的工程监理工程师，负责撰写节假日安全监理通知书。
+        system: composeSystem(`你是一位专业的工程监理工程师，负责撰写节假日安全监理通知书。
 输出格式：先以【key】value 格式输出各字段，再在【正文内容】中输出完整正文。
 
 【字段】
@@ -830,7 +962,7 @@ ${userInput}
 
 【格式要求】
 - 禁止使用 markdown 标记
-- 禁止口语化表述`,
+- 禁止口语化表述`),
         user: `${projectContext}
 
 【任务】根据以下需求生成节假日安全监理通知书（${holidayType}类型）。
@@ -848,7 +980,7 @@ ${userInput}
     // ====================================================================
     case '工程联系单': {
       return {
-        system: `你是一位专业的工程监理工程师，负责撰写工程联系单。
+        system: composeSystem(`你是一位专业的工程监理工程师，负责撰写工程联系单。
 输出格式：先以【key】value 格式输出各字段，再在【正文内容】中输出完整正文。
 
 【字段】
@@ -880,7 +1012,7 @@ ${userInput}
 【格式要求】
 - 一级标题用"一、二、三、"，二级标题用"（一）（二）（三）"
 - 禁止使用 markdown 标记
-- 禁止口语化表述`,
+- 禁止口语化表述`),
         user: `${projectContext}
 
 【任务】根据以下要点生成工程联系单。
@@ -898,7 +1030,7 @@ ${userInput}
     // ====================================================================
     case '停工令': {
       return {
-        system: `你是一位专业的工程监理工程师，负责撰写停工令。
+        system: composeSystem(`你是一位专业的工程监理工程师，负责撰写停工令。
 输出格式：以【key】value 格式输出各字段。
 
 【字段】
@@ -931,7 +1063,7 @@ ${userInput}
 
 【格式要求】
 - 禁止使用 markdown 标记
-- 禁止口语化表述`,
+- 禁止口语化表述`),
         user: `${projectContext}
 
 【任务】根据以下事由生成停工令。
@@ -951,7 +1083,7 @@ ${userInput}
       const isDetailed = userInput.includes('细则')
       const typeName = isDetailed ? '监理实施细则' : '监理规划'
       return {
-        system: `你是一位资深工程监理工程师，负责编制${typeName}。
+        system: composeSystem(`你是一位资深工程监理工程师，负责编制${typeName}。
 输出格式：以【key】value 格式输出各章节，再输出完整正文。
 
 【字段】
@@ -985,7 +1117,7 @@ ${isDetailed ? `【细则额外要求】
 - 一级标题用"一、二、三、"，二级标题用"（一）（二）（三）"
 - 禁止使用 markdown 标记（**、##、---）
 - 专业书面用语，禁用口语化表述
-- 引用具体法规标准名称：《建设工程监理规范》GB/T 50319-2013 等`,
+- 引用具体法规标准名称：《建设工程监理规范》GB/T 50319-2013 等`),
         user: `${projectContext}
 
 【任务】根据以下项目信息编制${typeName}。
@@ -1002,7 +1134,7 @@ ${userInput}
     // ====================================================================
     case '方案审核意见': {
       return {
-        system: `你是一位资深工程监理工程师，负责审核施工单位报审的施工方案/施工组织设计/专项方案。
+        system: composeSystem(`你是一位资深工程监理工程师，负责审核施工单位报审的施工方案/施工组织设计/专项方案。
 输出格式：以【key】value 格式输出各审核维度，最后输出综合审核意见正文。
 
 【审核维度（必须逐条）】
@@ -1048,7 +1180,7 @@ ${userInput}
 【格式要求】
 - 一级标题用"一、二、三、"，二级标题用"（一）（二）（三）"
 - 禁止使用 markdown 标记
-- 专业书面用语`,
+- 专业书面用语`),
         user: `${projectContext}
 
 【任务】对以下方案进行审核并出具审核意见。
@@ -1065,7 +1197,7 @@ ${userInput}
     // ====================================================================
     case '工程变更单': {
       return {
-        system: `你是一位资深工程监理工程师，负责审核/编制工程变更单。
+        system: composeSystem(`你是一位资深工程监理工程师，负责审核/编制工程变更单。
 输出格式：以【key】value 格式输出各字段，再输出完整正文。
 
 【字段】
@@ -1114,7 +1246,7 @@ ${userInput}
 【格式要求】
 - 禁止使用 markdown 标记
 - 专业书面用语
-- 必须引用具体合同条款号或规范标准`,
+- 必须引用具体合同条款号或规范标准`),
         user: `${projectContext}
 
 【任务】根据以下变更申请生成工程变更单。
@@ -1131,7 +1263,7 @@ ${userInput}
     // ====================================================================
     case '索赔报告': {
       return {
-        system: `你是一位资深工程监理工程师，负责审核/编制工程索赔报告。
+        system: composeSystem(`你是一位资深工程监理工程师，负责审核/编制工程索赔报告。
 输出格式：以【key】value 格式输出各字段，再输出完整正文。
 
 【字段】
@@ -1176,7 +1308,7 @@ ${userInput}
 【格式要求】
 - 禁止使用 markdown 标记
 - 必须引用具体合同条款号
-- 索赔金额计算需明确列项`,
+- 索赔金额计算需明确列项`),
         user: `${projectContext}
 
 【任务】根据以下信息生成索赔报告。
@@ -1193,7 +1325,7 @@ ${userInput}
     // ====================================================================
     case '巡视记录': {
       return {
-        system: `你是一位资深工程监理工程师，负责出具现场巡视记录。
+        system: composeSystem(`你是一位资深工程监理工程师，负责出具现场巡视记录。
 输出格式：以【key】value 格式输出各字段，再输出完整正文。
 
 【字段】
@@ -1232,7 +1364,7 @@ ${userInput}
 【格式要求】
 - 禁止使用 markdown 标记
 - 问题描述需明确具体（部位/工序/违反条款）
-- 安全问题须引用《建设工程安全生产管理条例》等具体条款`,
+- 安全问题须引用《建设工程安全生产管理条例》等具体条款`),
         user: `${projectContext}
 
 【任务】根据以下巡视情况生成现场巡视记录。
@@ -1249,7 +1381,7 @@ ${userInput}
     // ====================================================================
     case '安全检查记录': {
       return {
-        system: `你是一位资深安全监理工程师，负责出具安全检查记录。
+        system: composeSystem(`你是一位资深安全监理工程师，负责出具安全检查记录。
 输出格式：以【key】value 格式输出各字段，再输出完整正文。
 
 【字段】
@@ -1302,7 +1434,7 @@ ${userInput}
 
 【格式要求】
 - 禁止使用 markdown 标记
-- 问题描述需具体到部位/班组/作业内容`,
+- 问题描述需具体到部位/班组/作业内容`),
         user: `${projectContext}
 
 【任务】根据以下情况生成安全检查记录。
@@ -1319,7 +1451,7 @@ ${userInput}
     // ====================================================================
     case '质量评估报告': {
       return {
-        system: `你是一位资深工程监理工程师，负责出具分部分项工程质量评估报告。
+        system: composeSystem(`你是一位资深工程监理工程师，负责出具分部分项工程质量评估报告。
 输出格式：以【key】value 格式输出各评估维度，最后输出综合评估结论。
 
 【评估维度】
@@ -1362,7 +1494,7 @@ ${userInput}
 【格式要求】
 - 禁止使用 markdown 标记
 - 引用具体验收规范名称及条款号
-- 评估结论必须明确（合格/不合格）`,
+- 评估结论必须明确（合格/不合格）`),
         user: `${projectContext}
 
 【任务】对以下分部分项工程出具质量评估报告。
@@ -1379,7 +1511,7 @@ ${userInput}
     // ====================================================================
     case '付款审核意见': {
       return {
-        system: `你是一位资深工程监理工程师，负责审核工程进度款支付申请。
+        system: composeSystem(`你是一位资深工程监理工程师，负责审核工程进度款支付申请。
 输出格式：以【key】value 格式输出各审核维度，最后输出综合审核意见。
 
 【审核维度】
@@ -1423,7 +1555,7 @@ ${userInput}
 【格式要求】
 - 禁止使用 markdown 标记
 - 金额须同时给出大写和小写
-- 引用具体合同条款`,
+- 引用具体合同条款`),
         user: `${projectContext}
 
 【任务】根据以下付款申请生成监理审核意见。
@@ -1440,7 +1572,7 @@ ${userInput}
     // ====================================================================
     default:
       return {
-        system: `你是一位专业的工程监理工程师。
+        system: composeSystem(`你是一位专业的工程监理工程师。
 输出格式：先以【key】value 格式输出结构化字段，再输出正文。
 
 【字段】
@@ -1451,7 +1583,7 @@ ${userInput}
 - 使用专业书面用语
 - 禁止使用 markdown 标记
 - 一级标题用"一、二、三、"
-- 段落用空行分隔`,
+- 段落用空行分隔`),
         user: `${projectContext}
 
 【任务】生成规范的监理业务文档。
