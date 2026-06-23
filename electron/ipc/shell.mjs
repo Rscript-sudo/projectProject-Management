@@ -275,11 +275,18 @@ ${dataContext}
     ipcMain.once(abortChannel, () => controller.abort())
 
     // 主进程持有 apiKey，不再从 IPC 接收
-    const apiKey = getSettings().apiKey
+    const settings = getSettings()
+    const apiKey = settings.apiKey
     if (!apiKey) {
-      sender.send('ai:stream:chunk', { requestId, type: 'error', error: '未配置 API Key，请在设置中填写' })
+      // 区分两种情况：
+      //   1. settings.json 里压根没 apiKey  → 真正的"未配置"
+      //   2. settings.json 里有但解不开      → 提示重新输入（Keychain 数据失效）
+      const errMsg = settings._apiKeyDecryptError
+        ? `已配置的 API Key 无法解密（可能换了电脑/系统重装）。请到【设置】页重新输入 API Key。原因：${settings._apiKeyDecryptError}`
+        : '未配置 API Key，请在【设置】页填写'
+      sender.send('ai:stream:chunk', { requestId, type: 'error', error: errMsg })
       sender.send('ai:stream:end', { requestId })
-      return { success: false, error: 'API Key 未配置', requestId }
+      return { success: false, error: settings._apiKeyDecryptError ? 'API Key 配置异常' : 'API Key 未配置', requestId }
     }
 
     // ===== 数据预取：在调 LLM 前把项目实时数据注入 prompt =====

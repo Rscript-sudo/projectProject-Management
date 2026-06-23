@@ -223,7 +223,12 @@ export function getSettings() {
       const merged = { ...getDefaultSettings(), ...saved }
       // 解密 apiKey（如果存的是加密形式），前端拿到明文只在主进程用
       if (typeof merged.apiKey === 'object' && merged.apiKey) {
-        merged.apiKey = decryptSecret(merged.apiKey)
+        const decrypted = decryptSecret(merged.apiKey)
+        // decryptSecret 失败时返回 {decryptError: '...'}，透传给前端
+        merged.apiKey = decrypted
+        if (decrypted && typeof decrypted === 'object' && decrypted.decryptError) {
+          merged._apiKeyDecryptError = decrypted.decryptError
+        }
       }
       return merged
     }
@@ -235,13 +240,16 @@ export function getSettings() {
 
 /**
  * 给前端用的脱敏 settings —— 不含明文 apiKey，只含 hasApiKey 标志
+ * 透传 _apiKeyDecryptError，让前端能区分"未配置"和"配置了解不开"
  */
 export function getSettingsForFrontend() {
   const settings = getSettings()
-  const { apiKey, ...rest } = settings
+  const { apiKey, _apiKeyDecryptError, ...rest } = settings
+  const apiKeyDecryptError = _apiKeyDecryptError || null
   return {
     ...rest,
-    hasApiKey: !!apiKey,
+    hasApiKey: !!apiKey && !apiKeyDecryptError,
+    apiKeyDecryptError,
   }
 }
 

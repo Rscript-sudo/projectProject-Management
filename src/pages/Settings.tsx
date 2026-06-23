@@ -184,9 +184,25 @@ export default function Settings() {
               label="API Key"
               rules={[{ required: !settings.hasApiKey, message: '请输入 API Key' }]}
               extra={
-                settings.hasApiKey
-                  ? <Text type="success">✓ 已配置（出于安全，加密存储，不显示明文）</Text>
-                  : '在对应 AI 平台获取'
+                settings.apiKeyDecryptError ? (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message="已配置的 API Key 无法解密"
+                    description={
+                      <span>
+                        原因：{settings.apiKeyDecryptError}
+                        <br />
+                        可能换了电脑或重装了系统。请在下方重新输入 API Key 后保存。
+                      </span>
+                    }
+                    style={{ marginTop: 4 }}
+                  />
+                ) : settings.hasApiKey ? (
+                  <Text type="success">✓ 已配置（出于安全，加密存储，不显示明文）</Text>
+                ) : (
+                  '在对应 AI 平台获取'
+                )
               }
             >
               <Input.Password placeholder={settings.hasApiKey ? '已配置，留空保持不变' : 'sk-...'} />

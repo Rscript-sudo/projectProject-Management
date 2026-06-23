@@ -60,7 +60,13 @@ export function decryptSecret(stored) {
   try {
     return safeStorage.decryptString(Buffer.from(stored.encrypted, 'base64'))
   } catch (e) {
-    console.error('[secret] 解密失败（可能是换了机器/账号）:', e.message)
-    return ''
+    // 解密失败常见原因：
+    //   1. macOS 重装系统/换 Apple ID 后 Keychain 数据丢失
+    //   2. Windows 换了用户账号（DPAPI 绑账号）
+    //   3. Linux 之前有 keyring 现在没了
+    // 这种情况必须让用户重新输入 apiKey，不能静默吞错
+    console.error('[secret] 解密失败：', e.message)
+    console.error('[secret] 原因：可能是换了机器/账号/系统重装。请到设置页重新输入 API Key。')
+    return { decryptError: e.message }
   }
 }
