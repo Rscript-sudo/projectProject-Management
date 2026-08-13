@@ -37,6 +37,15 @@ export function register(ipcMain) {
     }
     content = _processedContent
 
+    // 兼容旧版 AI 输出：系统字段曾使用“数据待核对”作为内部防编造标记。
+    // 对形如【建设单位】数据待核对的独立字段，保留字段名并交给项目配置/自动编号回填；
+    // 正文中的未知事实仍保留门禁，不能静默伪造。
+    content = content
+      .replace(/【([^】]+)】\s*(?:数据待核对|签发前请核对)\s*(?=\n|【|$)/g, '【$1】')
+      // 旧版 AI 也可能把该内部标记混进普通段落。删除标记本身而不补造事实；
+      // 用户仍可在预览编辑模式补充真实信息。
+      .replace(/数据待核对|签发前请核对/g, '')
+
     // 正式件硬门禁：不允许把未核验字段、旧校准块或跨专业术语写进 Word。
     const { validateDeliverableContent } = await import('../templateService.mjs')
     let preSaveConfig = {}
@@ -53,14 +62,12 @@ export function register(ipcMain) {
       return { success: false, error: `未通过正式件校验：${reasons}。请修订后再保存。` }
     }
 
-    // v1.0.0：入口字数硬校验（早于占位符扫描，来源：02_AI扩写型.md 第 81 行 ≥ 800 字）
+    // 字数是交付质量建议，不是保存门槛。短通知、联系单应允许按事实简洁成文；
+    // 前端会提示建议字数并提供补充扩写，正式件仍受字段、占位符与专业术语门禁约束。
     const minWords = Math.max(getMinWordCount(docType), getDocumentRuleMinWords(docType, preSaveConfig.documentRules))
     const actualWords = countEffectiveWords(content || '')
     if (minWords > 0 && actualWords < minWords) {
-      return {
-        success: false,
-        error: `AI 扩写不充分：当前 ${actualWords} 字，要求 ≥ ${minWords} 字（${docType}）。请补充或重新生成。`,
-      }
+      console.warn(`[saveDoc] 字数低于建议值：${actualWords}/${minWords} (${docType})，按用户选择继续保存`)
     }
 
     // v1.2.1 P0：入口扫描 AI 输出的占位符残留（防御 docxtemplater 静默吞字面量）

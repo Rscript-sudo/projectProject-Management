@@ -311,13 +311,18 @@ export function validateDeliverableContent(value, projectType) {
  * 从内容中解析 【key】value 格式的结构化数据
  * AI 输出中可能包含如：【施工部位】机房、弱电间 等段落
  */
-function parseSections(content) {
+function parseSections(content, knownKeys = new Set()) {
   const result = {}
-  const regex = /【([^】]+)】([\s\S]*?)(?=【|$)/g
-  let match
-  while ((match = regex.exec(content)) !== null) {
+  const markers = [...String(content || '').matchAll(/【([^】]+)】/g)]
+  for (let index = 0; index < markers.length; index += 1) {
+    const match = markers[index]
     const key = match[1].trim()
-    let value = match[2].trim()
+    // AI 正文经常使用“【依据：…】”“【提示】”等行内小标题。它们不是模板字段，
+    // 不应把“正文内容”在这里截断；仅已登记的字段才可作为下一个字段边界。
+    if (!key || !knownKeys.has(key)) continue
+    const nextField = markers.slice(index + 1).find(item => knownKeys.has(item[1].trim()))
+    const valueEnd = nextField ? nextField.index : String(content).length
+    let value = String(content).slice(match.index + match[0].length, valueEnd).trim()
     if (key && value) {
       // v1.2.4（2026-06-29）：循环剥前缀（事由：：xxx → 事由：xxx → xxx）
       // 老板反馈 v1.2.3 的单次 regex 剥不干净，剩"：xxx"
@@ -399,7 +404,14 @@ export function buildPlaceholderData({
   }
 
   // 4. 从 content 中解析 【key】value 结构化数据并覆盖
-  const sections = parseSections(content)
+  const knownSectionKeys = new Set([
+    ...Object.keys(data),
+    ...Object.keys(placeholders).map(key => key.replace(/^\{\{|\}\}$/g, '').trim()),
+    ...getKnownAliases(),
+    // 兼容旧模板和模型常用的正文写法。
+    '正文内容', '正文', '内容',
+  ])
+  const sections = parseSections(content, knownSectionKeys)
   for (const [key, value] of Object.entries(sections)) {
     const stdKey = resolveKey(key)
     const aliases = stdKey ? (FIELD_ALIASES[stdKey] || [key]) : [key]
@@ -459,9 +471,10 @@ export async function renderTemplate(templatePath, data) {
     }
   }
   // 模板可由项目自行替换，字段集合不能再靠全局 config 假定。
-  // 未提供的字段必须显式标记待核对，不能让 docxtemplater 输出 undefined。
+  // 未提供的系统字段留空而不是写入内部“数据待核对”标记；后者会污染
+  // 交付件并使用户在没有可编辑字段的情况下无法保存。
   for (const key of new Set([...templateXml.matchAll(/\{\{([^}]{1,80})\}\}/g)].map(m => m[1].trim()))) {
-    if (data[key] === undefined || data[key] === null) data[key] = '数据待核对'
+    if (data[key] === undefined || data[key] === null) data[key] = ''
   }
 
   // 创建模板引擎实例

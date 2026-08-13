@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url'
 import { safeCall } from './safe.mjs'
 import { getSettings } from './shared.mjs'
 import { DATA_TOOLS } from '../dataTools.mjs'
+import { parseMaterial } from './material.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -95,22 +96,14 @@ export function register(ipcMain, mainWindow) {
       return { success: true, fileName, ext, type: 'text', content, size: stat.size, truncated }
     }
 
-    // Excel 文件
-    if (ext === '.xlsx' || ext === '.xls') {
-      const xlsxModule = await import('xlsx')
-      const XLSX = xlsxModule.default || xlsxModule
-      const workbook = XLSX.readFile(filePath)
-      const parts = []
-      for (const sheetName of workbook.SheetNames) {
-        const sheet = workbook.Sheets[sheetName]
-        const json = XLSX.utils.sheet_to_json(sheet, { header: 1 })
-        const text = json.map(row => (Array.isArray(row) ? row.join('\t') : '')).join('\n')
-        parts.push(`【工作表：${sheetName}】\n${text}`)
-      }
-      let content = parts.join('\n\n')
-      const truncated = content.length > MAX_SIZE
-      if (truncated) content = content.slice(0, MAX_SIZE) + '\n\n... [内容已截断，仅显示前50KB]'
-      return { success: true, fileName, ext, type: 'text', content, size: stat.size, truncated }
+    // Excel、PDF：统一本地解析。PDF 有文字层时可直接用于 AI；扫描件明确提示需 OCR。
+    if (ext === '.xlsx' || ext === '.xls' || ext === '.pdf') {
+      const parsed = await parseMaterial(filePath)
+      if (!parsed.success) return { success: false, error: parsed.error }
+      let content = parsed.text || ''
+      const truncated = Boolean(parsed.truncated)
+      if (truncated) content += '\n\n... [内容已截断，仅显示前50KB]'
+      return { success: true, fileName, ext, type: 'text', content, size: stat.size, truncated, note: parsed.note }
     }
 
     // 图片

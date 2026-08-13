@@ -16,6 +16,7 @@ import {
 import {
   PlusOutlined, DeleteOutlined, EditOutlined, BarChartOutlined,
   CheckCircleOutlined, ClockCircleOutlined, WarningOutlined, ArrowLeftOutlined,
+  ImportOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useAppStore } from '../stores/useProjectStore'
@@ -49,6 +50,9 @@ export default function ProgressView() {
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('gantt')
   const [yearMonth, setYearMonth] = useState(dayjs().format('YYYY-MM'))
+  const [importing, setImporting] = useState(false)
+  const [importSource, setImportSource] = useState('')
+  const [importNodes, setImportNodes] = useState<any[]>([])
 
   // 编辑弹窗
   const [editing, setEditing] = useState<ProgressNode | 'new' | null>(null)
@@ -96,6 +100,49 @@ export default function ProgressView() {
       name: '', plan_start: yearMonth + '-01', plan_end: yearMonth + '-15',
       actual_start: '', actual_end: '', progress_percent: 0, weight: 1,
     })
+  }
+
+  const handleImportProgress = async () => {
+    if (!window.electronAPI || !projectPath) return
+    const files = await window.electronAPI.selectFiles()
+    const filePath = files?.find(file => /\.(xlsx|xls)$/i.test(file))
+    if (!filePath) {
+      if (files?.length) message.warning('请选择 Excel 进度表（.xlsx 或 .xls）')
+      return
+    }
+    setImporting(true)
+    try {
+      const result = await window.electronAPI.parseMaterial({ filePath })
+      if (!result.success) throw new Error(result.error || '资料解析失败')
+      if (!result.progressCandidates?.length) {
+        message.warning('未识别到进度表头。请确认包含“节点/工作内容、计划日期或完成率”等列。')
+        return
+      }
+      setImportSource(filePath)
+      setImportNodes(result.progressCandidates.map((node: any, index: number) => ({ ...node, key: `${index}` })))
+    } catch (e: any) {
+      message.error('解析失败：' + e.message)
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const confirmImportProgress = async () => {
+    const selected = importNodes.filter(node => node.selected !== false).map(({ key, selected, source, ...node }) => node)
+    if (!selected.length) {
+      message.warning('请至少保留一个进度节点')
+      return
+    }
+    try {
+      const result = await window.electronAPI.importProgressMaterial({ projectPath, nodes: selected, sourceFile: importSource })
+      if (!result.success) throw new Error(result.error || '导入失败')
+      message.success(`已确认并写入 ${result.count} 个进度节点`)
+      setImportNodes([])
+      setImportSource('')
+      refresh()
+    } catch (e: any) {
+      message.error('导入失败：' + e.message)
+    }
   }
 
   const handleEdit = (node: any) => {
@@ -309,9 +356,10 @@ export default function ProgressView() {
             <BarChartOutlined /> 进度控制 · {projectName}
           </Title>
         </Space>
-        <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-          新增节点
-        </Button>
+        <Space>
+          <Button icon={<ImportOutlined />} loading={importing} onClick={handleImportProgress}>导入进度表</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>新增节点</Button>
+        </Space>
       </div>
 
       {/* 偏差概览 */}
@@ -513,6 +561,34 @@ export default function ProgressView() {
             </Col>
           </Row>
         </Space>
+      </Modal>
+
+      <Modal
+        open={importNodes.length > 0}
+        title="确认导入进度节点"
+        width={960}
+        okText="确认写入台账"
+        cancelText="取消"
+        onCancel={() => { setImportNodes([]); setImportSource('') }}
+        onOk={confirmImportProgress}
+      >
+        <Alert type="info" showIcon style={{ marginBottom: 12 }} message="仅勾选并确认的节点才会写入项目进度台账，并作为后续周报、月报的可追溯数据源。" description={importSource ? `来源：${importSource}` : undefined} />
+        <Table
+          size="small"
+          rowKey="key"
+          pagination={{ pageSize: 8 }}
+          dataSource={importNodes}
+          rowSelection={{ selectedRowKeys: importNodes.filter(n => n.selected !== false).map(n => n.key), onChange: keys => setImportNodes(nodes => nodes.map(node => ({ ...node, selected: keys.includes(node.key) }))) }}
+          columns={[
+            { title: '节点', dataIndex: 'name' },
+            { title: '计划开始', dataIndex: 'plan_start', width: 110 },
+            { title: '计划结束', dataIndex: 'plan_end', width: 110 },
+            { title: '实际开始', dataIndex: 'actual_start', width: 110 },
+            { title: '实际结束', dataIndex: 'actual_end', width: 110 },
+            { title: '完成率', dataIndex: 'progress_percent', width: 80, render: (value: number) => `${value}%` },
+            { title: '来源位置', dataIndex: 'source', width: 130 },
+          ]}
+        />
       </Modal>
     </div>
   )

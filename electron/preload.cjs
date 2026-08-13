@@ -70,6 +70,8 @@ const api = {
   progressGantt: (options) => ipcRenderer.invoke('progress:gantt', options),
   progressMonthlyCompare: (options) => ipcRenderer.invoke('progress:monthlyCompare', options),
   progressDeviation: (projectPath) => ipcRenderer.invoke('progress:deviation', projectPath),
+  parseMaterial: (options) => ipcRenderer.invoke('material:parse', options),
+  importProgressMaterial: (options) => ipcRenderer.invoke('material:importProgress', options),
 
   // 投资控制（B5）
   paymentList: (projectPath) => ipcRenderer.invoke('payment:list', projectPath),

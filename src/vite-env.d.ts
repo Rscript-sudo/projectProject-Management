@@ -223,6 +223,8 @@ export interface ElectronAPI {
   progressGantt: (options: { projectPath: string; yearMonth?: string }) => Promise<any>
   progressMonthlyCompare: (options: { projectPath: string; yearMonth: string }) => Promise<any>
   progressDeviation: (projectPath: string) => Promise<any>
+  parseMaterial: (options: { filePath: string }) => Promise<{ success: boolean; fileName?: string; ext?: string; type?: string; text?: string; note?: string; truncated?: boolean; progressCandidates?: any[]; error?: string }>
+  importProgressMaterial: (options: { projectPath: string; nodes: any[]; sourceFile?: string }) => Promise<{ success: boolean; count?: number; ids?: number[]; error?: string }>
 
   // 投资控制（B5）
   paymentList: (projectPath: string) => Promise<any[]>

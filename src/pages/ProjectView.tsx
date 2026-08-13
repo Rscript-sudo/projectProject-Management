@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Typography, Input, Button, Space, Spin, Modal, Form, Select, Tag, App, Dropdown, Tooltip, Checkbox, Popover } from 'antd'
-import { SendOutlined, RobotOutlined, FileTextOutlined, SaveOutlined, ReloadOutlined, FilePdfOutlined, SettingOutlined, FolderOpenOutlined, HomeOutlined, EditOutlined, CloseOutlined, SearchOutlined, BookOutlined, EyeOutlined, ControlOutlined } from '@ant-design/icons'
+import { SendOutlined, RobotOutlined, FileTextOutlined, SaveOutlined, ReloadOutlined, FilePdfOutlined, SettingOutlined, FolderOpenOutlined, HomeOutlined, EditOutlined, CloseOutlined, SearchOutlined, BookOutlined, EyeOutlined, ControlOutlined, DownOutlined } from '@ant-design/icons'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
 import { identifyDocType, identifyMode, buildChatPrompt, inferDataTools, postProcessTimeFields, postProcessFabricationGuard, sanitizeUnsupportedLogParticipants, generateFileName, getDocSavePath, providerConfigs, buildDocPrompt, callAI, extractSubject, stripCalibrationStatement, sanitizeFieldValue, sanitizeLetterStyle } from '../services/aiService'
@@ -75,7 +75,8 @@ export default function ProjectView() {
 
   const selectWritingDocument = (docType: string) => {
     setActiveDocumentType(docType)
-    setRightPanelTab('rules')
+    // 选文种后仍展示文档预览；扩写规则仅在用户主动打开“扩写规则”或点击“调整”时显示。
+    setRightPanelTab('preview')
     setWritingSetupOpen(false)
     setInput(previous => {
       const prefix = `写${docType}：`
@@ -1167,41 +1168,10 @@ export default function ProjectView() {
 
         {/* 输入区域 */}
         <div style={{
-          padding: '12px 16px',
+          padding: '10px 14px 12px',
           borderTop: '1px solid #f0f0f0',
-          background: '#fafafa',
+          background: '#f7f9fc',
         }}>
-          {/* 文书设置默认隐藏，避免输入区被规则占满；点击后以紧凑浮层调整。 */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
-            <Text type="secondary" style={{ fontSize: 11 }}>输入现场事实、事项或具体要求，AI 将按当前项目资料生成。</Text>
-            <Popover
-              trigger="click"
-              placement="topRight"
-              open={writingSetupOpen}
-              onOpenChange={setWritingSetupOpen}
-              content={<div style={{ width: 360 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <Text strong style={{ fontSize: 12 }}>文书设置</Text>
-                  <Button type="link" size="small" style={{ padding: 0, height: 20, fontSize: 11 }} onClick={() => { setConfigModalOpen(true); setWritingSetupOpen(false) }}>项目资料</Button>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
-                  {WRITING_DOCUMENT_TYPES.map(docType => <Tag key={docType} color={docType === activeDocumentType ? 'blue' : undefined} onClick={() => selectWritingDocument(docType)} style={{ margin: 0, cursor: 'pointer', fontSize: 11 }}>{docType}</Tag>)}
-                </div>
-                {activeDocumentType ? <>
-                  <div style={{ padding: '5px 7px', marginBottom: 7, background: '#fafafa', color: '#777', fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>已读取：{projectConfig.projectType || '未分类'}{projectConfig.projectTags?.length ? ` · ${projectConfig.projectTags.join('、')}` : ''}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                    {activeRulePacks.slice(0, 5).map(pack => <Tag color="blue" key={pack.id} style={{ margin: 0, fontSize: 10 }}>{pack.minWords ? `≥${pack.minWords}字 · ` : ''}{pack.label}</Tag>)}
-                    <Button type="link" size="small" style={{ padding: 0, height: 18, fontSize: 11 }} onClick={() => { setRightPanelTab('rules'); setWritingSetupOpen(false) }}>详细调整</Button>
-                  </div>
-                </> : <Text type="secondary" style={{ fontSize: 11 }}>请选择文种，自动加载对应规则。</Text>}
-              </div>}
-            >
-              <Button size="small" type={activeDocumentType ? 'default' : 'primary'} icon={<ControlOutlined />} style={{ fontSize: 11 }}>
-                {activeDocumentType || '文书设置'}
-              </Button>
-            </Popover>
-          </div>
-
           {/* 附件项目展示条 */}
           {attachedItems.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
@@ -1233,67 +1203,59 @@ export default function ProjectView() {
           )}
 
           <div style={{
-            display: 'flex',
-            gap: 6,
             background: '#fff',
-            border: '1px solid #e8e8e8',
-            borderRadius: 10,
-            padding: '6px 6px 6px 14px',
-            alignItems: 'flex-end',
+            border: '1px solid #e4e9f0',
+            borderRadius: 12,
+            padding: '7px 8px 7px 12px',
             transition: 'border-color 0.2s',
+            boxShadow: '0 1px 2px rgba(15, 23, 42, 0.02)',
           }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#1677ff' }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e8e8e8' }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#91caff' }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e4e9f0' }}
           >
-            <TextArea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onPressEnter={(e) => { if (!e.shiftKey) { e.preventDefault(); handleSend() } }}
-              placeholder="输入需求：查数据、问规范、写文档…"
-              autoSize={{ minRows: 1, maxRows: 4 }}
-              variant="borderless"
-              style={{ fontSize: 13, padding: 0, resize: 'none' }}
-            />
-            <Dropdown
-              menu={{
-                items: [
-                  { key: 'folder', icon: <FolderOpenOutlined />, label: '选择文件夹' },
-                  { key: 'file', icon: <FileTextOutlined />, label: '选择文件' },
-                ],
-                onClick: ({ key }) => { if (key === 'folder') handleAttachFolder(); else handleAttachFiles() },
-              }}
-              trigger={['click']}
-            >
-              <Button
-                icon={<FolderOpenOutlined />}
-                title="选择文件或文件夹"
-                style={{
-                  height: 34,
-                  width: 34,
-                  borderRadius: 8,
-                  flexShrink: 0,
-                  color: attachedItems.length > 0 ? '#1677ff' : '#bbb',
-                  border: 'none',
-                  background: 'transparent',
-                  fontSize: 14,
-                }}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 26, paddingBottom: 4, borderBottom: '1px solid #f0f2f5' }}>
+              <Text type="secondary" style={{ fontSize: 11 }}>输入现场事实或要求；写文书时请选择文种</Text>
+              <Popover
+                trigger="click"
+                placement="topRight"
+                open={writingSetupOpen}
+                onOpenChange={setWritingSetupOpen}
+                content={<div style={{ width: 300 }}>
+                  <div style={{ marginBottom: 10 }}>
+                    <Text strong style={{ fontSize: 13 }}>写作设置</Text>
+                    <Text type="secondary" style={{ display: 'block', fontSize: 11, marginTop: 1 }}>项目资料已自动读取；这里只设置本次文书的写作方式</Text>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    {WRITING_DOCUMENT_TYPES.map(docType => {
+                      const selected = docType === activeDocumentType
+                      return <Button key={docType} size="small" type={selected ? 'primary' : 'default'} onClick={() => selectWritingDocument(docType)} style={{ height: 30, textAlign: 'left', paddingInline: 9, fontSize: 12 }}>{docType}</Button>
+                    })}
+                  </div>
+                  <div style={{ marginTop: 10, padding: '7px 8px', borderRadius: 6, background: '#f6f8fb', fontSize: 11, color: '#64748b' }}>
+                    {activeDocumentType ? <><div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>适用项目：{projectConfig.projectType || '未分类'}{projectConfig.projectTags?.length ? ` · ${projectConfig.projectTags.join('、')}` : ''}</div><div style={{ marginTop: 3, color: '#1677ff' }}>已启用 {activeRulePacks.length} 条写作规则 <Button type="link" size="small" style={{ padding: '0 0 0 5px', height: 16, fontSize: 11 }} onClick={() => { setRightPanelTab('rules'); setWritingSetupOpen(false) }}>调整</Button></div></> : '不选文种可直接进行资料查询或规范问答。'}
+                  </div>
+                </div>}
+              >
+                <Button size="small" type={activeDocumentType ? 'default' : 'primary'} icon={<ControlOutlined />} style={{ borderRadius: 6, fontSize: 11, height: 25 }}>
+                  {activeDocumentType || '选择文种'} <DownOutlined style={{ fontSize: 9 }} />
+                </Button>
+              </Popover>
+            </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', paddingTop: 6 }}>
+              <TextArea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onPressEnter={(e) => { if (!e.shiftKey) { e.preventDefault(); handleSend() } }}
+                placeholder={activeDocumentType ? `填写${activeDocumentType}的现场事实、事项和要求…` : '输入需求：查数据、问规范、写文档…'}
+                autoSize={{ minRows: 1, maxRows: 4 }}
+                variant="borderless"
+                style={{ fontSize: 13, padding: '2px 0', resize: 'none' }}
               />
-            </Dropdown>
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              onClick={handleSend}
-              loading={loading}
-              style={{
-                height: 34,
-                minWidth: 72,
-                borderRadius: 8,
-                flexShrink: 0,
-                fontSize: 13,
-              }}
-            >
-              发送
-            </Button>
+              <Dropdown menu={{ items: [{ key: 'folder', icon: <FolderOpenOutlined />, label: '选择文件夹' }, { key: 'file', icon: <FileTextOutlined />, label: '选择文件' }], onClick: ({ key }) => { if (key === 'folder') handleAttachFolder(); else handleAttachFiles() } }} trigger={['click']}>
+                <Button icon={<FolderOpenOutlined />} title="选择文件或文件夹" style={{ height: 32, width: 32, borderRadius: 7, flexShrink: 0, color: attachedItems.length > 0 ? '#1677ff' : '#94a3b8', border: 'none', background: 'transparent', fontSize: 14 }} />
+              </Dropdown>
+              <Button type="primary" icon={<SendOutlined />} onClick={handleSend} loading={loading} style={{ height: 32, minWidth: 68, borderRadius: 7, flexShrink: 0, fontSize: 13 }}>发送</Button>
+            </div>
           </div>
         </div>
       </div>
@@ -1407,7 +1369,7 @@ export default function ProjectView() {
                   </div>)}
                 </div>
               })}
-              <Button block size="small" onClick={() => setConfigModalOpen(true)}>补充项目长期要求</Button>
+              <Text type="secondary" style={{ display: 'block', padding: '2px 2px 0', fontSize: 10, lineHeight: 1.45 }}>项目名称、单位、总监及专业标签由左侧「项目配置」统一维护，不在 AI 写作区重复设置。</Text>
             </> : <Button size="small" type="primary" onClick={() => selectWritingDocument('监理日志')}>从监理日志开始</Button>}
           </div> : rightPanelTab === 'preview' ? (
             /* ===== 文档预览 ===== */
@@ -1417,10 +1379,12 @@ export default function ProjectView() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
+                gap: 8,
+                flexWrap: 'wrap',
                 flexShrink: 0,
                 borderBottom: '1px solid #f5f5f5',
               }}>
-                <Space size={4}>
+                <Space size={4} style={{ flexWrap: 'wrap', rowGap: 4 }}>
                   {previewContent && (
                     <Text style={{ fontSize: 12, color: '#888' }}>{previewContent.docType}</Text>
                   )}
@@ -1434,11 +1398,11 @@ export default function ProjectView() {
                     const ok = msgWordCount >= minWords
                     return (
                       <Tag
-                        color={ok ? 'success' : 'error'}
+                        color={ok ? 'success' : 'warning'}
                         style={{ fontSize: 11, lineHeight: '18px', marginLeft: 8 }}
                         title={`当前 ${msgWordCount} 字${minWords > 0 ? `，要求 ≥ ${minWords} 字` : ''}`}
                       >
-                        {ok ? `✓ ${msgWordCount}` : `${msgWordCount}/${minWords}`}
+                        {ok ? `✓ ${msgWordCount}` : `${msgWordCount}/${minWords} 建议`}
                       </Tag>
                     )
                   })()}
@@ -1470,9 +1434,9 @@ export default function ProjectView() {
                         const minWords = Math.max(getMinWordCount(previewContent.docType), getDocumentRuleMinWords(previewContent.docType, projectConfig.documentRules))
                         const insufficient = minWords > 0 && msgWordCount < minWords
                         return (
-                          <Tooltip title={insufficient ? `当前 ${msgWordCount} 字，不足 ${minWords} 字` : undefined}>
-                            <Button type="primary" size="small" icon={<SaveOutlined />} onClick={handleSave} loading={generating} disabled={insufficient}>
-                              {generating ? '保存中...' : (insufficient ? `不足 ${minWords} 字` : '保存')}
+                          <Tooltip title={insufficient ? `当前 ${msgWordCount} 字，建议 ${minWords} 字；可先保存，或在编辑中补充。` : undefined}>
+                            <Button type="primary" size="small" icon={<SaveOutlined />} onClick={handleSave} loading={generating}>
+                              {generating ? '保存中...' : '保存'}
                             </Button>
                           </Tooltip>
                         )
@@ -1602,37 +1566,17 @@ export default function ProjectView() {
                         }}
                       />
                     ) : (
-                      /* 预览模式：格式化展示 */
-                      <div style={{
-                        background: '#fff',
-                        border: '1px solid #e8e8e8',
-                        borderRadius: 8,
-                        padding: 20,
-                        minHeight: 300,
-                        fontSize: 13,
-                        lineHeight: 2,
-                      }}>
-                        {previewContent.content.split('\n').map((line, i) => {
-                          if (!line.trim()) return <div key={i} style={{ height: 8 }} />
-                          const isTitle = /^[一二三四五六七八九十]+[、.]/.test(line.trim())
-                          const isSubTitle = /^[（(][一二三四五六七八九十][）)]/.test(line.trim())
-                          return (
-                            <div key={i} style={{
-                              fontWeight: isTitle ? 600 : isSubTitle ? 500 : 400,
-                              fontSize: isTitle ? 14 : 13,
-                              marginBottom: 4,
-                              color: isTitle ? '#333' : isSubTitle ? '#444' : '#555',
-                            }}>
-                              {line}
-                            </div>
-                          )
-                        })}
-                      </div>
+                      <DocumentLayoutPreview
+                        docType={previewContent.docType}
+                        content={previewContent.content}
+                        projectName={currentProject?.name || ''}
+                        projectConfig={projectConfig}
+                      />
                     )}
 
                     {!editMode && (
                       <div style={{ marginTop: 12, padding: '8px 12px', background: '#f6f8fa', borderRadius: 6, fontSize: 11, color: '#888' }}>
-                        确认无误后点击「保存」
+                        此处按系统交付版式展示字段与正文；空白字段将在生成 Word 时由项目配置、系统编号自动回填，仍为空的字段以待补充状态保留。
                       </div>
                     )}
                   </>
@@ -1896,6 +1840,41 @@ function renderTemplateNode(
 // 去掉末尾的编号后缀（如 "18_通信工程" → 仅用于 Tree 展示）
 function stripLeadingNum(name: string): string {
   return name.replace(/^\d+_/, '')
+}
+
+// 只有模板字段可分段；正文里的【依据：…】、【注意】等是正文内容的一部分。
+// 这与主进程的模板填充规则保持一致，避免右侧预览和实际 Word 出现不同结果。
+function parsePreviewSections(content: string): Record<string, string> {
+  const sections: Record<string, string> = {}
+  const knownKeys = new Set(['项目名称', '文件编号', '致单位', '事由', '主题', '正文内容', '正文', '内容'])
+  const markers = [...String(content || '').matchAll(/【([^】]+)】/g)]
+  for (let index = 0; index < markers.length; index += 1) {
+    const marker = markers[index]
+    const key = marker[1].trim()
+    if (!knownKeys.has(key)) continue
+    const nextField = markers.slice(index + 1).find(item => knownKeys.has(item[1].trim()))
+    const end = nextField ? nextField.index : content.length
+    const value = content.slice(marker.index! + marker[0].length, end).trim()
+    if (value) sections[key] = value
+  }
+  return sections
+}
+
+function DocumentLayoutPreview({ docType, content, projectName, projectConfig }: { docType: string; content: string; projectName: string; projectConfig: { ownerUnit?: string; contractor?: string; supervisorUnit?: string; chiefEngineer?: string } }) {
+  const sections = parsePreviewSections(content)
+  const field = (...keys: string[]) => keys.map(key => sections[key]).find(value => value) || ''
+  const meta = docType === '监理周报' || docType === '监理月报'
+    ? [['项目名称', projectName], ['建设单位', projectConfig.ownerUnit || ''], ['施工单位', projectConfig.contractor || ''], ['监理单位', projectConfig.supervisorUnit || ''], ['总监理工程师', projectConfig.chiefEngineer || '']]
+    : [['项目名称', projectName], ['文件编号', field('文件编号')], ['致单位', field('致单位') || projectConfig.contractor || ''], ['事由', field('事由', '主题')]]
+  const body = field('正文内容', '内容', '正文') || content.replace(/【[^】]+】/g, '').trim()
+  const displayValue = (value: string) => value && !/(数据待核对|签发前请核对)/.test(value) ? value : '待补充'
+  return <div style={{ background: '#fff', border: '1px solid #e1e7ef', borderRadius: 8, minHeight: 300, overflow: 'hidden', boxShadow: '0 1px 3px rgba(15, 23, 42, .03)' }}>
+    <div style={{ padding: '20px 20px 12px', textAlign: 'center', fontSize: 18, fontWeight: 700, letterSpacing: 3, color: '#1f2937' }}>{docType === '整改通知书' ? '监 理 整 改 通 知 书' : docType === '安全通知书' ? '监 理 安 全 通 知 书' : docType}</div>
+    <div style={{ margin: '0 20px', display: 'grid', gridTemplateColumns: '88px minmax(0, 1fr)', border: '1px solid #dfe5ed', fontSize: 12 }}>
+      {meta.flatMap(([label, value]) => [<div key={`${label}-label`} style={{ padding: '7px 8px', background: '#f7f9fc', borderBottom: '1px solid #e8edf3', color: '#64748b', fontWeight: 600 }}>{label}</div>, <div key={`${label}-value`} style={{ padding: '7px 9px', borderBottom: '1px solid #e8edf3', color: value ? '#334155' : '#9aa7b8' }}>{displayValue(value)}</div>])}
+    </div>
+    <div style={{ padding: '16px 20px 22px', fontSize: 13, lineHeight: 2, color: '#374151', whiteSpace: 'pre-wrap' }}>{body || '待补充正文内容'}</div>
+  </div>
 }
 
 /** 轻量 Markdown 渲染 — 将 **粗体**、`代码` 转为 HTML */

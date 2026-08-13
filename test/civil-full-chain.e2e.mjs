@@ -64,6 +64,7 @@ const docs = [
   ['整改通知书', '整改通知', `【事由】五层梁板支撑整改
 【致单位】华建建筑工程有限公司
 【正文内容】一、检查情况
+【依据：现场巡视记录】
 监理人员在3号楼五层梁板模板支撑检查中发现，局部立杆底部垫板设置不连续，部分水平杆连接扣件紧固不足。
 
 二、整改要求
@@ -107,6 +108,28 @@ async function main() {
   assert.equal(config.projectTypeCode, 'civil')
   assert.deepEqual(config.projectTags, profile.projectTags)
 
+  // 实际进度表 → 本地解析 → 用户确认入账 → 实时数据源，覆盖周报/月报的可追溯链路。
+  const xlsxModule = await import('xlsx')
+  const XLSX = xlsxModule.default || xlsxModule
+  const progressFile = path.join(runtimeDir, '八月施工进度表.xlsx')
+  const progressBook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(progressBook, XLSX.utils.aoa_to_sheet([
+    ['任务名称', '计划开始', '计划结束', '实际开始', '实际结束', '完成率', '权重'],
+    ['3号楼五层梁板', '2026-08-01', '2026-08-15', '2026-08-02', '2026-08-16', '100%', 2],
+    ['地下车库顶板防水', '2026-08-10', '2026-08-28', '2026-08-11', '', '40%', 1],
+  ]), '八月计划')
+  XLSX.writeFile(progressBook, progressFile)
+  const parsedProgress = await call('material:parse', { filePath: progressFile })
+  assert.equal(parsedProgress.success, true, parsedProgress.error)
+  assert.equal(parsedProgress.progressCandidates.length, 2)
+  assert.equal(parsedProgress.progressCandidates[1].source, '八月计划!3')
+  const importedProgress = await call('material:importProgress', { projectPath: created.path, nodes: parsedProgress.progressCandidates, sourceFile: progressFile })
+  assert.equal(importedProgress.success, true, importedProgress.error)
+  assert.equal(importedProgress.count, 2)
+  const progressData = await call('data:query', { projectName, toolIds: ['progress_summary'] })
+  assert.equal(progressData.progress_summary.总节点数, 2)
+  assert.equal(progressData.progress_summary.节点详情[1].进度, '40%')
+
   const results = []
   for (const [docType, label, content, min] of docs) {
     const saved = await call('fs:saveDoc', { projectPath: created.path, projectName, docType, userInput: label, customSummary: label, content })
@@ -115,6 +138,10 @@ async function main() {
     if (saved.path.endsWith('.docx')) {
       const body = await xml(saved.path)
       assert.equal(/undefined|null|数据待核对|签发前请核对|项目类型校准声明|━━━━━━━━|\{\{/.test(body), false, `${docType} 交付文件含脏文本`)
+      if (docType === '整改通知书') {
+        assert.ok(body.includes('依据：现场巡视记录'), '整改通知书正文中的依据小标题不得被模板字段解析截断')
+        assert.ok(body.includes('整改期限'), '整改通知书完整正文应写入 Word')
+      }
     }
     results.push({ docType, path: saved.path, ext: path.extname(saved.path) })
   }

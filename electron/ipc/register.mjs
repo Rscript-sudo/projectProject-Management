@@ -15,6 +15,7 @@ import { register as registerDb } from './db.mjs'
 import { register as registerFilename } from './filename.mjs'
 import { register as registerSop } from './sop.mjs'
 import { register as registerUpdate } from './update.mjs'
+import { register as registerMaterial } from './material.mjs'
 
 export function registerAll(ipcMain, mainWindow) {
   registerProject(ipcMain)
@@ -34,4 +35,5 @@ export function registerAll(ipcMain, mainWindow) {
   registerFilename(ipcMain)
   registerSop(ipcMain)
   registerUpdate(ipcMain)
+  registerMaterial(ipcMain)
 }

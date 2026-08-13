@@ -814,7 +814,12 @@ export function identifyMode(input: string): ModeResult {
     // 判断此文档类型是否涉及数据查询（进度报告、月报等）
     const dataKeywords = ['进度', '投资', '合同', '隐患', '付款', '报告', '月报', '周报']
     const needsData = dataKeywords.some(k => input.includes(k) || docResult.type.includes(k))
-    const toolIds = needsData ? inferDataTools(input) : []
+    const reportTools = docResult.type === '监理周报'
+      ? ['progress_summary', 'hazard_open', 'correspondence_recent', 'photo_recent']
+      : docResult.type === '监理月报'
+        ? ['progress_summary', 'hazard_open', 'correspondence_recent', 'photo_recent', 'payment_status', 'contract_overview']
+        : []
+    const toolIds = needsData ? [...new Set([...reportTools, ...inferDataTools(input)])] : []
     return {
       mode: needsData ? 'HYBRID' : 'DOC',
       docType: docResult.type,
@@ -1312,7 +1317,7 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
 
   const templateContract = templateFields.length > 0
     ? `【模板字段契约】本项目当前${docType}模板要求以下字段：${templateFields.map(field => `【${field}】`).join('、')}。
-必须逐项输出；字段无已核验数据时填“数据待核对”，不得输出 undefined、空值、模板符号或自行补造事实。除这些字段外，不要新增会被模板忽略的结构化字段。`
+必须逐项输出；字段无已核验数据时仅输出字段名并留空（例如【建设单位】），不得写“数据待核对”、undefined、模板符号，也不得自行补造事实。除这些字段外，不要新增会被模板忽略的结构化字段。`
     : ''
 
   // 添加项目信息前缀
@@ -1324,10 +1329,10 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
 - 专业标签：${projectInfo.projectTags?.length ? projectInfo.projectTags.join('、') : '未填写'}
 - 项目特点/建设范围：${projectInfo.projectFeatures || '未填写'}
 - 当前阶段：${projectInfo.projectPhase || '未填写'}
-- 建设单位：${projectInfo.ownerUnit || '数据待核对'}
-- 施工单位：${projectInfo.contractor || '数据待核对'}
-- 监理单位：${projectInfo.supervisorUnit || '数据待核对'}
-- 总监理工程师：${projectInfo.chiefEngineer || '数据待核对'}
+- 建设单位：${projectInfo.ownerUnit || '未配置（文书中留空）'}
+- 施工单位：${projectInfo.contractor || '未配置（文书中留空）'}
+- 监理单位：${projectInfo.supervisorUnit || '未配置（文书中留空）'}
+- 总监理工程师：${projectInfo.chiefEngineer || '未配置（文书中留空）'}
 ` : ''
   const documentRulesInjection = buildDocumentRulesInjection(docType, normalizeDocumentRules(projectInfo?.documentRules))
 
