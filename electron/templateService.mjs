@@ -7,6 +7,7 @@
 
 import path from 'path'
 import fs from 'fs'
+import { findForbiddenTerms } from '../src/shared/projectProfile.mjs'
 import { fileURLToPath } from 'url'
 import { getKnownAliases, EXPECTED_PLACEHOLDER_RE } from './placeholderScan.mjs'
 
@@ -82,6 +83,53 @@ const DOC_TYPE_DIR_MAP = {
   '通用文档': null,
 }
 
+// 同一目录内存在多个相近文种时，不能依赖文件系统遍历顺序。
+// 例如“监理规划”和“监理细则”必须各自选用对应底稿。
+const DOC_TYPE_TEMPLATE_HINTS = {
+  '监理规划': ['监理规划模版.docx', '监理规划(模板).docx', '信息化项目监理规划通用模板.docx'],
+  '监理细则': ['监理实施细则模版.docx', '信息化项目监理实施细则通用模板.docx'],
+}
+
+function selectTemplateFile(files, docType, expectedExtension) {
+  const candidates = files.filter(name => name.toLowerCase().endsWith(expectedExtension) && !name.startsWith('~$') && !name.startsWith('.~'))
+  const hints = DOC_TYPE_TEMPLATE_HINTS[docType] || []
+  return hints.find(name => candidates.includes(name)) || candidates[0]
+}
+
+/**
+ * 列出随应用交付的只读企业基础模板。
+ * 它们是企业模板体系的底座；用户导入的企业共享模板会在生成时覆盖它们。
+ */
+export async function listSystemTemplates(templatesDir) {
+  const entries = []
+  for (const [docType, dirName] of Object.entries(DOC_TYPE_DIR_MAP)) {
+    if (!dirName) continue
+    const dirPath = path.join(templatesDir, dirName)
+    if (!fs.existsSync(dirPath)) continue
+    let config = {}
+    const configPath = path.join(dirPath, 'config.json')
+    if (fs.existsSync(configPath)) {
+      try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')) } catch {}
+    }
+    const expectedExtension = config.engine === 'xlsx' ? '.xlsx' : '.docx'
+    const file = selectTemplateFile(fs.readdirSync(dirPath), docType, expectedExtension)
+    if (!file) continue
+    const templatePath = path.join(dirPath, file)
+    entries.push({
+      id: `system:${docType}`,
+      name: `${docType}（系统预置）`,
+      docType,
+      scope: 'system',
+      projectType: '通用',
+      sourceName: file,
+      path: templatePath,
+      fields: await getTemplatePlaceholders(templatePath),
+      readOnly: true,
+    })
+  }
+  return entries
+}
+
 /**
  * 查找文档类型的模板文件
  * @param {string} templatesDir - 模板根目录
@@ -90,11 +138,6 @@ const DOC_TYPE_DIR_MAP = {
  */
 export function findTemplate(templatesDir, docType, options = {}) {
   const dirName = DOC_TYPE_DIR_MAP[docType]
-  const overridePath = options.templateOverride?.path
-  const hasOverride = overridePath && fs.existsSync(overridePath) && path.extname(overridePath).toLowerCase() === '.docx'
-  // 自定义模板优先于系统映射；这样没有内置模板的新文种也可由企业模板库直接支持。
-  if (!dirName && !hasOverride) return null
-
   const dirPath = dirName ? path.join(templatesDir, dirName) : null
 
   // 读取 config.json
@@ -108,11 +151,17 @@ export function findTemplate(templatesDir, docType, options = {}) {
     }
   }
 
-  // 查找 .docx 模板文件（排除 macOS 临时文件和备份文件）
+  const expectedExtension = config.engine === 'xlsx' ? '.xlsx' : '.docx'
+  const overridePath = options.templateOverride?.path
+  const hasOverride = overridePath && fs.existsSync(overridePath) && path.extname(overridePath).toLowerCase() === expectedExtension
+  // 自定义模板优先于系统映射；这样没有内置模板的新文种也可由企业模板库直接支持。
+  if (!dirName && !hasOverride) return null
+
+  // 查找与该文种渲染引擎一致的模板文件（排除 macOS 临时文件和备份文件）
   const files = dirPath && fs.existsSync(dirPath) ? fs.readdirSync(dirPath) : []
-  const tmplFile = files.find(f => f.endsWith('.docx') && !f.startsWith('~$') && !f.startsWith('.~'))
+  const tmplFile = selectTemplateFile(files, docType, expectedExtension)
   if (!tmplFile && !hasOverride) {
-    console.error('[templateService] No .docx file found in', dirPath)
+    console.error(`[templateService] No ${expectedExtension} file found in`, dirPath)
     return null
   }
 
@@ -241,16 +290,21 @@ const PROJECT_TYPE_FORBIDDEN_TERMS = {
 }
 
 export function sanitizeForbiddenTerms(value, projectType) {
-  if (!value || typeof value !== 'string' || !projectType) return value
-  const forbidden = PROJECT_TYPE_FORBIDDEN_TERMS[projectType]
-  if (!forbidden) return value
-  let v = value
-  for (const term of forbidden) {
-    if (v.includes(term)) {
-      v = v.replace(new RegExp(term, 'g'), `{{待替换：${term}（${projectType}项目禁用）}}`)
-    }
+  // 保留预览层醒目提示；正式件在 doc.mjs 中先硬拦截原文，因此该占位符不会落盘。
+  if (!value || typeof value !== 'string') return value
+  let result = value
+  for (const term of findForbiddenTerms(value, projectType)) {
+    result = result.replace(new RegExp(term, 'g'), `{{待替换：${term}（${projectType}项目禁用）}}`)
   }
-  return v
+  return result
+}
+
+export function validateDeliverableContent(value, projectType) {
+  const text = String(value || '')
+  const invalidMarkers = ['undefined', 'null', '{{待替换', '{{待补充', '{{待清理', '数据待核对', '签发前请核对', '项目类型校准声明', '📋', '━━━━━━━━']
+  const markers = invalidMarkers.filter(marker => text.includes(marker))
+  const forbiddenTerms = findForbiddenTerms(text, projectType)
+  return { valid: markers.length === 0 && forbiddenTerms.length === 0, markers, forbiddenTerms }
 }
 
 /**
@@ -378,7 +432,32 @@ export async function renderTemplate(templatePath, data) {
   // 读取模板文件
   const tmplContent = fs.readFileSync(templatePath, 'binary')
   const zip = new PizZip(tmplContent)
-  const templateXml = zip.file('word/document.xml')?.asText() || ''
+  let templateXml = zip.file('word/document.xml')?.asText() || ''
+  // 周报未提供现场照片时，不得保留“影像资料”空白整页和蓝色表格。
+  // 这是模板级可交付规则：有真实照片字段才保留附录；没有就完全移除。
+  const photoKeys = ['图1路径', '图2路径', '图3路径', '图4路径']
+  const hasPhoto = photoKeys.some(key => {
+    const value = String(data[key] || '').trim()
+    return value && value !== '数据待核对' && value !== '签发前请核对'
+  })
+  if (!hasPhoto && templateXml.includes('附录：本周现场影像资料记录')) {
+    const appendixIndex = templateXml.indexOf('附录：本周现场影像资料记录')
+    const prefix = templateXml.slice(0, appendixIndex)
+    const paragraphStarts = [...prefix.matchAll(/<w:p(?:\s[^>]*)?>/g)]
+    const paragraphStart = paragraphStarts.at(-1)?.index ?? -1
+    const tableStart = templateXml.indexOf('<w:tbl', appendixIndex)
+    const tableEnd = templateXml.indexOf('</w:tbl>', tableStart)
+    if (paragraphStart >= 0 && tableStart >= 0 && tableEnd >= 0) {
+      templateXml = templateXml.slice(0, paragraphStart) + templateXml.slice(tableEnd + '</w:tbl>'.length)
+    }
+    zip.file('word/document.xml', templateXml)
+  }
+  if (!hasPhoto) {
+    // buildPlaceholderData 的 config 默认值会先写入“数据待核对”，这里必须覆盖为空。
+    for (const key of ['图1路径', '图1说明', '图2路径', '图2说明', '图3路径', '图3说明', '图4路径', '图4说明']) {
+      data[key] = ''
+    }
+  }
   // 模板可由项目自行替换，字段集合不能再靠全局 config 假定。
   // 未提供的字段必须显式标记待核对，不能让 docxtemplater 输出 undefined。
   for (const key of new Set([...templateXml.matchAll(/\{\{([^}]{1,80})\}\}/g)].map(m => m[1].trim()))) {
@@ -439,6 +518,136 @@ export async function renderTemplate(templatePath, data) {
   return buffer
 }
 
+// =============================================================================
+// 系统正式件版式
+// =============================================================================
+// 旧版 Word 模板大多用固定高度表格承载长正文；正文虽已替换，实际打开时会
+// 产生空白页、截断或字体缺失。系统预置模板改由这里的结构化版式输出：
+// 占位符数据仍是唯一内容来源，但长内容只落在可自然分页的段落中。
+// 项目模板/企业模板不会走此分支，仍由 renderTemplate 保持原样渲染。
+const STRUCTURED_SYSTEM_DOC_TYPES = new Set([
+  '监理日志', '监理周报', '监理月报', '整改通知书', '安全通知书', '工程联系单', '进度分析报告',
+])
+
+export function supportsStructuredSystemLayout(docType) {
+  return STRUCTURED_SYSTEM_DOC_TYPES.has(docType)
+}
+
+// 系统正式件不允许把关键段落默认为“—”后继续出厂。
+// 自定义项目/企业模板仍可按自身字段配置；本规则只约束系统交付版。
+const STRUCTURED_REQUIRED_FIELDS = {
+  '监理日志': ['施工部位', '参与人员', '今日内容', '核心工作落实', '协调解决情况', '其他事项'],
+  '监理周报': ['日期范围', '周数', '形象进度说明', '周进度详情', '安全质量描述', '存在问题', '下周计划', '监理建议'],
+  '监理月报': ['日期范围', '月份', '形象进度说明', '本月进度详情', '本月质量描述', '本月安全描述', '存在问题', '监理履职情况', '下月计划'],
+  '进度分析报告': ['报告期', '总体进度', '进度偏差', '偏差原因', '风险提示', '建议措施', '下月计划'],
+  '整改通知书': ['致单位', '事由', '正文内容'],
+  '安全通知书': ['致单位', '事由', '正文内容'],
+  '工程联系单': ['致单位', '主题', '正文内容'],
+}
+
+export function validateStructuredSystemData(docType, data) {
+  const required = STRUCTURED_REQUIRED_FIELDS[docType] || []
+  const missing = required.filter(key => !String(data[key] ?? '').trim())
+  return { valid: missing.length === 0, missing }
+}
+
+function splitDocumentParagraphs(value) {
+  return String(value || '')
+    .replace(/\r\n?/g, '\n')
+    .split(/\n{2,}/)
+    .map(item => item.trim())
+    .filter(Boolean)
+}
+
+/** 生成系统预置模板的可签发 DOCX；仅使用结构化占位字段，不混入任何 AI 校准信息。 */
+export async function renderStructuredSystemDocument(docType, data) {
+  const docx = await import('docx')
+  const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, VerticalAlign, PageNumber, BorderStyle } = docx
+  const page = { top: 1985, bottom: 1701, left: 1587, right: 1474 }
+  const font = 'Songti SC'
+  const titleFont = 'Heiti SC'
+  const value = (key) => String(data[key] ?? '').trim()
+  const body = (text) => splitDocumentParagraphs(text).map(item => new Paragraph({
+    children: [new TextRun({ text: item, font, size: 24 })],
+    alignment: AlignmentType.JUSTIFIED,
+    indent: { firstLine: 480 },
+    spacing: { line: 360, after: 120 },
+  }))
+  const heading = (text, level = 1) => new Paragraph({
+    children: [new TextRun({ text, font: level === 1 ? titleFont : font, size: level === 1 ? 28 : 24, bold: level === 1 })],
+    spacing: { before: level === 1 ? 260 : 160, after: 120 },
+    keepNext: true,
+  })
+  const title = (text) => new Paragraph({
+    children: [new TextRun({ text, font: titleFont, size: 36, bold: true })],
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 280 },
+  })
+  // A4 正文可用宽度为 9360 DXA。必须写明每个单元格的 DXA 宽度，不能用
+  // 百分比或固定行高：WPS/Word 对百分比序列化的兼容性不同，曾导致内容重叠。
+  const META_LABEL_WIDTH = 1760
+  const META_VALUE_WIDTH = 2920
+  const cell = (text, width, isLabel = false) => new TableCell({
+    verticalAlign: VerticalAlign.CENTER,
+    margins: { top: 90, bottom: 90, left: 120, right: 120 },
+    width: { size: width, type: WidthType.DXA },
+    children: [new Paragraph({ children: [new TextRun({ text: text || '—', font, size: 21, bold: isLabel })], alignment: isLabel ? AlignmentType.CENTER : AlignmentType.LEFT })],
+  })
+  const meta = (pairs) => new Table({
+    width: { size: 9360, type: WidthType.DXA },
+    borders: { top: { style: BorderStyle.SINGLE, size: 4, color: '666666' }, bottom: { style: BorderStyle.SINGLE, size: 4, color: '666666' }, left: { style: BorderStyle.SINGLE, size: 4, color: '666666' }, right: { style: BorderStyle.SINGLE, size: 4, color: '666666' }, insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: '999999' }, insideVertical: { style: BorderStyle.SINGLE, size: 4, color: '999999' } },
+    rows: pairs.map(row => new TableRow({ children: [
+      cell(row[0], META_LABEL_WIDTH, true),
+      cell(row[1], META_VALUE_WIDTH),
+      cell(row[2], META_LABEL_WIDTH, true),
+      cell(row[3], META_VALUE_WIDTH),
+    ] })),
+  })
+  const children = []
+  const appendSections = (sections) => {
+    for (const [label, content] of sections) {
+      if (!String(content || '').trim()) continue
+      children.push(heading(label))
+      children.push(...body(content))
+    }
+  }
+
+  if (docType === '监理日志') {
+    children.push(title('监 理 日 志'))
+    children.push(meta([['项目名称', value('项目名称'), '日期', value('日期')], ['施工部位', value('施工部位'), '天气/气温', [value('天气'), value('气温')].filter(Boolean).join(' / ')]]))
+    appendSections([['一、参与人员', value('参与人员')], ['二、当日监理工作', value('今日内容')], ['三、核心工作落实', value('核心工作落实')], ['四、问题及协调处理', value('协调解决情况')], ['五、其他事项及次日计划', value('其他事项')]])
+  } else if (docType === '监理周报') {
+    children.push(title('监 理 周 报'))
+    children.push(meta([['项目名称', value('项目名称'), '报告期', value('日期范围')], ['周次', value('周数'), '报告日期', value('日期')], ['建设单位', value('甲方单位'), '施工单位', value('乙方单位')], ['监理单位', value('监理单位'), '总监理工程师', value('总监姓名')]]))
+    appendSections([['一、本周形象进度', value('形象进度说明')], ['二、本周工作开展情况', value('周进度详情')], ['（一）集采材料与设备', value('集采部分内容')], ['（二）非集采材料与设备', value('非集采部分内容')], ['（三）到货与安装统计', value('到货安装统计')], ['三、质量安全管控', value('安全质量描述')], ['四、存在问题及处理情况', value('存在问题')], ['五、下周工作计划', value('下周计划')], ['六、监理建议', value('监理建议')]])
+  } else if (docType === '监理月报') {
+    children.push(title('监 理 月 报'))
+    children.push(meta([['项目名称', value('项目名称'), '报告期', value('日期范围')], ['月份', value('月份'), '报告日期', value('日期')], ['建设单位', value('甲方单位'), '施工单位', value('乙方单位')], ['监理单位', value('监理单位'), '总监理工程师', value('总监姓名')]]))
+    appendSections([['一、项目概况及本月综述', value('形象进度说明')], ['二、本月进度管理', value('本月进度详情')], ['三、工程量及累计完成情况', [value('本月完成工程量'), value('累计完成情况'), value('到货安装统计')].filter(Boolean).join('\n\n')], ['四、投资完成情况', value('本月投资情况')], ['五、质量管理情况', value('本月质量描述')], ['六、安全管理情况', value('本月安全描述')], ['七、问题及监理履职情况', [value('存在问题'), value('监理履职情况')].filter(Boolean).join('\n\n')], ['八、监理建议及下月计划', [value('监理建议'), value('下月计划')].filter(Boolean).join('\n\n')]])
+  } else if (docType === '进度分析报告') {
+    children.push(title('项目进度分析报告'))
+    children.push(meta([['项目名称', value('项目名称'), '项目代码', value('项目代码')], ['报告期', value('报告期'), '报告日期', value('报告日期')], ['监理单位', value('监理单位'), '编制人', value('编制人')]]))
+    appendSections([['一、总体进度概况', value('总体进度')], ['二、进度偏差分析', [value('进度偏差'), value('偏差原因')].filter(Boolean).join('\n\n')], ['三、风险提示', value('风险提示')], ['四、建议措施', value('建议措施')], ['五、下月工作计划', value('下月计划')]])
+  } else {
+    const documentTitle = docType === '整改通知书' ? '监理整改通知书' : docType === '安全通知书' ? '监理安全通知书' : '工程联系单'
+    children.push(title(documentTitle))
+    children.push(meta([['项目名称', value('项目名称'), '文件编号', value('文件编号')], ['致单位', value('致单位'), '日期', value('日期')], ['事由', value('事由') || value('主题'), '监理单位', value('监理单位')]]))
+    children.push(...body(value('正文内容') || value('内容') || value('正文')))
+    children.push(new Paragraph({ children: [new TextRun({ text: value('监理单位') || '监理机构', font, size: 24 })], alignment: AlignmentType.RIGHT, spacing: { before: 260 } }))
+    children.push(new Paragraph({ children: [new TextRun({ text: value('日期'), font, size: 24 })], alignment: AlignmentType.RIGHT }))
+  }
+
+  const document = new Document({
+    styles: { default: { document: { run: { font, size: 24 } } } },
+    sections: [{
+      properties: { page: { margin: page } },
+      footers: { default: new docx.Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: '第 ', font, size: 18 }), new TextRun({ children: [PageNumber.CURRENT], font, size: 18 }), new TextRun({ text: ' 页', font, size: 18 })] })] }) },
+      children,
+    }],
+  })
+  return Packer.toBuffer(document)
+}
+
 /**
  * 渲染 xlsx 模板 — 将占位符数据写入 xlsx 单元格
  * 使用 xlsx (SheetJS) 库，根据 config.json 中的单元格映射写入值
@@ -489,12 +698,14 @@ export async function renderXlsxTemplate(templatePath, data, cellMappings) {
 // =============================================================================
 
 const STYLE_MAP = {
-  h1:      { font: '黑体',         sz: 30, bold: false, align: 'left',    firstLine: 0    },
-  h2:      { font: '楷体_GB2312', sz: 32, bold: true,  align: 'left',    firstLine: 0    },
-  h3:      { font: '仿宋_GB2312', sz: 32, bold: false, align: 'left',    firstLine: 0    },
-  h4:      { font: '仿宋_GB2312', sz: 32, bold: false, align: 'left',    firstLine: 0    },
-  body:    { font: '仿宋_GB2312', sz: 32, bold: false, align: 'justify', firstLine: 640  },
-  closing: { font: '仿宋_GB2312', sz: 32, bold: false, align: 'right',   firstLine: 0    },
+  // 使用 macOS 自带中文字体。此前模板中的“仿宋_GB2312/黑体/楷体_GB2312”
+  // 在未安装 Office 字体的 Mac 上会被 LibreOffice/预览器渲染为方框，无法交付。
+  h1:      { font: 'Heiti SC', sz: 30, bold: false, align: 'left',    firstLine: 0    },
+  h2:      { font: 'Kaiti SC',  sz: 32, bold: true,  align: 'left',    firstLine: 0    },
+  h3:      { font: 'Songti SC', sz: 32, bold: false, align: 'left',    firstLine: 0    },
+  h4:      { font: 'Songti SC', sz: 32, bold: false, align: 'left',    firstLine: 0    },
+  body:    { font: 'Songti SC', sz: 32, bold: false, align: 'justify', firstLine: 640  },
+  closing: { font: 'Songti SC', sz: 32, bold: false, align: 'right',   firstLine: 0    },
 }
 
 // GB/T 9704-2012 A4 页边距（单位：twips，1cm ≈ 567 twips）
@@ -620,6 +831,21 @@ export async function formatDocx(docxPath, templateUsed = true) {
 
   try {
     const zip = new PizZip(fs.readFileSync(docxPath))
+    // 字体定义既可能写在正文 run 中，也可能留在 styles/theme/header/footer。
+    // 仅改 document.xml 会让 LibreOffice/WPS 仍按模板中的 Windows 专有字体渲染，
+    // 出现中文缺字（方框）。对所有 Word XML 部件做同一兼容替换。
+    const normalizeFonts = (partXml) => partXml
+      .replaceAll('仿宋_GB2312', 'Songti SC')
+      .replaceAll('方正小标宋简体', 'Songti SC')
+      .replaceAll('黑体', 'Heiti SC')
+      .replaceAll('楷体_GB2312', 'Kaiti SC')
+
+    for (const fileName of Object.keys(zip.files)) {
+      if (!/^word\/(?:document|styles|header\d+|footer\d+|theme\/theme\d+)\.xml$/.test(fileName)) continue
+      const part = zip.file(fileName)
+      if (part) zip.file(fileName, normalizeFonts(part.asText()))
+    }
+
     const docFile = zip.file('word/document.xml')
     if (!docFile) {
       console.warn('[formatDocx] word/document.xml not found in', docxPath)
@@ -627,6 +853,10 @@ export async function formatDocx(docxPath, templateUsed = true) {
     }
 
     let xml = docFile.asText()
+
+    // 将系统模板中只在 Windows Office 上可用的旧字体，统一替换为本机可用字体。
+    // 保留字号、加粗、对齐和版式，仅做字体兼容性处理。
+    xml = normalizeFonts(xml)
 
     // === 1. 模板路径：只格式化含 <w:br/> 的段落（即 {{正文内容}} 产物）===
     //     有 <w:br/> → 分段检测（按 <w:br/> 分组，每行独立识别标题/正文）
@@ -657,7 +887,7 @@ export async function formatDocx(docxPath, templateUsed = true) {
     if (!templateUsed) {
       xml = xml.replace(/<w:r>([\s\S]*?)<\/w:r>/g, (match, inner) => {
         if (/<w:rPr>/.test(inner)) return match
-        return '<w:r><w:rPr><w:rFonts w:ascii="仿宋_GB2312" w:hAnsi="仿宋_GB2312" w:eastAsia="仿宋_GB2312"/><w:sz w:val="32"/><w:szCs w:val="32"/></w:rPr>' + inner + '</w:r>'
+        return '<w:r><w:rPr><w:rFonts w:ascii="Songti SC" w:hAnsi="Songti SC" w:eastAsia="Songti SC"/><w:sz w:val="32"/><w:szCs w:val="32"/></w:rPr>' + inner + '</w:r>'
       })
     }
 

@@ -9,6 +9,7 @@ import { isPathSafe } from './file.mjs'
 import { safeCall } from './safe.mjs'
 import { scanForLeftoverPlaceholders } from '../placeholderScan.mjs'
 import { getMinWordCount, countEffectiveWords } from './docValidation.mjs'
+import { getDocumentRuleMinWords } from '../../src/shared/documentRules.mjs'
 // v1.2.0：主进程接入反编造铁律后处理（单一真相源：electron/shared/postProcess.mjs）
 import { postProcessTimeFields, postProcessFabricationGuard } from '../shared/postProcess.mjs'
 
@@ -36,8 +37,24 @@ export function register(ipcMain) {
     }
     content = _processedContent
 
+    // 正式件硬门禁：不允许把未核验字段、旧校准块或跨专业术语写进 Word。
+    const { validateDeliverableContent } = await import('../templateService.mjs')
+    let preSaveConfig = {}
+    const preSaveConfigPath = path.join(getProjectDataPath(projectName), 'project.config.json')
+    if (fs.existsSync(preSaveConfigPath)) {
+      try { preSaveConfig = JSON.parse(fs.readFileSync(preSaveConfigPath, 'utf8')) } catch {}
+    }
+    const deliverableCheck = validateDeliverableContent(content, preSaveConfig.projectTypeCode || preSaveConfig.projectType)
+    if (!deliverableCheck.valid) {
+      const reasons = [
+        deliverableCheck.markers.length ? `未清理内容：${deliverableCheck.markers.join('、')}` : '',
+        deliverableCheck.forbiddenTerms.length ? `不适用专业术语：${deliverableCheck.forbiddenTerms.join('、')}` : '',
+      ].filter(Boolean).join('；')
+      return { success: false, error: `未通过正式件校验：${reasons}。请修订后再保存。` }
+    }
+
     // v1.0.0：入口字数硬校验（早于占位符扫描，来源：02_AI扩写型.md 第 81 行 ≥ 800 字）
-    const minWords = getMinWordCount(docType)
+    const minWords = Math.max(getMinWordCount(docType), getDocumentRuleMinWords(docType, preSaveConfig.documentRules))
     const actualWords = countEffectiveWords(content || '')
     if (minWords > 0 && actualWords < minWords) {
       return {
@@ -87,7 +104,7 @@ export function register(ipcMain) {
     console.log('[saveDoc] Saving:', { docType, projectName, fileName: finalFileName, subDir: finalSubDir, ...(filenameMeta || {}) })
 
     const templatesDir = getTemplatesDir()
-    const { findTemplate, buildPlaceholderData, renderTemplate, renderXlsxTemplate, formatDocx } = await import('../templateService.mjs')
+    const { findTemplate, buildPlaceholderData, renderTemplate, renderStructuredSystemDocument, supportsStructuredSystemLayout, validateStructuredSystemData, renderXlsxTemplate, formatDocx } = await import('../templateService.mjs')
     let projectConfig = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', templateOverrides: {} }
     const configPath = path.join(getProjectDataPath(projectName), 'project.config.json')
     if (fs.existsSync(configPath)) {
@@ -131,10 +148,22 @@ export function register(ipcMain) {
 
       const engine = template.config.engine || 'docx'
 
+      // 系统预置的旧表格模板不再承担长正文：改由结构化交付版输出。
+      // 企业模板、项目模板仍完整尊重用户自己的字段与版式。
+      const useStructuredSystemLayout = engine !== 'xlsx'
+        && !projectConfig.templateOverrides?.[docType]
+        && !libraryTemplate
+        && supportsStructuredSystemLayout(docType)
       let buffer
       if (engine === 'xlsx') {
         const cellMappings = template.config.placeholder_cells || []
         buffer = await renderXlsxTemplate(template.templatePath, data, cellMappings)
+      } else if (useStructuredSystemLayout) {
+        const structuredCheck = validateStructuredSystemData(docType, data)
+        if (!structuredCheck.valid) {
+          return { success: false, error: `未通过正式件字段校验：${structuredCheck.missing.join('、')}未填写。请在 AI 结果中补齐对应段落后再保存。` }
+        }
+        buffer = await renderStructuredSystemDocument(docType, data)
       } else {
         buffer = await renderTemplate(template.templatePath, data)
       }
@@ -143,8 +172,19 @@ export function register(ipcMain) {
       await updateLedger(projectPath, finalSubDir, finalFileName, docType, meta)
       console.log('[saveDoc] Template saved OK:', savePath, 'size:', buffer.length)
 
-      if (engine !== 'xlsx') {
+      if (engine !== 'xlsx' && !useStructuredSystemLayout) {
         await formatDocx(savePath, true)
+      }
+
+      // 渲染后再扫一次，防止模板默认值、空影像字段等绕过输入层校验。
+      if (engine !== 'xlsx') {
+        const PizZip = (await import('pizzip')).default
+        const renderedText = new PizZip(fs.readFileSync(savePath, 'binary')).file('word/document.xml')?.asText().replace(/<[^>]+>/g, '') || ''
+        const renderedCheck = validateDeliverableContent(renderedText, projectConfig.projectTypeCode || projectConfig.projectType)
+        if (!renderedCheck.valid) {
+          try { fs.unlinkSync(savePath) } catch {}
+          return { success: false, error: `模板渲染后未通过正式件校验：${[...renderedCheck.markers, ...renderedCheck.forbiddenTerms].join('、')}。文件未保留。` }
+        }
       }
 
       return { success: true, path: savePath, fileName: finalFileName, subDir: finalSubDir, filenameMeta }
@@ -172,6 +212,14 @@ export function register(ipcMain) {
     console.log('[saveDoc] Fallback saved OK:', savePath, 'size:', buffer.length)
 
     await formatDocx(savePath, false)
+
+    const PizZip = (await import('pizzip')).default
+    const renderedText = new PizZip(fs.readFileSync(savePath, 'binary')).file('word/document.xml')?.asText().replace(/<[^>]+>/g, '') || ''
+    const renderedCheck = validateDeliverableContent(renderedText, preSaveConfig.projectTypeCode || preSaveConfig.projectType)
+    if (!renderedCheck.valid) {
+      try { fs.unlinkSync(savePath) } catch {}
+      return { success: false, error: `文档未通过正式件校验：${[...renderedCheck.markers, ...renderedCheck.forbiddenTerms].join('、')}。文件未保留。` }
+    }
 
     return { success: true, path: savePath, fileName: finalFileName, subDir: finalSubDir, filenameMeta }
   }))
@@ -203,7 +251,7 @@ export function register(ipcMain) {
     ensureDir(path.dirname(savePath))
 
     const templatesDir = getTemplatesDir()
-    const { findTemplate, buildPlaceholderData, renderTemplate } = await import('../templateService.mjs')
+    const { findTemplate, buildPlaceholderData, renderTemplate, renderStructuredSystemDocument, supportsStructuredSystemLayout, validateStructuredSystemData } = await import('../templateService.mjs')
     let projectConfig = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', templateOverrides: {} }
     const configPath = path.join(getProjectDataPath(projectName), 'project.config.json')
     if (fs.existsSync(configPath)) {
@@ -228,7 +276,20 @@ export function register(ipcMain) {
         chiefEngineer: projectConfig.chiefEngineer || undefined,
         userInput, content, config: template.config,
       })
-      docBuffer = await renderTemplate(template.templatePath, data)
+      const engine = template.config.engine || 'docx'
+      const useStructuredSystemLayout = engine !== 'xlsx'
+        && !projectConfig.templateOverrides?.[docType]
+        && !libraryTemplate
+        && supportsStructuredSystemLayout(docType)
+      if (useStructuredSystemLayout) {
+        const structuredCheck = validateStructuredSystemData(docType, data)
+        if (!structuredCheck.valid) {
+          return { success: false, error: `未通过正式件字段校验：${structuredCheck.missing.join('、')}未填写。请补齐后再导出 PDF。` }
+        }
+        docBuffer = await renderStructuredSystemDocument(docType, data)
+      } else {
+        docBuffer = await renderTemplate(template.templatePath, data)
+      }
     } else {
       const { Document, Packer, Paragraph, TextRun } = await import('docx')
       const paragraphs = (content || '').split('\n').filter(line => line.trim())

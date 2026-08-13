@@ -1,17 +1,22 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Typography, Input, Button, Space, Spin, Modal, Form, Select, Tag, App, Dropdown, Tooltip } from 'antd'
-import { SendOutlined, RobotOutlined, FileTextOutlined, SaveOutlined, ReloadOutlined, FilePdfOutlined, SettingOutlined, FolderOpenOutlined, HomeOutlined, EditOutlined, CloseOutlined, SearchOutlined, BookOutlined, EyeOutlined } from '@ant-design/icons'
+import { Typography, Input, Button, Space, Spin, Modal, Form, Select, Tag, App, Dropdown, Tooltip, Checkbox, Popover } from 'antd'
+import { SendOutlined, RobotOutlined, FileTextOutlined, SaveOutlined, ReloadOutlined, FilePdfOutlined, SettingOutlined, FolderOpenOutlined, HomeOutlined, EditOutlined, CloseOutlined, SearchOutlined, BookOutlined, EyeOutlined, ControlOutlined } from '@ant-design/icons'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
-import { identifyDocType, identifyMode, buildChatPrompt, inferDataTools, postProcessTimeFields, postProcessFabricationGuard, generateFileName, getDocSavePath, providerConfigs, buildDocPrompt, callAI, extractSubject, appendCalibrationStatement, sanitizeFieldValue, sanitizeLetterStyle } from '../services/aiService'
+import { identifyDocType, identifyMode, buildChatPrompt, inferDataTools, postProcessTimeFields, postProcessFabricationGuard, sanitizeUnsupportedLogParticipants, generateFileName, getDocSavePath, providerConfigs, buildDocPrompt, callAI, extractSubject, stripCalibrationStatement, sanitizeFieldValue, sanitizeLetterStyle } from '../services/aiService'
+import { PROJECT_TYPE_OPTIONS, getProjectTypeProfile, normalizeProjectType, normalizeTags } from '../shared/projectProfile.mjs'
 import { countEffectiveWords, getMinWordCount } from '../shared/docTypeMinWords'
+import { getApplicableRulePacks, getDocumentRuleMinWords, normalizeDocumentRules, RULE_PACKS } from '../shared/documentRules.mjs'
 import type { SessionMode } from '../services/aiService'
 import DirTree from '../components/DirTree'
 import type { DirNode, TemplateItem } from '../vite-env'
 import { useElectronAPI } from '../hooks/useElectronAPI'
+import ProjectTemplateCenterModal from '../components/ProjectTemplateCenterModal'
 
 const { Text } = Typography
 const { TextArea } = Input
+
+const WRITING_DOCUMENT_TYPES = ['监理日志', '监理周报', '监理月报', '整改通知书', '工程联系单']
 
 interface ChatMessage {
   id: string
@@ -42,30 +47,61 @@ export default function ProjectView() {
   const apiReady = useElectronAPI()
   const [lastInput, setLastInput] = useState('')
   const [configModalOpen, setConfigModalOpen] = useState(false)
-  const [projectConfig, setProjectConfig] = useState<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }>; templateSelections?: Record<string, string | null> }>({
+  const [projectConfig, setProjectConfig] = useState<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; projectTypeCode?: string; projectTags?: string[]; projectFeatures?: string; projectPhase?: string; documentRules?: { rulePackIds?: string[]; additionalInstruction?: string }; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }>; templateSelections?: Record<string, string | null> }>({
     contractor: '',
     ownerUnit: '',
     supervisorUnit: '',
     chiefEngineer: '',
-    projectType: '通用',
+    projectType: '未分类', projectTypeCode: 'unclassified', projectTags: [], projectFeatures: '', projectPhase: '',
   })
   const [configForm] = Form.useForm()
   const [editMode, setEditMode] = useState(false)
   const [editableContent, setEditableContent] = useState('')
-  const [rightPanelTab, setRightPanelTab] = useState<'preview' | 'templates'>('preview')
+  const [rightPanelTab, setRightPanelTab] = useState<'preview' | 'templates' | 'rules'>('preview')
+  const [activeDocumentType, setActiveDocumentType] = useState<string>()
   const [templateCatalog, setTemplateCatalog] = useState<TemplateItem[]>([])
   const [templateLoading, setTemplateLoading] = useState(false)
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [templateSearch, setTemplateSearch] = useState('')
-  const [templateCenterOpen, setTemplateCenterOpen] = useState(false)
+  const [projectTemplateCenterOpen, setProjectTemplateCenterOpen] = useState(false)
   const [templateLibrary, setTemplateLibrary] = useState<Array<{ id: string; name: string; docType: string; scope: 'global' | 'professional'; projectType: string; sourceName: string; path: string; fields?: string[] }>>([])
-  const [templateImportForm] = Form.useForm()
   const [treeWidth, setTreeWidth] = useState(260)
   const [previewWidth, setPreviewWidth] = useState(380)
   const [attachedItems, setAttachedItems] = useState<Array<{ type: 'folder' | 'file'; path: string }>>([])
+  const [writingSetupOpen, setWritingSetupOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const dragCleanupRef = useRef<(() => void) | null>(null)
+
+  const selectWritingDocument = (docType: string) => {
+    setActiveDocumentType(docType)
+    setRightPanelTab('rules')
+    setWritingSetupOpen(false)
+    setInput(previous => {
+      const prefix = `写${docType}：`
+      return previous.startsWith('写') && previous.includes('：') ? prefix : previous || prefix
+    })
+    setTimeout(() => document.querySelector<HTMLTextAreaElement>('textarea')?.focus(), 0)
+  }
+
+  const activeRulePacks = activeDocumentType
+    ? getApplicableRulePacks(activeDocumentType, projectConfig.documentRules)
+    : []
+
+  const updateRulePack = async (ruleId: string, enabled: boolean) => {
+    if (!currentProject) return
+    const current = normalizeDocumentRules(projectConfig.documentRules)
+    const rulePackIds = enabled
+      ? [...new Set([...current.rulePackIds, ruleId])]
+      : current.rulePackIds.filter(id => id !== ruleId)
+    const next = normalizeDocumentRules({ ...current, rulePackIds })
+    const result = await window.electronAPI.saveProjectDocumentRules(currentProject.path, next)
+    if (!result.success) {
+      message.error(result.error || '规则保存失败')
+      return
+    }
+    setProjectConfig(prev => ({ ...prev, documentRules: result.documentRules }))
+  }
 
   // 拖拽调整面板宽度（使用 ref 避免闭包问题）
   const dragStateRef = useRef<{ panel: 'tree' | 'preview'; startX: number; startWidth: number } | null>(null)
@@ -255,21 +291,6 @@ export default function ProjectView() {
     setTemplateLibrary(await window.electronAPI.listTemplateLibrary())
   }
 
-  const handleImportTemplate = async () => {
-    if (!window.electronAPI) return
-    const values = await templateImportForm.validateFields()
-    const sourcePath = await window.electronAPI.selectTemplateFile()
-    if (!sourcePath) return
-    const result = await window.electronAPI.importTemplateToLibrary({ ...values, sourcePath })
-    if (!result.success) {
-      message.error('导入失败：' + (result.error || '未知错误'))
-      return
-    }
-    templateImportForm.resetFields()
-    await loadTemplateLibrary()
-    message.success('模板已进入模板中心')
-  }
-
   const handleSelectLibraryTemplate = async (docType: string, templateId: string | null) => {
     if (!currentProject || !window.electronAPI) return
     const result = await window.electronAPI.selectProjectTemplate(currentProject.path, docType, templateId)
@@ -337,6 +358,7 @@ export default function ProjectView() {
 
     // ==== 意图分类 ====
     const { mode, docType, dataToolIds } = identifyMode(trimmedInput)
+    if (docType) setActiveDocumentType(docType)
     setLastInput(trimmedInput)
 
     // v1.2.0：DOC/HYBRID 模式必须先选项目，避免 AI 在没有项目信息时凭空扩写
@@ -344,6 +366,12 @@ export default function ProjectView() {
     //   v1.2.0 行为：弹 toast 提示选项目，中断生成
     if ((mode === 'DOC' || mode === 'HYBRID') && !currentProject) {
       message.warning('请先在顶部选择项目，再生成文档', 3)
+      setLoading(false)
+      setProgressStage('')
+      return
+    }
+    if ((mode === 'DOC' || mode === 'HYBRID') && normalizeProjectType(projectConfig.projectTypeCode || projectConfig.projectType) === 'unclassified') {
+      message.warning('请先在“项目配置”中选择项目类型；未分类项目不能生成正式文档', 4)
       setLoading(false)
       setProgressStage('')
       return
@@ -395,6 +423,11 @@ export default function ProjectView() {
         supervisorUnit: projectConfig.supervisorUnit || undefined,
         chiefEngineer: projectConfig.chiefEngineer || undefined,
         projectType: projectConfig.projectType || undefined,
+        projectTypeCode: projectConfig.projectTypeCode || normalizeProjectType(projectConfig.projectType),
+        projectTags: normalizeTags(projectConfig.projectTags),
+        projectFeatures: projectConfig.projectFeatures || undefined,
+        projectPhase: projectConfig.projectPhase || undefined,
+        documentRules: projectConfig.documentRules,
       } : undefined
 
       // ==== 附件信息注入 AI 上下文 ====
@@ -450,7 +483,7 @@ export default function ProjectView() {
           // 不阻塞：失败时降级到 router enabledSections 摘要（buildDocPrompt 兜底）
           let sopData: any = undefined
           try {
-            const projectType = projectInfo?.projectType || '土建'
+            const projectType = projectInfo?.projectTypeCode || projectInfo?.projectType || 'unclassified'
             if (window.electronAPI?.readSop) {
               const r = await window.electronAPI.readSop({ projectType, docType: docType || '' })
               if (r && r.found) sopData = r
@@ -574,12 +607,13 @@ export default function ProjectView() {
         if (guardResult.warnings.length > 0) {
           message.warning(`⚠️ ${guardResult.warnings.join('；')}，已替换为占位符请补充`, 5)
         }
-        accumulated = postProcessTimeFields(guardResult.content, postProcessCtx)
+        accumulated = stripCalibrationStatement(postProcessTimeFields(guardResult.content, postProcessCtx))
+        if (docType === '监理日志') accumulated = sanitizeUnsupportedLogParticipants(accumulated, trimmedInput)
 
         // v1.2.1（2026-06-28 接入）：DOC/HYBRID 模式下自动续写
         //   AI 输出 < getMinWordCount(docType) → 追加一轮 user 消息要求扩写，最多 1 次
         if ((mode === 'DOC' || mode === 'HYBRID') && docType && docType !== '通用文档') {
-          const minWords = getMinWordCount(docType)
+            const minWords = Math.max(getMinWordCount(docType), getDocumentRuleMinWords(docType, projectConfig.documentRules))
           let wordCount = countEffectiveWords(accumulated)
           if (minWords > 0 && wordCount < minWords) {
             // 尝试追加一轮 user 消息（不重新走 system prompt，直接续写）
@@ -630,7 +664,7 @@ export default function ProjectView() {
                         postProcessFabricationGuard(accumulated).content,
                         postProcessCtx
                       )
-                      accumulated = mergedFinal
+                      accumulated = docType === '监理日志' ? sanitizeUnsupportedLogParticipants(mergedFinal, trimmedInput) : mergedFinal
                       setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: accumulated } : m))
                     } else {
                       console.warn('[AI] 续写流式结束但 retryAcc 为空')
@@ -654,17 +688,7 @@ export default function ProjectView() {
             if (wordCount < minWords) {
               message.warning(`⚠️ AI 仅输出 ${wordCount} 字（要求 ≥ ${minWords} 字），内容可能不足，建议在输入中补充具体要求后重新生成`, 6)
             }
-          } else if (wordCount < 600) {
-            message.warning(`⚠️ AI 仅输出 ${wordCount} 字（建议 ≥ 600 字），内容可能过于简单，建议在输入中补充具体要求后重新生成`, 6)
           }
-        }
-
-        // v1.2.1（2026-06-28 接入）：DOC/HYBRID 模式下追加项目类型校准声明
-        //   之前写了 appendCalibrationStatement 但 0 调用点，v1.2.0 的 SOP 注入等于无反馈闭环
-        if ((mode === 'DOC' || mode === 'HYBRID') && docType) {
-          const projectType = projectInfo?.projectType || '土建'
-          accumulated = appendCalibrationStatement(accumulated, projectType, docType)
-          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: accumulated } : m))
         }
 
         // v1.2.4（2026-06-29）：预览前对【事由】【主题】字段值兜底剥前缀
@@ -721,7 +745,7 @@ export default function ProjectView() {
       })
       if (!result.success) throw new Error(result.error || 'AI 调用失败')
 
-      let aiContent = result.content || ''
+      let aiContent = stripCalibrationStatement(result.content || '')
       // 后处理：先跑反编造守门员（捕获原始日期），再处理时间字段占位符
       const guardResult = postProcessFabricationGuard(aiContent)
       if (guardResult.warnings.length > 0) {
@@ -733,17 +757,8 @@ export default function ProjectView() {
       // v1.2.0：AI 扩写字数软警告（与流式路径同源，老板 2026-06-27 反馈内容过简）
       if (mode === 'DOC' || mode === 'HYBRID') {
         const wordCount = countEffectiveWords(aiContent)
-        if (wordCount < 600) {
-          message.warning(`⚠️ AI 仅输出 ${wordCount} 字（建议 ≥ 600 字），内容可能过于简单，建议在输入中补充具体要求后重新生成`, 6)
-        }
-      }
-
-      // v1.2.1（2026-06-28 接入）：DOC/HYBRID 模式下追加项目类型校准声明
-      //   与流式路径同源，避免校准声明只在一条路径上出现
-      if ((mode === 'DOC' || mode === 'HYBRID') && docType) {
-        const projectType = projectInfo?.projectType || '土建'
-        aiContent = appendCalibrationStatement(aiContent, projectType, docType)
-        setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: aiContent } : m))
+        const minWords = Math.max(getMinWordCount(docType || ''), getDocumentRuleMinWords(docType || '', projectConfig.documentRules))
+        if (wordCount < minWords) message.warning(`⚠️ AI 仅输出 ${wordCount} 字（要求 ≥ ${minWords} 字），建议补充现场事实后重新生成`, 6)
       }
 
       // v1.2.4（2026-06-29）：非流式降级路径同样兜底剥【事由】前缀
@@ -754,6 +769,7 @@ export default function ProjectView() {
         )
         // v1.2.7（2026-06-29 老板反馈）：信件语体清理（覆盖全文，含正文）
         aiContent = sanitizeLetterStyle(aiContent)
+        if (docType === '监理日志') aiContent = sanitizeUnsupportedLogParticipants(aiContent, trimmedInput)
         setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: aiContent } : m))
       }
 
@@ -801,7 +817,8 @@ export default function ProjectView() {
     try {
       const { docType } = previewContent
       // 编辑模式下使用编辑后的内容
-      const content = editMode ? editableContent : previewContent.content
+      // 校准声明仅用于界面说明，绝不能落入正式文书或计入字数。
+      const content = stripCalibrationStatement(editMode ? editableContent : previewContent.content)
       const subject = extractSubject(previewContent.userInput || lastInput)
       // 预览用的文件名（前端也展示给老板看）
       const fileNameInfo = await generateFileName(docType, currentProject.name, subject || docType)
@@ -905,10 +922,7 @@ export default function ProjectView() {
               {currentProject?.name || '未选定项目'}
             </Text>
           </Space>
-          <Space size={4}>
-            <Button type="primary" size="small" icon={<BookOutlined />} onClick={() => { loadTemplateLibrary(); setTemplateCenterOpen(true) }} title="管理通用、专业与项目模板">
-              模板中心
-            </Button>
+          <Space size={2}>
             <Button
               type="text"
               size="small"
@@ -1157,68 +1171,35 @@ export default function ProjectView() {
           borderTop: '1px solid #f0f0f0',
           background: '#fafafa',
         }}>
-          {/* 快捷能力入口 */}
-          <div style={{
-            marginBottom: 10,
-            padding: '0 2px',
-          }}>
-            <div style={{
-              fontSize: 10,
-              color: '#bbb',
-              marginBottom: 6,
-              letterSpacing: '0.3px',
-            }}>
-              试试这些：
-            </div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {[
-                { emoji: '📊', label: '查进度', hint: '查进度：' },
-                { emoji: '📖', label: '问规范', hint: '问规范：' },
-                { emoji: '⚠️', label: '查隐患', hint: '查隐患：' },
-                { emoji: '📄', label: '写文书', hint: '写文书：' },
-                { emoji: '🖼️', label: '整理照片', hint: '整理照片：', selectFolder: true },
-              ].map((item) => (
-                <div
-                  key={item.label}
-                  onClick={async () => {
-                    setInput(item.hint)
-                    if (item.selectFolder) {
-                      await handleAttachFolder()
-                    }
-                    // 自动聚焦输入框
-                    setTimeout(() => {
-                      const ta = document.querySelector('textarea')
-                      if (ta) { ta.focus(); ta.setSelectionRange(item.hint.length, item.hint.length) }
-                    }, 10)
-                  }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '3px 12px',
-                    borderRadius: 16,
-                    background: '#f5f5f5',
-                    color: '#555',
-                    fontSize: 11,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s',
-                    lineHeight: '20px',
-                    userSelect: 'none',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = '#e6f4ff'
-                    e.currentTarget.style.color = '#1677ff'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = '#f5f5f5'
-                    e.currentTarget.style.color = '#555'
-                  }}
-                >
-                  <span style={{ fontSize: 13 }}>{item.emoji}</span>
-                  {item.label}
+          {/* 文书设置默认隐藏，避免输入区被规则占满；点击后以紧凑浮层调整。 */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
+            <Text type="secondary" style={{ fontSize: 11 }}>输入现场事实、事项或具体要求，AI 将按当前项目资料生成。</Text>
+            <Popover
+              trigger="click"
+              placement="topRight"
+              open={writingSetupOpen}
+              onOpenChange={setWritingSetupOpen}
+              content={<div style={{ width: 360 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <Text strong style={{ fontSize: 12 }}>文书设置</Text>
+                  <Button type="link" size="small" style={{ padding: 0, height: 20, fontSize: 11 }} onClick={() => { setConfigModalOpen(true); setWritingSetupOpen(false) }}>项目资料</Button>
                 </div>
-              ))}
-            </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
+                  {WRITING_DOCUMENT_TYPES.map(docType => <Tag key={docType} color={docType === activeDocumentType ? 'blue' : undefined} onClick={() => selectWritingDocument(docType)} style={{ margin: 0, cursor: 'pointer', fontSize: 11 }}>{docType}</Tag>)}
+                </div>
+                {activeDocumentType ? <>
+                  <div style={{ padding: '5px 7px', marginBottom: 7, background: '#fafafa', color: '#777', fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>已读取：{projectConfig.projectType || '未分类'}{projectConfig.projectTags?.length ? ` · ${projectConfig.projectTags.join('、')}` : ''}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                    {activeRulePacks.slice(0, 5).map(pack => <Tag color="blue" key={pack.id} style={{ margin: 0, fontSize: 10 }}>{pack.minWords ? `≥${pack.minWords}字 · ` : ''}{pack.label}</Tag>)}
+                    <Button type="link" size="small" style={{ padding: 0, height: 18, fontSize: 11 }} onClick={() => { setRightPanelTab('rules'); setWritingSetupOpen(false) }}>详细调整</Button>
+                  </div>
+                </> : <Text type="secondary" style={{ fontSize: 11 }}>请选择文种，自动加载对应规则。</Text>}
+              </div>}
+            >
+              <Button size="small" type={activeDocumentType ? 'default' : 'primary'} icon={<ControlOutlined />} style={{ fontSize: 11 }}>
+                {activeDocumentType || '文书设置'}
+              </Button>
+            </Popover>
           </div>
 
           {/* 附件项目展示条 */}
@@ -1395,11 +1376,40 @@ export default function ProjectView() {
               模板资源
             </Text>
           </div>
+          <div style={{ width: 1, background: '#f0f0f0' }} />
+          <div onClick={() => setRightPanelTab('rules')} style={{ flex: 1, padding: '8px 8px', cursor: 'pointer', borderBottom: rightPanelTab === 'rules' ? '2px solid #1677ff' : '2px solid transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: rightPanelTab === 'rules' ? '#f0f5ff' : 'transparent' }}>
+            <ControlOutlined style={{ color: rightPanelTab === 'rules' ? '#1677ff' : '#999', fontSize: 13 }} />
+            <Text style={{ fontSize: 12, fontWeight: rightPanelTab === 'rules' ? 600 : 400, color: rightPanelTab === 'rules' ? '#1677ff' : '#666' }}>扩写规则</Text>
+          </div>
         </div>
 
         {/* 内容区 */}
         <div style={{ flex: 1, overflow: 'auto' }}>
-          {rightPanelTab === 'preview' ? (
+          {rightPanelTab === 'rules' ? <div style={{ padding: 12 }}>
+            <Text strong style={{ fontSize: 13 }}>{activeDocumentType ? `${activeDocumentType}规则` : '选择文种后配置规则'}</Text>
+            <Text type="secondary" style={{ display: 'block', margin: '4px 0 10px', fontSize: 11, lineHeight: 1.5 }}>勾选即保存为本项目默认；生成时自动带入，无需编写提示词。</Text>
+            {activeDocumentType ? <>
+              <div style={{ marginBottom: 8 }}>
+                <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>项目默认</Tag>
+                <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>本次生成可直接使用</Text>
+              </div>
+              {['通用底线', activeDocumentType === '监理日志' ? '监理日志' : activeDocumentType === '监理周报' ? '监理周报' : activeDocumentType === '监理月报' ? '监理月报' : '通知与函件'].map(group => {
+                const packs = RULE_PACKS.filter(pack => pack.group === group && (!pack.docTypes || pack.docTypes.includes(activeDocumentType)))
+                if (!packs.length) return null
+                const selectedIds = normalizeDocumentRules(projectConfig.documentRules).rulePackIds
+                return <div key={group} style={{ border: '1px solid #f0f0f0', marginBottom: 8, borderRadius: 5, overflow: 'hidden' }}>
+                  <div style={{ padding: '6px 8px', background: '#fafafa', fontSize: 11, fontWeight: 600 }}>{group}</div>
+                  {packs.map(pack => <div key={pack.id} style={{ padding: '7px 8px', borderTop: '1px solid #f5f5f5' }}>
+                    <Checkbox checked={selectedIds.includes(pack.id)} onChange={event => updateRulePack(pack.id, event.target.checked)} style={{ fontSize: 12, lineHeight: 1.35 }}>
+                      {pack.label}{pack.minWords ? <Tag color="blue" style={{ marginLeft: 4, fontSize: 10, lineHeight: '16px' }}>≥{pack.minWords}字</Tag> : null}
+                    </Checkbox>
+                    <Text type="secondary" style={{ display: 'block', margin: '2px 0 0 23px', fontSize: 10, lineHeight: 1.45 }}>{pack.description}</Text>
+                  </div>)}
+                </div>
+              })}
+              <Button block size="small" onClick={() => setConfigModalOpen(true)}>补充项目长期要求</Button>
+            </> : <Button size="small" type="primary" onClick={() => selectWritingDocument('监理日志')}>从监理日志开始</Button>}
+          </div> : rightPanelTab === 'preview' ? (
             /* ===== 文档预览 ===== */
             <>
               <div style={{
@@ -1420,7 +1430,7 @@ export default function ProjectView() {
                       const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
                       return lastAssistant?.wordCount ?? countEffectiveWords(previewContent.content)
                     })()
-                    const minWords = getMinWordCount(previewContent.docType)
+                    const minWords = Math.max(getMinWordCount(previewContent.docType), getDocumentRuleMinWords(previewContent.docType, projectConfig.documentRules))
                     const ok = msgWordCount >= minWords
                     return (
                       <Tag
@@ -1457,7 +1467,7 @@ export default function ProjectView() {
                           const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
                           return lastAssistant?.wordCount ?? countEffectiveWords(previewContent.content)
                         })()
-                        const minWords = getMinWordCount(previewContent.docType)
+                        const minWords = Math.max(getMinWordCount(previewContent.docType), getDocumentRuleMinWords(previewContent.docType, projectConfig.documentRules))
                         const insufficient = minWords > 0 && msgWordCount < minWords
                         return (
                           <Tooltip title={insufficient ? `当前 ${msgWordCount} 字，不足 ${minWords} 字` : undefined}>
@@ -1476,7 +1486,7 @@ export default function ProjectView() {
                         onClick={async () => {
                           if (!currentProject || !previewContent) return
                           const { docType } = previewContent
-                          const content = editMode ? editableContent : previewContent.content
+                          const content = stripCalibrationStatement(editMode ? editableContent : previewContent.content)
                           const subject = extractSubject(previewContent.userInput || lastInput)
                           // 走虚竹 v2.0 文件名
                           const fileNameInfo = await generateFileName(docType, currentProject.name, subject || docType)
@@ -1681,7 +1691,7 @@ export default function ProjectView() {
         onOk={handleSaveConfig}
         onCancel={() => setConfigModalOpen(false)}
         okText="保存"
-        width={420}
+        width={400}
       >
         <Form
           form={configForm}
@@ -1705,65 +1715,35 @@ export default function ProjectView() {
           </Form.Item>
           <Form.Item name="projectType" label="项目类型">
             <Select
-              options={[
-                { value: '通用', label: '通用' },
-                { value: '通信工程', label: '通信工程' },
-                { value: '信息化工程', label: '信息化工程' },
-                { value: '电力工程', label: '电力工程' },
-              ]}
+              options={PROJECT_TYPE_OPTIONS.map(item => ({ value: item.label, label: item.label }))}
             />
           </Form.Item>
-          <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 12, marginTop: 4 }}>
-            <Text strong style={{ fontSize: 12 }}>项目专用模板</Text>
-            <Text type="secondary" style={{ display: 'block', fontSize: 11, margin: '4px 0 8px' }}>
-              选择后会复制到本项目“项目模板”目录，仅影响当前项目；未配置时仍使用通用模板。
+          <Form.Item name="projectTags" label="专业标签（可自定义）">
+            <Select mode="tags" placeholder="如：机房、网络、安防" options={getProjectTypeProfile(projectConfig.projectType).suggestedTags.map(tag => ({ value: tag, label: tag }))} />
+          </Form.Item>
+          <Form.Item name="projectFeatures" label="项目特点 / 建设范围">
+            <Input.TextArea rows={2} placeholder="只填写已确认的建设范围、系统和约束；AI 会以此为事实边界。" />
+          </Form.Item>
+          <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 10, marginTop: 2 }}>
+            <Space style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <Text strong style={{ fontSize: 12 }}>项目模板</Text>
+              <Button type="link" size="small" icon={<BookOutlined />} onClick={() => setProjectTemplateCenterOpen(true)}>管理项目模板</Button>
+            </Space>
+            <Text type="secondary" style={{ display: 'block', fontSize: 11, margin: '0 0 8px' }}>
+              在这里为当前项目指定模板库版本或上传专属模板，不影响其他项目。
             </Text>
-            {['监理日志', '监理周报', '监理月报', '会议纪要'].map(docType => (
-              <div key={docType} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                <Text style={{ fontSize: 12 }}>{docType}</Text>
-                <Space size={4}>
-                  <Select
-                    size="small"
-                    style={{ width: 132 }}
-                    value={projectConfig.templateSelections?.[docType] || undefined}
-                    placeholder="自动匹配"
-                    allowClear
-                    onClear={() => handleSelectLibraryTemplate(docType, null)}
-                    onChange={(value) => handleSelectLibraryTemplate(docType, value)}
-                    options={templateLibrary.filter(t => t.docType === docType).map(t => ({ value: t.id, label: `${t.scope === 'professional' ? t.projectType : '通用'} · ${t.name}` }))}
-                  />
-                  <Button size="small" onClick={() => handleAssignProjectTemplate(docType)}>
-                    {projectConfig.templateOverrides?.[docType] ? '替换' : '专用'}
-                  </Button>
-                </Space>
-              </div>
-            ))}
-            <Button block size="small" icon={<BookOutlined />} style={{ marginTop: 6 }} onClick={() => { loadTemplateLibrary(); setTemplateCenterOpen(true) }}>
-              打开模板中心（导入通用 / 专业模板）
-            </Button>
+            <Space style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <Text strong style={{ fontSize: 12 }}>文书规则</Text>
+              <Button type="link" size="small" icon={<ControlOutlined />} onClick={() => { setRightPanelTab('rules'); setConfigModalOpen(false) }}>在 AI 写文书区设置</Button>
+            </Space>
+            <Text type="secondary" style={{ display: 'block', fontSize: 11 }}>
+              用勾选规则包控制数据来源、日志、周报和月报写法；不需要自行写提示词。
+            </Text>
           </div>
         </Form>
       </Modal>
 
-      <Modal title="模板中心" open={templateCenterOpen} onCancel={() => setTemplateCenterOpen(false)} footer={null} width={680}>
-        <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>
-          通用模板供所有项目兜底；专业模板会随项目类型自动匹配；项目专用模板仅用于当前项目。
-        </Text>
-        <Form form={templateImportForm} layout="inline" initialValues={{ docType: '监理周报', scope: 'professional', projectType: projectConfig.projectType }} style={{ marginBottom: 16 }}>
-          <Form.Item name="docType" rules={[{ required: true }]}><Select style={{ width: 150 }} options={['监理日志', '监理周报', '监理月报', '会议纪要', '整改通知书', '安全通知书', '工程联系单', '停工令', '开工通知', '竣工通知', '工程变更单', '工程款支付证书', '进度分析报告', '开工条件检查表', '承建资格报审表', '施工组织设计报审表', '总监理工程师任命书', '监理规划', '监理细则', '方案审核意见', '索赔报告', '巡视记录', '安全检查记录', '质量评估报告', '付款审核意见', '通用文档'].map(v => ({ value: v, label: v }))} /></Form.Item>
-          <Form.Item name="scope" rules={[{ required: true }]}><Select style={{ width: 100 }} options={[{ value: 'professional', label: '专业模板' }, { value: 'global', label: '通用模板' }]} /></Form.Item>
-          <Form.Item name="projectType"><Select style={{ width: 110 }} options={['通用', '通信工程', '信息化工程', '电力工程'].map(v => ({ value: v, label: v }))} /></Form.Item>
-          <Button type="primary" onClick={handleImportTemplate}>导入 Word 模板</Button>
-        </Form>
-        <div style={{ maxHeight: 320, overflow: 'auto', borderTop: '1px solid #f0f0f0' }}>
-          {templateLibrary.length === 0 ? <div style={{ padding: 24, color: '#999' }}>模板中心暂无用户导入模板</div> : templateLibrary.map(item => (
-            <div key={item.id} style={{ padding: '10px 4px', borderBottom: '1px solid #f5f5f5', display: 'flex', justifyContent: 'space-between' }}>
-              <div><Text strong style={{ fontSize: 12 }}>{item.name}</Text><br /><Text type="secondary" style={{ fontSize: 11 }}>{item.docType} · {item.scope === 'professional' ? item.projectType : '所有项目'} · {item.sourceName}{item.fields ? ` · 已识别 ${item.fields.length} 个字段` : ''}</Text></div>
-              <Button size="small" onClick={() => window.electronAPI?.openFile(item.path)}>查看</Button>
-            </div>
-          ))}
-        </div>
-      </Modal>
+      <ProjectTemplateCenterModal open={projectTemplateCenterOpen} onClose={() => { setProjectTemplateCenterOpen(false); loadProjectConfig() }} project={{ name: currentProject.name, path: currentProject.path, projectType: projectConfig.projectType, templateOverrides: projectConfig.templateOverrides, templateSelections: projectConfig.templateSelections }} />
     </div>
   )
 }

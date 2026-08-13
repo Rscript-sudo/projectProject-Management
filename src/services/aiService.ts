@@ -9,7 +9,10 @@
 // AI 生成前必须先识别项目类型，加载对应 SOP，禁止通用模板硬套
 // ============================================================
 
-type ProjectTypeKey = '土建' | '市政' | '房建' | '信息化' | '园林' | '钢结构' | '装饰'
+import { getProjectTypeProfile, normalizeProjectType } from '../shared/projectProfile.mjs'
+import { buildDocumentRulesInjection, normalizeDocumentRules } from '../shared/documentRules.mjs'
+
+type ProjectTypeKey = '土建' | '市政' | '房建' | '信息化' | '通信' | '电力' | '园林' | '钢结构' | '装饰' | '未分类'
 
 interface ProjectTypeSOP {
   displayName: string
@@ -23,7 +26,7 @@ interface ProjectTypeSOP {
 // 内嵌路由表（与 src/shared/project-type-router.json 同步）
 // 单一真相源逻辑：JSON 是数据源，TS 是类型化镜像；修改 JSON 后同步此对象
 const PROJECT_TYPE_ROUTER: { 默认类型兜底: ProjectTypeKey; [k: string]: ProjectTypeSOP | ProjectTypeKey } = {
-  '默认类型兜底': '土建',
+  '默认类型兜底': '未分类',
   '土建': {
     displayName: '土建工程',
     sopFile: 'src/shared/sop/civil/safety-notice.json',
@@ -56,6 +59,22 @@ const PROJECT_TYPE_ROUTER: { 默认类型兜底: ProjectTypeKey; [k: string]: Pr
     disabledSections: ['扬尘污染防治', '木工加工区', '土方覆盖', '深基坑/高支模', '塔吊/施工升降机', '苗木养护', '管线迁改（光纤除外）', '交通导改'],
     minWordsByDocType: { '安全通知书': 800, '整改通知书': 800, '监理日志': 200, '监理周报': 1000, '监理月报': 2000 },
   },
+  '通信': {
+    displayName: '通信工程', sopFile: 'src/shared/sop/communication/safety-notice.json', keyWords: ['通信', '光缆', '光纤', '基站', '传输'],
+    enabledSections: ['通信设备与光缆材料核验', '测试记录与网络割接管理', '临时用电与高处作业（仅实际发生时）', '设备及成品保护'],
+    disabledSections: ['扬尘污染防治', '木工加工区', '土方覆盖', '深基坑/高支模', '塔吊/施工升降机'],
+    minWordsByDocType: { '安全通知书': 800, '整改通知书': 800, '监理日志': 200, '监理周报': 1000, '监理月报': 2000 },
+  },
+  '电力': {
+    displayName: '电力工程', sopFile: 'src/shared/sop/power/safety-notice.json', keyWords: ['电力', '变配电', '配电柜', '继电保护'],
+    enabledSections: ['停送电及作业许可', '设备材料核验', '电缆敷设与接地', '调试与试验记录'],
+    disabledSections: ['扬尘污染防治', '木工加工区', '土方覆盖', '深基坑/高支模', '塔吊/施工升降机'],
+    minWordsByDocType: { '安全通知书': 800, '整改通知书': 800, '监理日志': 200, '监理周报': 1000, '监理月报': 2000 },
+  },
+  '未分类': {
+    displayName: '未完成专业设定', sopFile: '', keyWords: ['通用', '未分类'], enabledSections: [], disabledSections: [],
+    minWordsByDocType: { '安全通知书': 800, '整改通知书': 800, '监理日志': 200, '监理周报': 1000, '监理月报': 2000 },
+  },
   '园林': {
     displayName: '园林绿化工程',
     sopFile: 'src/shared/sop/landscape/safety-notice.json',
@@ -83,15 +102,8 @@ const PROJECT_TYPE_ROUTER: { 默认类型兜底: ProjectTypeKey; [k: string]: Pr
 }
 
 function resolveProjectType(configuredType: string | undefined | null): ProjectTypeKey {
-  if (!configuredType) return PROJECT_TYPE_ROUTER['默认类型兜底']
-  const normalized = configuredType.trim()
-  if (PROJECT_TYPE_ROUTER[normalized]) return normalized as ProjectTypeKey
-  for (const key of Object.keys(PROJECT_TYPE_ROUTER)) {
-    if (key.startsWith('_') || key === '默认类型兜底') continue
-    const sop = PROJECT_TYPE_ROUTER[key] as ProjectTypeSOP
-    if (sop.keyWords?.some((kw) => normalized.includes(kw))) return key as ProjectTypeKey
-  }
-  return PROJECT_TYPE_ROUTER['默认类型兜底']
+  const route: Record<string, ProjectTypeKey> = { civil: '土建', municipal: '市政', building: '房建', information: '信息化', communication: '通信', power: '电力', landscape: '园林', steel: '钢结构', decoration: '装饰', unclassified: '未分类' }
+  return route[normalizeProjectType(configuredType)] || '未分类'
 }
 
 function loadProjectTypeSOP(projectType: ProjectTypeKey): ProjectTypeSOP {
@@ -190,9 +202,6 @@ function buildCalibrationStatement(projectType: ProjectTypeKey, docType: string,
   const minWords = sop.minWordsByDocType[docType] ?? 600
   const wordCountOk = actualWordCount >= minWords
   return [
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-    '📋 项目类型校准声明',
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
     `• 项目类型：${projectType}（${sop.displayName}）`,
     `• 已加载 SOP：${sop.sopFile}`,
     `• 文档类型：${docType}`,
@@ -918,6 +927,15 @@ export function postProcessTimeFields(
   //    这些防守性替换仍保留 {{未指定时间}} 占位让用户补充
   let result = content
 
+  // 周报/月报的日期范围是业务周期数据，不能被通用日期清洗压成当天。
+  // 与 electron/shared/postProcess.mjs 保持一致，防止预览和实际保存不一致。
+  const protectedRanges: string[] = []
+  result = result.replace(/【日期范围】[^\n]*/g, (matched) => {
+    const token = `__PMS_DATE_RANGE_${protectedRanges.length}__`
+    protectedRanges.push(matched)
+    return token
+  })
+
   // 1a. 拦截具体到分钟的时间（"14时30分"→"{{未指定时间}}"）
   // v1.2.1 修复（P0）：前后加负向断言 + 强制"分"字结尾
   //   旧正则 /\d{1,2}\s*[时点]\s*\d{1,2}\s*分?/g 误杀"5时30元"、"高度3时5"
@@ -949,7 +967,7 @@ export function postProcessTimeFields(
     result = result.replace(regex, `【${key}】${dateStr}`)
   }
 
-  return result
+  return result.replace(/__PMS_DATE_RANGE_(\d+)__/g, (_, index) => protectedRanges[Number(index)] || '')
 }
 
 /**
@@ -1022,6 +1040,13 @@ export function postProcessFabricationGuard(content: string): {
   }
 }
 
+// 监理日志中的参与人员必须来自当次现场事实；不能把项目资料中的总监等角色误带入日志。
+export function sanitizeUnsupportedLogParticipants(content: string, sourceText: string): string {
+  const hasParticipantEvidence = /(?:监理|施工|作业|班组|人员)[^。；，,\n]{0,16}\d+\s*(?:名|人|个)?/.test(sourceText)
+  if (hasParticipantEvidence) return content
+  return content.replace(/【参与人员】[^\n]*/g, '【参与人员】人员情况未提供')
+}
+
 // 提取项目代码
 function extractProjectCode(projectName: string): string {
   // 优先取下划线前的部分（如 PJ803）
@@ -1084,7 +1109,15 @@ export function appendCalibrationStatement(
     .replace(/[#*`_>]/g, '')
   const wordCount = plainText.length
   const statement = buildCalibrationStatement(resolved, docType, wordCount)
-  return `${content}\n\n${statement}`
+  return `${content}${CALIBRATION_MARKER}${statement}`
+}
+
+const CALIBRATION_MARKER = '\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📋 项目类型校准声明\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+
+/** 预览可显示校准说明；落盘和字数校验必须只使用实际文书内容。 */
+export function stripCalibrationStatement(content: string): string {
+  const markerIndex = (content || '').indexOf(CALIBRATION_MARKER)
+  return markerIndex >= 0 ? content.slice(0, markerIndex).trimEnd() : content
 }
 
 /**
@@ -1235,23 +1268,16 @@ const WORK_PROCEDURE_MAPS: Record<string, {
   },
 }
 
-const DEFAULT_PROCEDURE_MAP = {
-  name: '通用',
-  procedures: [
-    { keyword: '模板', safety: '高空安全、临边洞口', quality: '标高线位' },
-    { keyword: '钢筋', safety: '高空安全', quality: '材料验收、隐蔽验收' },
-    { keyword: '混凝土', safety: '临电安全、高空安全', quality: '隐蔽验收' },
-    { keyword: '脚手架', safety: '高空安全、临边洞口', quality: '标高线位' },
-    { keyword: '吊篮', safety: '高空安全、临边洞口', quality: '成品保护' },
-  ],
-}
+const DEFAULT_PROCEDURE_MAP = { name: '未分类', procedures: [] as { keyword: string; safety: string; quality: string }[] }
 
 /** 获取项目类型对应的工序映射表描述 */
 function getProcedureMapText(projectType?: string): string {
-  const map = WORK_PROCEDURE_MAPS[projectType || ''] || DEFAULT_PROCEDURE_MAP
-  return map.procedures.map(p =>
+  const code = normalizeProjectType(projectType)
+  const key = ({ information: '信息化工程', communication: '通信工程', power: '电力工程' } as Record<string, string>)[code]
+  const map = WORK_PROCEDURE_MAPS[key || ''] || DEFAULT_PROCEDURE_MAP
+  return map.procedures.length ? map.procedures.map(p =>
     `  - "${p.keyword}" → 安全维度：${p.safety} / 质量维度：${p.quality}`
-  ).join('\n')
+  ).join('\n') : '  - 未设置专业工序映射：仅依据项目标签、项目特点和用户提供的事实撰写。'
 }
 
 // ===== 构建 AI 生成提示词（严格遵循监理业务技能规范） =====
@@ -1263,6 +1289,11 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
   supervisorUnit?: string
   chiefEngineer?: string
   projectType?: string
+  projectTypeCode?: string
+  projectTags?: string[]
+  projectFeatures?: string
+  projectPhase?: string
+  documentRules?: { rulePackIds?: string[]; additionalInstruction?: string }
 }, extractedSubject?: string, sopData?: {
   found: boolean
   sopFile: string
@@ -1285,22 +1316,27 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
     : ''
 
   // 添加项目信息前缀
+  const profile = getProjectTypeProfile(projectInfo?.projectTypeCode || projectInfo?.projectType)
   const projectContext = projectInfo ? `
-【项目信息】
+【项目画像（唯一事实边界）】
 - 项目名称：${projectInfo.projectName}
-- 项目类型：${projectInfo.projectType || '通用'}
+- 项目类型：${profile.label}（编码：${profile.code}）
+- 专业标签：${projectInfo.projectTags?.length ? projectInfo.projectTags.join('、') : '未填写'}
+- 项目特点/建设范围：${projectInfo.projectFeatures || '未填写'}
+- 当前阶段：${projectInfo.projectPhase || '未填写'}
 - 建设单位：${projectInfo.ownerUnit || '数据待核对'}
 - 施工单位：${projectInfo.contractor || '数据待核对'}
 - 监理单位：${projectInfo.supervisorUnit || '数据待核对'}
 - 总监理工程师：${projectInfo.chiefEngineer || '数据待核对'}
 ` : ''
+  const documentRulesInjection = buildDocumentRulesInjection(docType, normalizeDocumentRules(projectInfo?.documentRules))
 
   // ============================================================
   // v1.2.0 项目类型识别 + SOP 强制注入（老板拍板 · 2026-06-28）
   // 必须在所有 case 之前执行，确保 16 个 case 全部继承 SOP 约束
   // v1.2.1（2026-06-28）：支持传入 sopData，主进程 readSop 的结果；不存在时降级到 router 摘要
   // ============================================================
-  const resolvedType = resolveProjectType(projectInfo?.projectType)
+  const resolvedType = resolveProjectType(projectInfo?.projectTypeCode || projectInfo?.projectType)
   const sopInjection = sopData
     ? buildSOPMaterialization(resolvedType, docType, sopData)
     : buildSOPInjection(resolvedType, docType)
@@ -1335,18 +1371,21 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
     },
   ): string => {
     const parts: string[] = [
+      `【项目事实合同】只能把“项目画像、用户输入、已归档资料”当作事实来源。专业标签和项目特点未填写时，写“数据待核对”或提示补充；不得以土建、通信、电力等其他专业的常识补造事实。只允许使用与项目类型、标签和建设范围相符的术语。${profile.forbiddenTerms.length ? `严禁出现：${profile.forbiddenTerms.join('、')}。` : ''}`,
       ANTI_FABRICATION_RULES,
       THREE_SEGMENT_RULES,  // v1.2.0 新增：三段划分硬约束（模式 B 全员适用）
       COMMON_EXPANSION_RULES,
       PARAGRAPH_FORMAT_RULES,
+      documentRulesInjection,
       sopInjection,  // v1.2.0 新增：项目类型 SOP 强制注入
       clarificationPrompt,  // v1.2.0 新增：用户输入反问机制
       typeRules,
       templateContract,
     ].filter(Boolean)
     if (extras?.decisionTree) parts.push(EXPANSION_BOUNDARY_TREE)
-    if (extras?.regulationHints) parts.push(REGULATION_HINTS)
-    if (extras?.proofExample && PROOF_EXAMPLES[extras.proofExample]) {
+    // 示例中含有具体土建场景，不再跨专业注入；避免模型把示例当项目事实。
+    if (extras?.regulationHints && ['土建', '市政', '房建', '钢结构', '装饰'].includes(resolvedType)) parts.push(REGULATION_HINTS)
+    if (extras?.proofExample && PROOF_EXAMPLES[extras.proofExample] && ['土建', '市政', '房建', '钢结构', '装饰'].includes(resolvedType)) {
       parts.push(PROOF_EXAMPLES[extras.proofExample]!)
     }
     parts.push(subjectRule)
@@ -1359,8 +1398,8 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
     // 模板为 .xlsx，有单元格占位符映射
     // ====================================================================
     case '监理日志': {
-      const procMapText = getProcedureMapText(projectInfo?.projectType)
-      const projectTypeName = projectInfo?.projectType || '通用'
+      const procMapText = getProcedureMapText(projectInfo?.projectTypeCode || projectInfo?.projectType)
+      const projectTypeName = profile.label
 
       return {
         system: composeSystem(`你是一位专业的工程监理工程师，负责撰写日常监理日志。
@@ -1376,20 +1415,8 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
 根据项目类型，从以下工序映射表中自动匹配安全/质量维度：
 ${procMapText}
 
-【通用安全检查维度】
-临电安全：临时配电箱漏电保护、接线规范性
-高空安全：安全带佩戴、作业平台稳固性
-临边洞口：临边防护、洞口盖板设置
-动火安全：动火审批、消防器材配备
-消防安全：材料存放区灭火器配备
-特种设备：吊装令、特种设备检验合格证
-
-【通用质量控制维度】
-材料验收：材料合格证、规格型号核对
-隐蔽验收：隐蔽前检查、影像留存
-标高线位：标高复测、轴线复核
-成品保护：已装设备保护、污染防护
-接地系统：接地电阻测试、等电位连接
+【适用性硬约束】
+仅写项目画像、用户输入或上述工序映射中明确适用的安全/质量控制点。没有发生的高处、临边、动火、吊装、土建工序一律不得添加；不确定时写“数据待核对”。
 
 【字数要求】
 - 【核心工作落实】：50-100字（质量维度，不得写"无"或"正常"）
@@ -1411,7 +1438,7 @@ ${procMapText}
 【协调解决情况】...
 【其他事项】安全巡视：...\n明日计划：...
 
-【参与人员格式】监理1名，施工人员若干`),
+【参与人员规则】只填写用户明确提供的人员或数量；未提供时填写“人员情况未提供”，不得从项目总监、参建单位资料或常识推断，也不得使用“施工人员若干”等虚构概数。`),
         user: `${projectContext}
 
 【任务】根据以下信息生成监理日志内容。
@@ -1516,9 +1543,10 @@ ${userInput}
 - 【监理建议】：监理工作建议，50-100字
 - 【图1路径】至【图4路径】、【图1说明】至【图4说明】：仅填写已归档、可追溯的现场影像；没有资料时写“数据待核对”
 
-正文按"一、本周施工进度、二、下周施工计划、三、安全质量情况、四、存在问题、五、监理建议"结构写入上述字段。
+各字段合计不少于 1000 字；其中【安全质量描述】、【存在问题】、【下周计划】和【监理建议】必须有可执行的实质内容。
+正文按"一、本周施工进度、二、下周施工计划、三、安全质量情况、四、存在问题、五、监理建议"结构拆分写入上述字段。
 输出字段必须与模板完全一致：不得输出【周进度详情】，必须输出【集采部分内容】和【非集采部分内容】。
-禁止使用 markdown 标记。`),
+只输出模板字段，不要在字段后重复输出“完整正文”、校准声明或其他说明文字；禁止使用 markdown 标记。`),
         user: `${projectContext}
 
 【任务】根据以下信息生成监理周报（当前第 ${weekNum} 周，${dateRange}）。
@@ -1526,7 +1554,7 @@ ${userInput}
 【周报内容】
 ${userInput}
 
-请以【key】value 格式输出各字段内容，再输出完整正文。`,
+请仅以【key】value 格式输出模板字段内容。`,
       }
     }
 

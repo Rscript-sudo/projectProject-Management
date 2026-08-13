@@ -60,6 +60,19 @@ export async function importTemplateToLibrary({ userDataPath, sourcePath, docTyp
   return entry
 }
 
+/** 编辑后的企业模板可重新扫描字段，不必再次导入或新建副本。 */
+export async function refreshTemplateLibraryEntry({ userDataPath, templateId }) {
+  const registry = readRegistry(userDataPath)
+  const entry = registry.templates.find(item => item.id === templateId)
+  if (!entry) throw new Error('未找到企业模板')
+  if (!fs.existsSync(entry.path)) throw new Error('企业模板文件不存在')
+  const { getTemplatePlaceholders } = await import('./templateService.mjs')
+  entry.fields = await getTemplatePlaceholders(entry.path)
+  entry.updatedAt = new Date().toISOString()
+  writeRegistry(userDataPath, registry)
+  return entry
+}
+
 export function resolveLibraryTemplate(userDataPath, { docType, projectType, selectedTemplateId }) {
   const templates = listTemplateLibrary(userDataPath).filter(item => item.docType === docType && fs.existsSync(item.path))
   if (selectedTemplateId) {

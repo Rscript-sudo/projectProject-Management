@@ -21,6 +21,7 @@ import LedgerPanel from '../components/LedgerPanel'
 import DataBoard from '../components/DataBoard'
 import type { DirNode, ScanCompletenessResult } from '../vite-env'
 import { useElectronAPI } from '../hooks/useElectronAPI'
+import { PROJECT_TYPE_OPTIONS, getProjectTypeProfile, normalizeTags } from '../shared/projectProfile.mjs'
 
 const { Text, Title } = Typography
 
@@ -45,11 +46,19 @@ export default function Home() {
   // Create modal
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
-  const [newProjectType, setNewProjectType] = useState('通用')
+  const [newProjectType, setNewProjectType] = useState<string>()
+  const [newProjectTags, setNewProjectTags] = useState<string[]>([])
+  const [newProjectFeatures, setNewProjectFeatures] = useState('')
+  const [newProjectPhase, setNewProjectPhase] = useState('')
+  const [newProjectCode, setNewProjectCode] = useState('')
+  const [newOwnerUnit, setNewOwnerUnit] = useState('')
+  const [newContractor, setNewContractor] = useState('')
+  const [newSupervisorUnit, setNewSupervisorUnit] = useState('')
+  const [newChiefEngineer, setNewChiefEngineer] = useState('')
   const [creating, setCreating] = useState(false)
 
   // Project config
-  const [projectConfig, setProjectConfig] = useState({ contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '通用', projectCode: 'PROJECT' })
+  const [projectConfig, setProjectConfig] = useState({ contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '未分类', projectTypeCode: 'unclassified', projectTags: [] as string[], projectFeatures: '', projectPhase: '', projectCode: 'PROJECT' })
   const [editMode, setEditMode] = useState(false)
   const [configForm] = Form.useForm()
 
@@ -75,7 +84,7 @@ export default function Home() {
       setProjectConfig({ projectCode: 'PROJECT', ...(config as any) })
       configForm.setFieldsValue(config)
     } catch (e) {
-      const defaults = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '通用', projectCode: 'PROJECT' }
+      const defaults = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '未分类', projectTypeCode: 'unclassified', projectTags: [] as string[], projectFeatures: '', projectPhase: '', projectCode: 'PROJECT' }
       setProjectConfig(defaults)
       configForm.setFieldsValue(defaults)
     }
@@ -100,14 +109,20 @@ export default function Home() {
 
   // --- 操作 ---
   const handleCreateProject = async () => {
-    if (!newProjectName.trim()) return
+    if (!newProjectName.trim() || !newProjectType) {
+      message.warning('请填写项目名称并选择项目类型')
+      return
+    }
     setCreating(true)
-    const result = await createProject(newProjectName.trim(), newProjectType)
+    const result = await createProject(newProjectName.trim(), newProjectType, { projectTags: normalizeTags(newProjectTags), projectFeatures: newProjectFeatures, projectPhase: newProjectPhase, projectCode: newProjectCode, ownerUnit: newOwnerUnit, contractor: newContractor, supervisorUnit: newSupervisorUnit, chiefEngineer: newChiefEngineer })
     setCreating(false)
     if (result.success) {
       setCreateModalOpen(false)
       setNewProjectName('')
-      setNewProjectType('通用')
+      setNewProjectType(undefined)
+      setNewProjectTags([])
+      setNewProjectFeatures('')
+      setNewProjectPhase(''); setNewProjectCode(''); setNewOwnerUnit(''); setNewContractor(''); setNewSupervisorUnit(''); setNewChiefEngineer('')
       await loadProjects()
       loadDirTree(projectRoot)
       const updated = useAppStore.getState().projects
@@ -132,7 +147,7 @@ export default function Home() {
           configForm.setFieldsValue(cfg)
         })
         .catch(() => {
-          const defaults = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '通用', projectCode: 'PROJECT' }
+          const defaults = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '未分类', projectTypeCode: 'unclassified', projectTags: [] as string[], projectFeatures: '', projectPhase: '', projectCode: 'PROJECT' }
           setProjectConfig(defaults)
           configForm.setFieldsValue(defaults)
         })
@@ -627,13 +642,14 @@ export default function Home() {
                       <Select
                         size="small"
                         style={{ width: '100%' }}
-                        options={[
-                          { value: '通用', label: '通用' },
-                          { value: '通信工程', label: '通信工程' },
-                          { value: '信息化工程', label: '信息化工程' },
-                          { value: '电力工程', label: '电力工程' },
-                        ]}
+                        options={PROJECT_TYPE_OPTIONS.map(item => ({ value: item.label, label: item.label }))}
                       />
+                    </Form.Item>
+                    <Form.Item name="projectTags" label="专业标签" style={{ marginBottom: 8 }}>
+                      <Select mode="tags" placeholder="可选择或输入，如：机房、网络、安防" options={getProjectTypeProfile(projectConfig.projectType).suggestedTags.map(tag => ({ value: tag, label: tag }))} />
+                    </Form.Item>
+                    <Form.Item name="projectFeatures" label="项目特点 / 建设范围" style={{ marginBottom: 8 }}>
+                      <Input.TextArea rows={2} placeholder="只填写已知事实；AI 不会自行补造。" />
                     </Form.Item>
                     <Space style={{ width: '100%' }}>
                       <Button type="primary" size="small" htmlType="button" onClick={handleSaveConfig} style={{ flex: 1 }}>
@@ -702,10 +718,10 @@ export default function Home() {
         title="新建项目"
         open={createModalOpen}
         onOk={handleCreateProject}
-        onCancel={() => { setCreateModalOpen(false); setNewProjectName(''); setNewProjectType('通用') }}
+        onCancel={() => { setCreateModalOpen(false); setNewProjectName(''); setNewProjectType(undefined); setNewProjectTags([]); setNewProjectFeatures(''); setNewProjectPhase(''); setNewProjectCode(''); setNewOwnerUnit(''); setNewContractor(''); setNewSupervisorUnit(''); setNewChiefEngineer('') }}
         confirmLoading={creating}
         okText="创建"
-        width={480}
+        width={560}
       >
         <div style={{ padding: '16px 0' }}>
           <Text type="secondary">项目将创建在：</Text>
@@ -717,13 +733,29 @@ export default function Home() {
               onChange={setNewProjectType}
               style={{ width: '100%' }}
               size="small"
-              options={[
-                { value: '通用', label: '通用' },
-                { value: '通信工程', label: '通信工程' },
-                { value: '信息化工程', label: '信息化工程' },
-                { value: '电力工程', label: '电力工程' },
-              ]}
+              placeholder="请选择项目类型"
+              options={PROJECT_TYPE_OPTIONS.filter(item => item.code !== 'unclassified').map(item => ({ value: item.label, label: item.label }))}
             />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>专业标签（可选，可自定义）</Text>
+            <Select mode="tags" value={newProjectTags} onChange={setNewProjectTags} style={{ width: '100%' }} size="small"
+              placeholder={newProjectType ? `如：${getProjectTypeProfile(newProjectType).suggestedTags.join('、')}` : '请先选择项目类型'}
+              options={(newProjectType ? getProjectTypeProfile(newProjectType).suggestedTags : []).map(tag => ({ value: tag, label: tag }))} />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>项目特点 / 建设范围（可选）</Text>
+            <Input.TextArea rows={2} value={newProjectFeatures} onChange={e => setNewProjectFeatures(e.target.value)} placeholder="如：数据中心机房改造，含综合布线、核心交换和视频监控。" />
+          </div>
+          <Text strong style={{ display: 'block', margin: '12px 0 6px', fontSize: 13 }}>项目基础信息</Text>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 11 }}>创建时一次建档，后续自动写入模板及 AI 上下文。</Text>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <Input value={newProjectCode} onChange={e => setNewProjectCode(e.target.value)} placeholder="项目编码（可空自动生成）" />
+            <Input value={newProjectPhase} onChange={e => setNewProjectPhase(e.target.value)} placeholder="当前阶段" />
+            <Input value={newOwnerUnit} onChange={e => setNewOwnerUnit(e.target.value)} placeholder="建设单位" />
+            <Input value={newContractor} onChange={e => setNewContractor(e.target.value)} placeholder="施工单位" />
+            <Input value={newSupervisorUnit} onChange={e => setNewSupervisorUnit(e.target.value)} placeholder="监理单位" />
+            <Input value={newChiefEngineer} onChange={e => setNewChiefEngineer(e.target.value)} placeholder="总监理工程师" />
           </div>
           <Input
             placeholder="请输入项目名称"

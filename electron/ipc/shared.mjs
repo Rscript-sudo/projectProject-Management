@@ -3,6 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { encryptSecret, decryptSecret } from './secret.mjs'
 import { generateProjectCodeFromName } from './filename.mjs'
+import { normalizeProjectProfile } from '../../src/shared/projectProfile.mjs'
 
 export function getDefaultRoot() {
   return path.join(app.getPath('home'), 'Desktop')
@@ -27,7 +28,7 @@ export function ensureProjectDataDir(projectName) {
   return ensureDir(getProjectDataPath(projectName))
 }
 
-export function createProjectStructure(projectPath, projectName, projectType = '通用') {
+export function createProjectStructure(projectPath, projectName, projectType = '未分类', projectProfile = {}) {
   const dirs = [
     '01_项目前期/01_项目合同',
     '01_项目前期/02_招标文件',
@@ -84,13 +85,14 @@ export function createProjectStructure(projectPath, projectName, projectType = '
   const configPath = path.join(dataDir, 'project.config.json')
   if (!fs.existsSync(configPath)) {
     // 初次创建：自动生成 projectCode（虚竹 v2.0 项目码规则）
-    const projectCode = generateProjectCodeFromName(projectName)
+    const projectCode = String(projectProfile.projectCode || '').trim() || generateProjectCodeFromName(projectName)
+    const normalizedProfile = normalizeProjectProfile({ ...projectProfile, projectType })
     fs.writeFileSync(configPath, JSON.stringify({
-      contractor: '',
-      ownerUnit: '',
-      supervisorUnit: '',
-      chiefEngineer: '',
-      projectType,
+      contractor: String(projectProfile.contractor || '').trim(),
+      ownerUnit: String(projectProfile.ownerUnit || '').trim(),
+      supervisorUnit: String(projectProfile.supervisorUnit || '').trim(),
+      chiefEngineer: String(projectProfile.chiefEngineer || '').trim(),
+      ...normalizedProfile,
       projectCode,
     }, null, 2), 'utf8')
   }

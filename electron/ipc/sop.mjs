@@ -13,6 +13,7 @@
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
+import { getProjectTypeProfile, normalizeProjectType } from '../../src/shared/projectProfile.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -24,18 +25,10 @@ const __dirname = path.dirname(__filename)
  * 从 electron/ipc/sop.mjs 出发 → ../../src/shared/sop/
  */
 function resolveSopPath(projectType) {
-  // 标准化 key：信息化 → information
-  const map = {
-    '土建': 'civil',
-    '市政': 'municipal',
-    '房建': 'building',
-    '信息化': 'information',
-    '园林': 'landscape',
-    '钢结构': 'steel',
-    '装饰': 'decoration',
-  }
-  const folder = map[projectType] || 'civil'
-  return path.join(__dirname, '..', '..', 'src', 'shared', 'sop', folder, 'safety-notice.json')
+  const code = normalizeProjectType(projectType)
+  // 没有该专业 SOP 时明确返回空，而不是悄悄套用土建 SOP。
+  if (code === 'unclassified') return { code, path: null }
+  return { code, path: path.join(__dirname, '..', '..', 'src', 'shared', 'sop', code, 'safety-notice.json') }
 }
 
 export function register(ipcMain) {
@@ -55,20 +48,22 @@ export function register(ipcMain) {
    */
   ipcMain.handle('sop:read', (_, params = {}) => {
     try {
-      const { projectType = '土建', docType = '' } = params
-      const sopPath = resolveSopPath(projectType)
-      if (!fs.existsSync(sopPath)) {
+      const { projectType = '未分类', docType = '' } = params
+      const resolved = resolveSopPath(projectType)
+      const profile = getProjectTypeProfile(resolved.code)
+      if (!resolved.path || !fs.existsSync(resolved.path)) {
         return {
           found: false,
-          projectType,
-          sopFile: path.relative(path.join(__dirname, '..', '..'), sopPath),
+          projectType: profile.label,
+          projectTypeCode: resolved.code,
+          sopFile: resolved.path ? path.relative(path.join(__dirname, '..', '..'), resolved.path) : '',
           sections: [],
           globalForbiddenTerms: [],
           minWords: 0,
         }
       }
 
-      const raw = JSON.parse(fs.readFileSync(sopPath, 'utf8'))
+      const raw = JSON.parse(fs.readFileSync(resolved.path, 'utf8'))
       const sections = []
       for (const [key, value] of Object.entries(raw.sections || {})) {
         if (!value || typeof value !== 'object') continue
@@ -84,8 +79,9 @@ export function register(ipcMain) {
 
       return {
         found: true,
-        projectType,
-        sopFile: path.relative(path.join(__dirname, '..', '..'), sopPath),
+        projectType: profile.label,
+        projectTypeCode: resolved.code,
+        sopFile: path.relative(path.join(__dirname, '..', '..'), resolved.path),
         sections,
         globalForbiddenTerms: Array.isArray(raw._禁用条款) ? raw._禁用条款 : [],
         minWords,
@@ -94,7 +90,7 @@ export function register(ipcMain) {
       console.error('[sop:read] Error:', e.message)
       return {
         found: false,
-        projectType: params.projectType || '土建',
+        projectType: params.projectType || '未分类',
         sopFile: '',
         sections: [],
         globalForbiddenTerms: [],

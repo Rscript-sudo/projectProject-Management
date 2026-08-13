@@ -5,13 +5,15 @@ import { fileURLToPath } from 'url'
 import { safeCall } from './safe.mjs'
 import { ensureDir, ensureProjectIndex, readProjectIndex, writeProjectIndex, createProjectStructure, getProjectDataPath, ensureProjectDataDir, getDefaultRoot, getSettings } from './shared.mjs'
 import { generateProjectCodeFromName } from './filename.mjs'
+import { normalizeProjectProfile } from '../../src/shared/projectProfile.mjs'
+import { normalizeDocumentRules } from '../../src/shared/documentRules.mjs'
 
 function projectTemplateConfig(projectPath) {
   const dataDir = getProjectDataPath(path.basename(projectPath))
   const configPath = path.join(dataDir, 'project.config.json')
   let config = {}
   if (fs.existsSync(configPath)) config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
-  return { dataDir, configPath, config }
+  return { dataDir, configPath, config: { ...config, documentRules: normalizeDocumentRules(config.documentRules) } }
 }
 
 export function register(ipcMain) {
@@ -37,11 +39,11 @@ export function register(ipcMain) {
     }
   })
 
-  ipcMain.handle('fs:createProject', safeCall((_, rootPath, projectName, projectType = '通用') => {
+  ipcMain.handle('fs:createProject', safeCall((_, rootPath, projectName, projectType = '未分类', projectProfile = {}) => {
     const projectPath = path.join(rootPath, projectName)
     if (fs.existsSync(projectPath)) return { success: false, error: '项目已存在' }
     ensureDir(projectPath)
-    createProjectStructure(projectPath, projectName, projectType)
+    createProjectStructure(projectPath, projectName, projectType, projectProfile)
     const index = readProjectIndex()
     index.projects.push({ name: projectName, path: projectPath, addedAt: new Date().toISOString() })
     writeProjectIndex(index)
@@ -51,15 +53,15 @@ export function register(ipcMain) {
   ipcMain.handle('fs:readProjectConfig', (_, projectPath) => {
     try {
       const configPath = path.join(getProjectDataPath(path.basename(projectPath)), 'project.config.json')
-      if (!fs.existsSync(configPath)) return { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '通用', projectCode: 'PROJECT' }
+      if (!fs.existsSync(configPath)) return { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', ...normalizeProjectProfile(), documentRules: normalizeDocumentRules(), projectCode: 'PROJECT' }
       const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'))
       // 旧项目兼容：没有 projectCode 时按项目名兜底
       if (!cfg.projectCode) {
         cfg.projectCode = generateProjectCodeFromName(path.basename(projectPath))
       }
-      return cfg
+      return { ...cfg, ...normalizeProjectProfile(cfg), documentRules: normalizeDocumentRules(cfg.documentRules) }
     } catch {
-      return { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '通用', projectCode: 'PROJECT' }
+      return { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', ...normalizeProjectProfile(), documentRules: normalizeDocumentRules(), projectCode: 'PROJECT' }
     }
   })
 
@@ -67,7 +69,7 @@ export function register(ipcMain) {
     const dataDir = getProjectDataPath(path.basename(projectPath))
     ensureDir(dataDir)
     const configPath = path.join(dataDir, 'project.config.json')
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+    fs.writeFileSync(configPath, JSON.stringify({ ...config, ...normalizeProjectProfile(config), documentRules: normalizeDocumentRules(config.documentRules) }, null, 2), 'utf8')
     return { success: true }
   }))
 
@@ -89,6 +91,17 @@ export function register(ipcMain) {
     config.templateOverrides = { ...(config.templateOverrides || {}), [docType]: { path: targetPath, sourceName: path.basename(sourcePath), updatedAt: new Date().toISOString() } }
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
     return { success: true, path: targetPath, templateOverride: config.templateOverrides[docType] }
+  }))
+
+  // 恢复项目的自动模板匹配。保留项目模板文件，避免用户误操作后无法找回原件。
+  ipcMain.handle('fs:clearProjectTemplateOverride', safeCall((_, projectPath, docType) => {
+    const { dataDir, configPath, config } = projectTemplateConfig(projectPath)
+    ensureDir(dataDir)
+    const overrides = { ...(config.templateOverrides || {}) }
+    delete overrides[docType]
+    config.templateOverrides = overrides
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+    return { success: true }
   }))
 
   ipcMain.handle('fs:getProjectTemplateContract', async (_, projectPath, docType) => {
@@ -154,9 +167,33 @@ export function register(ipcMain) {
     return listTemplateLibrary(app.getPath('userData'))
   })
 
+  ipcMain.handle('fs:listSystemTemplates', async () => {
+    const templatesDir = app.isPackaged
+      ? path.join(process.resourcesPath, 'templates')
+      : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'templates')
+    const { listSystemTemplates } = await import('../templateService.mjs')
+    return listSystemTemplates(templatesDir)
+  })
+
   ipcMain.handle('fs:importTemplateToLibrary', safeCall(async (_, payload) => {
     const { importTemplateToLibrary } = await import('../templateRegistry.mjs')
     return { success: true, template: await importTemplateToLibrary({ userDataPath: app.getPath('userData'), ...payload }) }
+  }))
+
+  ipcMain.handle('fs:cloneSystemTemplateToLibrary', safeCall(async (_, { docType, scope = 'global', projectType = '通用', name }) => {
+    const templatesDir = app.isPackaged
+      ? path.join(process.resourcesPath, 'templates')
+      : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'templates')
+    const { listSystemTemplates } = await import('../templateService.mjs')
+    const source = (await listSystemTemplates(templatesDir)).find(item => item.docType === docType)
+    if (!source) return { success: false, error: `未找到${docType}系统预置模板` }
+    const { importTemplateToLibrary } = await import('../templateRegistry.mjs')
+    return { success: true, template: await importTemplateToLibrary({ userDataPath: app.getPath('userData'), sourcePath: source.path, docType, scope, projectType, name: name || `${docType}企业模板` }) }
+  }))
+
+  ipcMain.handle('fs:refreshTemplateLibraryEntry', safeCall(async (_, templateId) => {
+    const { refreshTemplateLibraryEntry } = await import('../templateRegistry.mjs')
+    return { success: true, template: await refreshTemplateLibraryEntry({ userDataPath: app.getPath('userData'), templateId }) }
   }))
 
   ipcMain.handle('fs:selectProjectTemplate', safeCall((_, projectPath, docType, templateId) => {
@@ -165,6 +202,16 @@ export function register(ipcMain) {
     config.templateSelections = { ...(config.templateSelections || {}), [docType]: templateId || null }
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
     return { success: true, templateId: config.templateSelections[docType] }
+  }))
+
+  ipcMain.handle('fs:getRuleCatalog', () => import('../../src/shared/documentRules.mjs').then(({ RULE_PACKS, DEFAULT_RULE_PACK_IDS }) => ({ packs: RULE_PACKS, defaults: DEFAULT_RULE_PACK_IDS })))
+
+  ipcMain.handle('fs:saveProjectDocumentRules', safeCall((_, projectPath, documentRules) => {
+    const { dataDir, configPath, config } = projectTemplateConfig(projectPath)
+    ensureDir(dataDir)
+    config.documentRules = normalizeDocumentRules(documentRules)
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+    return { success: true, documentRules: config.documentRules }
   }))
 
   ipcMain.handle('fs:getProjectDataPath', (_, projectPath) => {

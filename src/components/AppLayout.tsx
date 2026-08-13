@@ -12,6 +12,7 @@ import {
 import { useAppStore } from '../stores/useProjectStore'
 import GlobalSearch from './GlobalSearch'
 import TemplateCenterModal from './TemplateCenterModal'
+import { PROJECT_TYPE_OPTIONS, getProjectTypeProfile, normalizeTags } from '../shared/projectProfile.mjs'
 
 const { Sider, Content } = Layout
 const { Text } = Typography
@@ -22,11 +23,18 @@ export default function AppLayout() {
   const { message } = App.useApp()
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
-  const [newProjectType, setNewProjectType] = useState('通用')
+  const [newProjectType, setNewProjectType] = useState<string>()
+  const [newProjectTags, setNewProjectTags] = useState<string[]>([])
+  const [newProjectFeatures, setNewProjectFeatures] = useState('')
+  const [newProjectPhase, setNewProjectPhase] = useState('')
+  const [newProjectCode, setNewProjectCode] = useState('')
+  const [newOwnerUnit, setNewOwnerUnit] = useState('')
+  const [newContractor, setNewContractor] = useState('')
+  const [newSupervisorUnit, setNewSupervisorUnit] = useState('')
+  const [newChiefEngineer, setNewChiefEngineer] = useState('')
   const [loading, setLoading] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [templateCenterOpen, setTemplateCenterOpen] = useState(false)
-  const [appVersion, setAppVersion] = useState('')
 
   // 键盘快捷键 Cmd+K / Ctrl+K 打开搜索
   useEffect(() => {
@@ -44,18 +52,21 @@ export default function AppLayout() {
     loadSettings()
   }, [])
 
-  useEffect(() => {
-    window.electronAPI?.appInfo().then(info => setAppVersion(info.version)).catch(() => {})
-  }, [])
-
   const handleCreateProject = async () => {
-    if (!newProjectName.trim()) return
+    if (!newProjectName.trim() || !newProjectType) {
+      message.warning('请填写项目名称并选择项目类型')
+      return
+    }
     setLoading(true)
-    const result = await createProject(newProjectName.trim(), newProjectType)
+    const result = await createProject(newProjectName.trim(), newProjectType, { projectTags: normalizeTags(newProjectTags), projectFeatures: newProjectFeatures, projectPhase: newProjectPhase, projectCode: newProjectCode, ownerUnit: newOwnerUnit, contractor: newContractor, supervisorUnit: newSupervisorUnit, chiefEngineer: newChiefEngineer })
     setLoading(false)
     if (result.success) {
       setCreateModalOpen(false)
       setNewProjectName('')
+      setNewProjectType(undefined)
+      setNewProjectTags([])
+      setNewProjectFeatures('')
+      setNewProjectPhase(''); setNewProjectCode(''); setNewOwnerUnit(''); setNewContractor(''); setNewSupervisorUnit(''); setNewChiefEngineer('')
       await loadProjects()
       const updatedProjects = useAppStore.getState().projects
       const project = updatedProjects.find(p => p.name === newProjectName.trim())
@@ -135,14 +146,6 @@ export default function AppLayout() {
             title="控制台"
           />
         </div>
-        <Button
-          type="text"
-          onClick={() => navigate('/settings')}
-          title="版本与更新"
-          style={{ width: '100%', height: 34, marginBottom: 6, color: '#8c8c8c', fontSize: 11 }}
-        >
-          v{appVersion || '…'}
-        </Button>
       </Sider>
 
       {/* 新建项目弹窗 */}
@@ -150,30 +153,47 @@ export default function AppLayout() {
         title="新建项目"
         open={createModalOpen}
         onOk={handleCreateProject}
-        onCancel={() => { setCreateModalOpen(false); setNewProjectName(''); setNewProjectType('通用') }}
+        onCancel={() => { setCreateModalOpen(false); setNewProjectName(''); setNewProjectType(undefined); setNewProjectTags([]); setNewProjectFeatures(''); setNewProjectPhase(''); setNewProjectCode(''); setNewOwnerUnit(''); setNewContractor(''); setNewSupervisorUnit(''); setNewChiefEngineer('') }}
         confirmLoading={loading}
         okText="创建"
-        width={480}
+        width={560}
       >
         <div style={{ padding: '16px 0' }}>
           <Text type="secondary">项目将创建在：</Text>
           <Text code style={{ display: 'block', marginTop: 4, marginBottom: 12, fontSize: 12 }}>{projectRoot || '未设置根目录'}</Text>
-          <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 10 }}>
             <Text type="secondary" style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>项目类型</Text>
             <Select
               value={newProjectType}
               onChange={setNewProjectType}
               style={{ width: '100%' }}
               size="small"
-              options={[
-                { value: '通用', label: '通用' },
-                { value: '通信工程', label: '通信工程' },
-                { value: '信息化工程', label: '信息化工程' },
-                { value: '电力工程', label: '电力工程' },
-              ]}
+              placeholder="请选择项目类型"
+              options={PROJECT_TYPE_OPTIONS.filter(item => item.code !== 'unclassified').map(item => ({ value: item.label, label: item.label }))}
             />
           </div>
+          <div style={{ marginBottom: 12 }}>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>专业标签（可选，可自定义）</Text>
+            <Select mode="tags" value={newProjectTags} onChange={setNewProjectTags} style={{ width: '100%' }} size="small"
+              placeholder={newProjectType ? `如：${getProjectTypeProfile(newProjectType).suggestedTags.join('、')}` : '请先选择项目类型'}
+              options={(newProjectType ? getProjectTypeProfile(newProjectType).suggestedTags : []).map(tag => ({ value: tag, label: tag }))} />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>项目特点 / 建设范围（可选）</Text>
+            <Input.TextArea rows={2} value={newProjectFeatures} onChange={e => setNewProjectFeatures(e.target.value)} placeholder="如：数据中心机房改造，含综合布线、核心交换和视频监控；正在实施阶段。" />
+          </div>
+          <Text strong style={{ display: 'block', margin: '12px 0 6px', fontSize: 13 }}>项目基础信息</Text>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 11 }}>一次建档，后续自动写入模板和 AI 上下文；未确认的信息可暂留空，但正式件不能使用待核对字段。</Text>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <Input value={newProjectCode} onChange={e => setNewProjectCode(e.target.value)} placeholder="项目编码（可留空自动生成）" />
+            <Input value={newProjectPhase} onChange={e => setNewProjectPhase(e.target.value)} placeholder="当前阶段，如：主体施工" />
+            <Input value={newOwnerUnit} onChange={e => setNewOwnerUnit(e.target.value)} placeholder="建设单位" />
+            <Input value={newContractor} onChange={e => setNewContractor(e.target.value)} placeholder="施工单位" />
+            <Input value={newSupervisorUnit} onChange={e => setNewSupervisorUnit(e.target.value)} placeholder="监理单位" />
+            <Input value={newChiefEngineer} onChange={e => setNewChiefEngineer(e.target.value)} placeholder="总监理工程师" />
+          </div>
           <Input
+            style={{ marginTop: 12 }}
             placeholder="请输入项目名称"
             value={newProjectName}
             onChange={e => setNewProjectName(e.target.value)}

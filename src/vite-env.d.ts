@@ -177,7 +177,7 @@ export interface ElectronAPI {
     error?: string
   }>
   getProjects: (rootPath: string) => Promise<{ name: string; path: string }[]>
-  createProject: (rootPath: string, name: string, projectType?: string) => Promise<{ success: boolean; path?: string; error?: string }>
+  createProject: (rootPath: string, name: string, projectType?: string, projectProfile?: { projectTypeCode?: string; projectTags?: string[]; projectFeatures?: string; projectPhase?: string }) => Promise<{ success: boolean; path?: string; error?: string }>
   getDirTree: (dirPath: string, maxDepth?: number) => Promise<DirNode>
   readFile: (filePath: string) => Promise<string | FileInfo | null>
   writeFile: (filePath: string, content: string) => Promise<{ success: boolean; error?: string }>
@@ -202,6 +202,7 @@ export interface ElectronAPI {
   readSop: (params: { projectType: string; docType?: string }) => Promise<{
     found: boolean
     projectType: string
+    projectTypeCode?: string
     sopFile: string
     sections: Array<{ title: string; mustInclude: string[]; forbiddenTerms: string[] }>
     globalForbiddenTerms: string[]
@@ -258,12 +259,18 @@ export interface ElectronAPI {
   selectSavePath: (defaultPath: string) => Promise<string | null>
   selectTemplateFile: () => Promise<string | null>
   getProjectDataPath: (projectPath: string) => Promise<string>
-  readProjectConfig: (projectPath: string) => Promise<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; projectCode?: string; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }>; templateSelections?: Record<string, string | null> }>
+  readProjectConfig: (projectPath: string) => Promise<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; projectTypeCode?: string; projectTags?: string[]; projectFeatures?: string; projectPhase?: string; projectCode?: string; documentRules?: { rulePackIds?: string[]; additionalInstruction?: string }; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }>; templateSelections?: Record<string, string | null> }>
   writeProjectConfig: (projectPath: string, config: object) => Promise<{ success: boolean; error?: string }>
+  getRuleCatalog: () => Promise<{ packs: Array<{ id: string; group: string; label: string; description: string; default?: boolean; docTypes?: string[] }>; defaults: string[] }>
+  saveProjectDocumentRules: (projectPath: string, documentRules: { rulePackIds?: string[]; additionalInstruction?: string }) => Promise<{ success: boolean; documentRules?: { rulePackIds: string[]; additionalInstruction: string }; error?: string }>
   assignProjectTemplate: (projectPath: string, docType: string, sourcePath: string) => Promise<{ success: boolean; path?: string; templateOverride?: { path: string; sourceName?: string; updatedAt?: string }; error?: string }>
+  clearProjectTemplateOverride: (projectPath: string, docType: string) => Promise<{ success: boolean; error?: string }>
   getProjectTemplateContract: (projectPath: string, docType: string) => Promise<{ found: boolean; fields: string[]; source?: string; path?: string; templateId?: string; error?: string }>
   listTemplateLibrary: () => Promise<Array<{ id: string; name: string; docType: string; scope: 'global' | 'professional'; projectType: string; path: string; sourceName: string; fields?: string[]; createdAt: string; updatedAt: string }>>
+  listSystemTemplates: () => Promise<Array<{ id: string; name: string; docType: string; scope: 'system'; projectType: string; path: string; sourceName: string; fields?: string[]; readOnly: true }>>
   importTemplateToLibrary: (payload: { sourcePath: string; docType: string; scope: 'global' | 'professional'; projectType?: string; name?: string }) => Promise<{ success: boolean; template?: any; error?: string }>
+  cloneSystemTemplateToLibrary: (payload: { docType: string; scope?: 'global' | 'professional'; projectType?: string; name?: string }) => Promise<{ success: boolean; template?: any; error?: string }>
+  refreshTemplateLibraryEntry: (templateId: string) => Promise<{ success: boolean; template?: any; error?: string }>
   selectProjectTemplate: (projectPath: string, docType: string, templateId: string | null) => Promise<{ success: boolean; templateId?: string | null; error?: string }>
   deleteFile: (filePath: string) => Promise<{ success: boolean; error?: string }>
   renameFile: (filePath: string, newName: string) => Promise<{ success: boolean; path?: string; error?: string }>

@@ -33,7 +33,7 @@ interface AppState {
   setProjectRoot: (root: string) => void
   loadProjects: () => Promise<void>
   setCurrentProject: (project: ProjectInfo | null) => void
-  createProject: (name: string, projectType?: string) => Promise<{ success: boolean; error?: string }>
+  createProject: (name: string, projectType?: string, projectProfile?: { projectTypeCode?: string; projectTags?: string[]; projectFeatures?: string; projectPhase?: string; projectCode?: string; ownerUnit?: string; contractor?: string; supervisorUnit?: string; chiefEngineer?: string }) => Promise<{ success: boolean; error?: string }>
   deleteProject: (path: string) => Promise<void>
   renameProject: (oldPath: string, newName: string) => Promise<{ success: boolean; error?: string }>
   loadSettings: () => Promise<void>
@@ -72,11 +72,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setCurrentProject: (project) => set({ currentProject: project }),
 
-  createProject: async (name, projectType = '通用') => {
+  createProject: async (name, projectType = '未分类', projectProfile = {}) => {
     const { projectRoot } = get()
     try {
       const api = await waitForElectronAPI(10000)
-      const result = await api.createProject(projectRoot, name, projectType)
+      const result = await api.createProject(projectRoot, name, projectType, projectProfile)
       if (result.success) {
         await get().loadProjects()
       }
