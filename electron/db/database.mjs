@@ -138,6 +138,16 @@ function initSchema(db) {
       updated_at TEXT NOT NULL
     );
 
+    -- 导入批次：让进度事实可回溯至源文件、工作表与行号，也用于防止重复导入。
+    CREATE TABLE IF NOT EXISTS progress_import_batch (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_name TEXT NOT NULL,
+      source_file TEXT NOT NULL,
+      source_hash TEXT,
+      imported_at TEXT NOT NULL,
+      imported_count INTEGER NOT NULL DEFAULT 0
+    );
+
     -- 付款审批
     CREATE TABLE IF NOT EXISTS payment_request (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -235,6 +245,17 @@ function initSchema(db) {
       created_at TEXT NOT NULL
     );
   `)
+
+  // 兼容既有数据库：SQLite 的 CREATE TABLE 不会补列，升级时明确追加。
+  for (const statement of [
+    'ALTER TABLE progress_node ADD COLUMN source_file TEXT',
+    'ALTER TABLE progress_node ADD COLUMN source_sheet TEXT',
+    'ALTER TABLE progress_node ADD COLUMN source_row INTEGER',
+    'ALTER TABLE progress_node ADD COLUMN import_batch_id INTEGER',
+  ]) {
+    try { db.exec(statement) } catch (error) { if (!/duplicate column name/i.test(error.message)) throw error }
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_progress_source ON progress_node(project_name, source_file, source_sheet, source_row)')
 }
 
 /**

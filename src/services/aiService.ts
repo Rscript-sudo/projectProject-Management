@@ -634,7 +634,7 @@ export const providerConfigs: Record<AIProvider, { baseUrl: string; defaultModel
 export async function callAI(
   config: AIConfig,
   messages: {role: string; content: string}[],
-  extra?: { mode?: string; projectName?: string; dataToolIds?: string[] }
+  extra?: { mode?: string; projectName?: string; dataToolIds?: string[]; reportPeriod?: { start: string; end: string } }
 ): Promise<{
   success: boolean
   content?: string

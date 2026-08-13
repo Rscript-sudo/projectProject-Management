@@ -24,42 +24,62 @@ function safeQuery(fn) {
   }
 }
 
+function normalizePeriod(period = {}) {
+  const start = /^\d{4}-\d{2}-\d{2}$/.test(period.start || '') ? period.start : ''
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(period.end || '') ? period.end : ''
+  return start && end && start <= end ? { start, end } : null
+}
+
+function periodLabel(period) {
+  return period ? `${period.start} 至 ${period.end}` : '项目累计（未指定报告期）'
+}
+
 export const DATA_TOOLS = [
   // ==================== 进度 ====================
   {
     id: 'progress_summary',
     name: '进度概况',
     keywords: ['进度', '进展', '滞后', '延误', '完成率', '百分比', '横道图', '计划', '节点'],
-    query: (projectName) => safeQuery(() => {
+    query: (projectName, options = {}) => safeQuery(() => {
       const db = getDb()
+      const period = normalizePeriod(options.period)
       const nodes = db.prepare(
         'SELECT * FROM progress_node WHERE project_name = ? ORDER BY plan_start ASC'
       ).all(projectName)
 
-      const total = nodes.length
-      const completed = nodes.filter(n => n.progress_percent >= 100).length
-      const today = new Date().toISOString().split('T')[0]
-      const delayed = nodes.filter(n =>
+      const scoped = period ? nodes.filter(n => {
+        const start = n.actual_start || n.plan_start || ''
+        const end = n.actual_end || n.plan_end || start
+        return start <= period.end && end >= period.start
+      }) : nodes
+
+      const total = scoped.length
+      const completed = scoped.filter(n => n.progress_percent >= 100).length
+      const referenceDate = period?.end || new Date().toISOString().split('T')[0]
+      const delayed = scoped.filter(n =>
         n.progress_percent < 100 && !n.actual_end
-        && n.plan_end && n.plan_end < today
+        && n.plan_end && n.plan_end < referenceDate
       ).length
-      const totalWeight = nodes.reduce((s, n) => s + n.weight, 0)
+      const totalWeight = scoped.reduce((s, n) => s + n.weight, 0)
       const weightedPct = totalWeight > 0
-        ? (nodes.reduce((s, n) => s + n.progress_percent * n.weight, 0) / totalWeight).toFixed(1)
+        ? (scoped.reduce((s, n) => s + n.progress_percent * n.weight, 0) / totalWeight).toFixed(1)
         : '0.0'
 
       return {
+        报告期: periodLabel(period),
+        数据口径: period ? '报告期内计划或实际日期与报告期相交的进度节点' : '项目当前累计数据；不得用于历史周报/月报签发',
         总节点数: total,
         已完成: completed,
         滞后: delayed,
         进行中: total - completed - delayed,
         加权总进度: `${weightedPct}%`,
-        节点详情: nodes.map(n => ({
+        节点详情: scoped.map(n => ({
           名称: n.name,
           计划: `${n.plan_start || '—'} ~ ${n.plan_end || '—'}`,
           实际: n.actual_start ? `${n.actual_start || ''} ~ ${n.actual_end || '进行中'}` : '未开始',
           进度: `${n.progress_percent}%`,
           权重: n.weight,
+          来源: n.source_file ? `${n.source_file}${n.source_sheet ? `｜${n.source_sheet}` : ''}${n.source_row ? `第${n.source_row}行` : ''}` : '手工录入',
         })),
       }
     }),
@@ -71,14 +91,16 @@ export const DATA_TOOLS = [
     id: 'hazard_open',
     name: '未闭环隐患',
     keywords: ['隐患', '安全问题', '未整改', '危险源', '安全风险', '整改'],
-    query: (projectName) => safeQuery(() => {
+    query: (projectName, options = {}) => safeQuery(() => {
       const db = getDb()
+      const period = normalizePeriod(options.period)
       const all = db.prepare(
         "SELECT * FROM hazard WHERE project_name = ? ORDER BY created_at DESC"
-      ).all(projectName)
+      ).all(projectName).filter(h => !period || String(h.created_at || '').slice(0, 10) <= period.end)
       const open = all.filter(h => h.status !== '已关闭')
 
       return {
+        报告期: periodLabel(period),
         总隐患数: all.length,
         未闭环: open.length,
         隐患清单: open.map(h => ({
@@ -100,15 +122,17 @@ export const DATA_TOOLS = [
     id: 'payment_status',
     name: '付款状态',
     keywords: ['付款', '支付', '资金', '进度款', '审批', '投资'],
-    query: (projectName) => safeQuery(() => {
+    query: (projectName, options = {}) => safeQuery(() => {
       const db = getDb()
+      const period = normalizePeriod(options.period)
       const requests = db.prepare(
         'SELECT * FROM payment_request WHERE project_name = ? ORDER BY created_at DESC'
-      ).all(projectName)
+      ).all(projectName).filter(r => !period || (String(r.period || '').slice(0, 7) >= period.start.slice(0, 7) && String(r.period || '').slice(0, 7) <= period.end.slice(0, 7)))
       const totalRequested = requests.reduce((s, r) => s + r.amount, 0)
       const approved = requests.filter(r => r.status === '已通过' || r.status === '已支付')
 
       return {
+        报告期: periodLabel(period),
         付款申请总数: requests.length,
         累计申请金额: totalRequested,
         已审批金额: approved.reduce((s, r) => s + r.amount, 0),
@@ -159,13 +183,15 @@ export const DATA_TOOLS = [
     id: 'correspondence_recent',
     name: '近期函件',
     keywords: ['函件', '通知', '联系单', '台账', '发文', '收文', '发出'],
-    query: (projectName) => safeQuery(() => {
+    query: (projectName, options = {}) => safeQuery(() => {
       const db = getDb()
+      const period = normalizePeriod(options.period)
       const items = db.prepare(
-        'SELECT * FROM correspondence WHERE project_name = ? ORDER BY created_at DESC LIMIT 20'
-      ).all(projectName)
+        'SELECT * FROM correspondence WHERE project_name = ? ORDER BY created_at DESC'
+      ).all(projectName).filter(c => !period || (String(c.created_at || '').slice(0, 10) >= period.start && String(c.created_at || '').slice(0, 10) <= period.end)).slice(0, 20)
 
       return {
+        报告期: periodLabel(period),
         函件总数: items.length,
         函件列表: items.map(c => ({
           类型: c.doc_type,
@@ -213,13 +239,15 @@ export const DATA_TOOLS = [
     id: 'photo_recent',
     name: '近期照片',
     keywords: ['照片', '影像', '拍照', '图片', '归档'],
-    query: (projectName) => safeQuery(() => {
+    query: (projectName, options = {}) => safeQuery(() => {
       const db = getDb()
+      const period = normalizePeriod(options.period)
       const photos = db.prepare(
-        'SELECT * FROM photo WHERE project_name = ? ORDER BY created_at DESC LIMIT 20'
-      ).all(projectName)
+        'SELECT * FROM photo WHERE project_name = ? ORDER BY shoot_date DESC, created_at DESC'
+      ).all(projectName).filter(p => !period || (String(p.shoot_date || '').slice(0, 10) >= period.start && String(p.shoot_date || '').slice(0, 10) <= period.end)).slice(0, 20)
 
       return {
+        报告期: periodLabel(period),
         照片总数: photos.length,
         照片列表: photos.map(p => ({
           文件名: p.file_name,

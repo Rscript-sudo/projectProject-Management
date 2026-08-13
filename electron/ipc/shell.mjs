@@ -209,7 +209,7 @@ function trimContext(messages, modelName) {
  * 数据预取 — 将项目实时数据注入为 LLM 上下文
  * 用于 ai:stream 和 ai:call 两个 handler 共享
  */
-function buildDataInjectedMessages(messages, mode, projectName, dataToolIds) {
+function buildDataInjectedMessages(messages, mode, projectName, dataToolIds, reportPeriod) {
   if (!mode || !projectName || !dataToolIds?.length) return messages
   if (mode !== 'DATA_QUERY' && mode !== 'HYBRID') return messages
 
@@ -218,7 +218,7 @@ function buildDataInjectedMessages(messages, mode, projectName, dataToolIds) {
     const tool = DATA_TOOLS.find(t => t.id === toolId)
     if (!tool) continue
     try {
-      const raw = tool.query(projectName)
+      const raw = tool.query(projectName, { period: reportPeriod })
       if (raw && Object.keys(raw).length > 0) {
         dataParts.push(`【${tool.name}】\n${JSON.stringify(raw, null, 2)}`)
       }
@@ -235,7 +235,8 @@ function buildDataInjectedMessages(messages, mode, projectName, dataToolIds) {
     const sysIdx = messages.findIndex(m => m.role === 'system')
     if (sysIdx >= 0) {
       const sys = { ...messages[sysIdx] }
-      sys.content += `\n\n【当前项目实时数据】\n${dataContext}\n\n请充分利用以上数据生成准确的文档内容。所有日期/时间字段使用当前实际日期，不要自行推算。`
+      const periodHint = reportPeriod?.start && reportPeriod?.end ? `报告期为 ${reportPeriod.start} 至 ${reportPeriod.end}，不得引用报告期外事实。` : '未选择报告期：不得生成可签发的周报或月报，只能提示用户先选择报告期。'
+      sys.content += `\n\n【项目受控数据】\n${dataContext}\n\n${periodHint} 请充分利用以上数据生成准确的文档内容；未提供的数量、日期和事实不得补造。`
       const result = [...messages]
       result[sysIdx] = sys
       return result
@@ -266,7 +267,7 @@ ${dataContext}
   // 流式 AI 调用 — 通过 webContents.send 推送每个 chunk
   // 新增参数：mode / projectName / dataToolIds — 用于数据预取后注入 prompt
   // 安全：apiKey 不再从 IPC 参数传入，主进程从加密存储读取
-  ipcMain.handle('ai:stream', async (event, { url, model, messages, mode, projectName, dataToolIds }) => {
+  ipcMain.handle('ai:stream', async (event, { url, model, messages, mode, projectName, dataToolIds, reportPeriod }) => {
     const sender = event.sender
     const requestId = `ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     const controller = new AbortController()
@@ -293,7 +294,7 @@ ${dataContext}
     }
 
     // ===== 数据预取：在调 LLM 前把项目实时数据注入 prompt =====
-    let finalMessages = buildDataInjectedMessages(messages, mode, projectName, dataToolIds)
+    let finalMessages = buildDataInjectedMessages(messages, mode, projectName, dataToolIds, reportPeriod)
 
     // ===== 上下文截断：防止超限报错 =====
     finalMessages = trimContext(finalMessages, model)
@@ -387,14 +388,14 @@ ${dataContext}
   })
 
   // 前端拉取项目实时数据（供右侧面板展示）
-  ipcMain.handle('data:query', safeCall(async (_, { projectName, toolIds }) => {
+  ipcMain.handle('data:query', safeCall(async (_, { projectName, toolIds, reportPeriod }) => {
     const results = {}
     if (!projectName || !toolIds?.length) return results
     for (const toolId of toolIds) {
       const tool = DATA_TOOLS.find(t => t.id === toolId)
       if (tool) {
         try {
-          results[toolId] = tool.query(projectName)
+          results[toolId] = tool.query(projectName, { period: reportPeriod })
         } catch (e) {
           results[toolId] = { error: e.message }
         }
@@ -403,13 +404,13 @@ ${dataContext}
     return results
   }))
 
-  ipcMain.handle('ai:call', safeCall(async (_, { url, model, messages, mode, projectName, dataToolIds }) => {
+  ipcMain.handle('ai:call', safeCall(async (_, { url, model, messages, mode, projectName, dataToolIds, reportPeriod }) => {
     // 主进程持有 apiKey，不再从 IPC 接收
     const apiKey = getSettings().apiKey
     if (!apiKey) {
       return { success: false, error: 'API Key 未配置，请在设置中填写' }
     }
-    let finalMessages = buildDataInjectedMessages(messages, mode, projectName, dataToolIds)
+    let finalMessages = buildDataInjectedMessages(messages, mode, projectName, dataToolIds, reportPeriod)
     finalMessages = trimContext(finalMessages, model)
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 60000)

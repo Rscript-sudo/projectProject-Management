@@ -49,7 +49,6 @@ export default function Home() {
   const [newProjectType, setNewProjectType] = useState<string>()
   const [newProjectTags, setNewProjectTags] = useState<string[]>([])
   const [newProjectFeatures, setNewProjectFeatures] = useState('')
-  const [newProjectPhase, setNewProjectPhase] = useState('')
   const [newProjectCode, setNewProjectCode] = useState('')
   const [newOwnerUnit, setNewOwnerUnit] = useState('')
   const [newContractor, setNewContractor] = useState('')
@@ -114,7 +113,7 @@ export default function Home() {
       return
     }
     setCreating(true)
-    const result = await createProject(newProjectName.trim(), newProjectType, { projectTags: normalizeTags(newProjectTags), projectFeatures: newProjectFeatures, projectPhase: newProjectPhase, projectCode: newProjectCode, ownerUnit: newOwnerUnit, contractor: newContractor, supervisorUnit: newSupervisorUnit, chiefEngineer: newChiefEngineer })
+    const result = await createProject(newProjectName.trim(), newProjectType, { projectTags: normalizeTags(newProjectTags), projectFeatures: newProjectFeatures, projectCode: newProjectCode, ownerUnit: newOwnerUnit, contractor: newContractor, supervisorUnit: newSupervisorUnit, chiefEngineer: newChiefEngineer })
     setCreating(false)
     if (result.success) {
       setCreateModalOpen(false)
@@ -122,7 +121,7 @@ export default function Home() {
       setNewProjectType(undefined)
       setNewProjectTags([])
       setNewProjectFeatures('')
-      setNewProjectPhase(''); setNewProjectCode(''); setNewOwnerUnit(''); setNewContractor(''); setNewSupervisorUnit(''); setNewChiefEngineer('')
+      setNewProjectCode(''); setNewOwnerUnit(''); setNewContractor(''); setNewSupervisorUnit(''); setNewChiefEngineer('')
       await loadProjects()
       loadDirTree(projectRoot)
       const updated = useAppStore.getState().projects
@@ -718,7 +717,7 @@ export default function Home() {
         title="新建项目"
         open={createModalOpen}
         onOk={handleCreateProject}
-        onCancel={() => { setCreateModalOpen(false); setNewProjectName(''); setNewProjectType(undefined); setNewProjectTags([]); setNewProjectFeatures(''); setNewProjectPhase(''); setNewProjectCode(''); setNewOwnerUnit(''); setNewContractor(''); setNewSupervisorUnit(''); setNewChiefEngineer('') }}
+        onCancel={() => { setCreateModalOpen(false); setNewProjectName(''); setNewProjectType(undefined); setNewProjectTags([]); setNewProjectFeatures(''); setNewProjectCode(''); setNewOwnerUnit(''); setNewContractor(''); setNewSupervisorUnit(''); setNewChiefEngineer('') }}
         confirmLoading={creating}
         okText="创建"
         width={560}
@@ -751,7 +750,6 @@ export default function Home() {
           <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 11 }}>创建时一次建档，后续自动写入模板及 AI 上下文。</Text>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <Input value={newProjectCode} onChange={e => setNewProjectCode(e.target.value)} placeholder="项目编码（可空自动生成）" />
-            <Input value={newProjectPhase} onChange={e => setNewProjectPhase(e.target.value)} placeholder="当前阶段" />
             <Input value={newOwnerUnit} onChange={e => setNewOwnerUnit(e.target.value)} placeholder="建设单位" />
             <Input value={newContractor} onChange={e => setNewContractor(e.target.value)} placeholder="施工单位" />
             <Input value={newSupervisorUnit} onChange={e => setNewSupervisorUnit(e.target.value)} placeholder="监理单位" />

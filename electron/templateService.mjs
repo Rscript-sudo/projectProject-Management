@@ -283,7 +283,7 @@ export function sanitizeFieldValue(value) {
  *   让老板在预览里一眼看到需要改的位置
  */
 const PROJECT_TYPE_FORBIDDEN_TERMS = {
-  信息化: ['塔吊', '升降机', '电焊机', '木工', '扬尘', '木工棚', '木工加工', '混凝土', '钢筋', '砌体', '模板', '脚手架', '深基坑', '高支模', '桩号', '围挡围栏'],
+  信息化: ['塔吊', '升降机', '电焊机', '木工', '扬尘', '木工棚', '木工加工', '混凝土', '钢筋', '砌体', '脚手架', '深基坑', '高支模', '桩号', '围挡围栏'],
   园林: ['塔吊', '升降机', '电焊机', '木工', '混凝土', '钢筋', '砌体', '脚手架', '深基坑', '高支模'],
   装饰: ['塔吊', '升降机', '混凝土', '钢筋', '砌体', '深基坑', '高支模', '苗木'],
   钢结构: ['木工', '砌体', '苗木', '机房', 'UPS', '精密空调'],
@@ -575,10 +575,12 @@ function splitDocumentParagraphs(value) {
 /** 生成系统预置模板的可签发 DOCX；仅使用结构化占位字段，不混入任何 AI 校准信息。 */
 export async function renderStructuredSystemDocument(docType, data) {
   const docx = await import('docx')
-  const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, VerticalAlign, PageNumber, BorderStyle } = docx
+  const { Document, Packer, Paragraph, TextRun, AlignmentType, PageNumber } = docx
   const page = { top: 1985, bottom: 1701, left: 1587, right: 1474 }
-  const font = 'Songti SC'
-  const titleFont = 'Heiti SC'
+  // 使用 LibreOffice 与 macOS Word 均可解析的 Unicode 中文字体；
+  // Songti SC 在部分无桌面字体缓存的渲染环境会退化成方框，不能作为交付默认。
+  const font = 'Arial Unicode MS'
+  const titleFont = 'Arial Unicode MS'
   const value = (key) => String(data[key] ?? '').trim()
   const body = (text) => splitDocumentParagraphs(text).map(item => new Paragraph({
     children: [new TextRun({ text: item, font, size: 24 })],
@@ -596,26 +598,17 @@ export async function renderStructuredSystemDocument(docType, data) {
     alignment: AlignmentType.CENTER,
     spacing: { after: 280 },
   })
-  // A4 正文可用宽度为 9360 DXA。必须写明每个单元格的 DXA 宽度，不能用
-  // 百分比或固定行高：WPS/Word 对百分比序列化的兼容性不同，曾导致内容重叠。
-  const META_LABEL_WIDTH = 1760
-  const META_VALUE_WIDTH = 2920
-  const cell = (text, width, isLabel = false) => new TableCell({
-    verticalAlign: VerticalAlign.CENTER,
-    margins: { top: 90, bottom: 90, left: 120, right: 120 },
-    width: { size: width, type: WidthType.DXA },
-    children: [new Paragraph({ children: [new TextRun({ text: text || '—', font, size: 21, bold: isLabel })], alignment: isLabel ? AlignmentType.CENTER : AlignmentType.LEFT })],
-  })
-  const meta = (pairs) => new Table({
-    width: { size: 9360, type: WidthType.DXA },
-    borders: { top: { style: BorderStyle.SINGLE, size: 4, color: '666666' }, bottom: { style: BorderStyle.SINGLE, size: 4, color: '666666' }, left: { style: BorderStyle.SINGLE, size: 4, color: '666666' }, right: { style: BorderStyle.SINGLE, size: 4, color: '666666' }, insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: '999999' }, insideVertical: { style: BorderStyle.SINGLE, size: 4, color: '999999' } },
-    rows: pairs.map(row => new TableRow({ children: [
-      cell(row[0], META_LABEL_WIDTH, true),
-      cell(row[1], META_VALUE_WIDTH),
-      cell(row[2], META_LABEL_WIDTH, true),
-      cell(row[3], META_VALUE_WIDTH),
-    ] })),
-  })
+  // 正式件头部采用字段行而非固定高度表格。旧模板的窄列在 Word/Quick Look/WPS
+  // 间解释不一致，长项目名会竖排并挤压正文；字段行可自然换行，跨办公软件稳定。
+  const meta = (pairs) => pairs.map(row => new Paragraph({
+    children: [
+      new TextRun({ text: `${row[0]}：`, font, size: 21, bold: true }),
+      new TextRun({ text: row[1] || '—', font, size: 21 }),
+      new TextRun({ text: `    ${row[2]}：`, font, size: 21, bold: true }),
+      new TextRun({ text: row[3] || '—', font, size: 21 }),
+    ],
+    spacing: { after: 70 },
+  }))
   const children = []
   const appendSections = (sections) => {
     for (const [label, content] of sections) {
@@ -627,24 +620,24 @@ export async function renderStructuredSystemDocument(docType, data) {
 
   if (docType === '监理日志') {
     children.push(title('监 理 日 志'))
-    children.push(meta([['项目名称', value('项目名称'), '日期', value('日期')], ['施工部位', value('施工部位'), '天气/气温', [value('天气'), value('气温')].filter(Boolean).join(' / ')]]))
+    children.push(...meta([['项目名称', value('项目名称'), '日期', value('日期')], ['施工部位', value('施工部位'), '天气/气温', [value('天气'), value('气温')].filter(Boolean).join(' / ')]]))
     appendSections([['一、参与人员', value('参与人员')], ['二、当日监理工作', value('今日内容')], ['三、核心工作落实', value('核心工作落实')], ['四、问题及协调处理', value('协调解决情况')], ['五、其他事项及次日计划', value('其他事项')]])
   } else if (docType === '监理周报') {
     children.push(title('监 理 周 报'))
-    children.push(meta([['项目名称', value('项目名称'), '报告期', value('日期范围')], ['周次', value('周数'), '报告日期', value('日期')], ['建设单位', value('甲方单位'), '施工单位', value('乙方单位')], ['监理单位', value('监理单位'), '总监理工程师', value('总监姓名')]]))
+    children.push(...meta([['项目名称', value('项目名称'), '报告期', value('日期范围')], ['周次', value('周数'), '报告日期', value('日期')], ['建设单位', value('甲方单位'), '施工单位', value('乙方单位')], ['监理单位', value('监理单位'), '总监理工程师', value('总监姓名')]]))
     appendSections([['一、本周形象进度', value('形象进度说明')], ['二、本周工作开展情况', value('周进度详情')], ['（一）集采材料与设备', value('集采部分内容')], ['（二）非集采材料与设备', value('非集采部分内容')], ['（三）到货与安装统计', value('到货安装统计')], ['三、质量安全管控', value('安全质量描述')], ['四、存在问题及处理情况', value('存在问题')], ['五、下周工作计划', value('下周计划')], ['六、监理建议', value('监理建议')]])
   } else if (docType === '监理月报') {
     children.push(title('监 理 月 报'))
-    children.push(meta([['项目名称', value('项目名称'), '报告期', value('日期范围')], ['月份', value('月份'), '报告日期', value('日期')], ['建设单位', value('甲方单位'), '施工单位', value('乙方单位')], ['监理单位', value('监理单位'), '总监理工程师', value('总监姓名')]]))
+    children.push(...meta([['项目名称', value('项目名称'), '报告期', value('日期范围')], ['月份', value('月份'), '报告日期', value('日期')], ['建设单位', value('甲方单位'), '施工单位', value('乙方单位')], ['监理单位', value('监理单位'), '总监理工程师', value('总监姓名')]]))
     appendSections([['一、项目概况及本月综述', value('形象进度说明')], ['二、本月进度管理', value('本月进度详情')], ['三、工程量及累计完成情况', [value('本月完成工程量'), value('累计完成情况'), value('到货安装统计')].filter(Boolean).join('\n\n')], ['四、投资完成情况', value('本月投资情况')], ['五、质量管理情况', value('本月质量描述')], ['六、安全管理情况', value('本月安全描述')], ['七、问题及监理履职情况', [value('存在问题'), value('监理履职情况')].filter(Boolean).join('\n\n')], ['八、监理建议及下月计划', [value('监理建议'), value('下月计划')].filter(Boolean).join('\n\n')]])
   } else if (docType === '进度分析报告') {
     children.push(title('项目进度分析报告'))
-    children.push(meta([['项目名称', value('项目名称'), '项目代码', value('项目代码')], ['报告期', value('报告期'), '报告日期', value('报告日期')], ['监理单位', value('监理单位'), '编制人', value('编制人')]]))
+    children.push(...meta([['项目名称', value('项目名称'), '项目代码', value('项目代码')], ['报告期', value('报告期'), '报告日期', value('报告日期')], ['监理单位', value('监理单位'), '编制人', value('编制人')]]))
     appendSections([['一、总体进度概况', value('总体进度')], ['二、进度偏差分析', [value('进度偏差'), value('偏差原因')].filter(Boolean).join('\n\n')], ['三、风险提示', value('风险提示')], ['四、建议措施', value('建议措施')], ['五、下月工作计划', value('下月计划')]])
   } else {
     const documentTitle = docType === '整改通知书' ? '监理整改通知书' : docType === '安全通知书' ? '监理安全通知书' : '工程联系单'
     children.push(title(documentTitle))
-    children.push(meta([['项目名称', value('项目名称'), '文件编号', value('文件编号')], ['致单位', value('致单位'), '日期', value('日期')], ['事由', value('事由') || value('主题'), '监理单位', value('监理单位')]]))
+    children.push(...meta([['项目名称', value('项目名称'), '文件编号', value('文件编号')], ['致单位', value('致单位'), '日期', value('日期')], ['事由', value('事由') || value('主题'), '监理单位', value('监理单位')]]))
     children.push(...body(value('正文内容') || value('内容') || value('正文')))
     children.push(new Paragraph({ children: [new TextRun({ text: value('监理单位') || '监理机构', font, size: 24 })], alignment: AlignmentType.RIGHT, spacing: { before: 260 } }))
     children.push(new Paragraph({ children: [new TextRun({ text: value('日期'), font, size: 24 })], alignment: AlignmentType.RIGHT }))

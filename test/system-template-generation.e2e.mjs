@@ -29,9 +29,36 @@ function structuredContent(docType, minimum, fields) {
     '主题': `${docType}信息化生成验收`,
     '正文内容': documentBody(docType, minimum),
     '内容': documentBody(docType, minimum),
+    // 系统交付版有比旧 Word 模板更完整的字段契约；回归测试必须覆盖这些字段，
+    // 不能只从旧模板占位符反推，否则会漏掉结构化正式件必填项。
+    '施工部位': '信息化机房及网络设备区',
+    '参与人员': '总监理工程师、专业监理工程师、施工单位项目负责人',
+    '今日内容': documentBody(docType, minimum),
+    '核心工作落实': documentBody(docType, minimum),
+    '协调解决情况': documentBody(docType, minimum),
+    '其他事项': documentBody(docType, minimum),
+    '日期范围': '2026年08月10日至2026年08月16日',
+    '周数': '第33周',
+    '形象进度说明': documentBody(docType, minimum),
+    '周进度详情': documentBody(docType, minimum),
+    '安全质量描述': documentBody(docType, minimum),
+    '存在问题': '本期未发现需签发整改通知的事项。',
+    '下周计划': documentBody(docType, minimum),
+    '监理建议': documentBody(docType, minimum),
+    '月份': '2026年08月',
+    '本月进度详情': documentBody(docType, minimum),
+    '本月质量描述': documentBody(docType, minimum),
+    '本月安全描述': documentBody(docType, minimum),
+    '监理履职情况': documentBody(docType, minimum),
+    '报告期': '2026年08月',
+    '总体进度': '以已确认的项目进度台账为准。',
+    '进度偏差': '本期未发现已确认的进度偏差。',
+    '偏差原因': '无。',
+    '风险提示': '持续关注设备到货和接口联调计划。',
+    '建议措施': documentBody(docType, minimum),
   }
   for (const field of fields) {
-    if (!values[field]) values[field] = `${field}：已按项目资料填写，签发前请核对。`
+    if (!values[field]) values[field] = `${field}：已按项目资料填写。`
   }
   return Object.entries(values).map(([key, value]) => `【${key}】${value}`).join('\n')
 }

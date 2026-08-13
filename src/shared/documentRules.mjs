@@ -53,7 +53,7 @@ export function buildDocumentRulesInjection(docType, rules = {}) {
   const packs = getApplicableRulePacks(docType, normalized)
   const lines = packs.map((pack, index) => `${index + 1}. ${pack.label}：${pack.description}`)
   const target = getDocumentRuleMinWords(docType, normalized)
-  if (target) lines.push(`${lines.length + 1}. 建议正文达到 ${target} 字左右；篇幅应与事项复杂度匹配，不以标题、占位符或重复内容凑数。`)
+  if (target) lines.push(`${lines.length + 1}. 正文不得少于 ${target} 字（建议按事实写到 ${target} 字左右）；短通知、联系单可按事实简洁成文，但不得以标题、占位符或重复内容凑数。`)
   if (normalized.additionalInstruction) lines.push(`${lines.length + 1}. 项目补充要求：${normalized.additionalInstruction}`)
   return `【本项目文书规则（已选择的能力包）】\n${lines.join('\n')}\n\n交付前静默自查：内容是否有来源、是否符合项目专业、结构是否齐全、每项要求是否可执行。规则不得覆盖“不得编造事实、正式件不得含待核对内容、模板字段契约和专业术语门禁”。`
 }

@@ -218,6 +218,8 @@ export function updateLedger(projectPath, subDir, fileName, docType, meta = null
       item.subject = meta.subject || ''            // 事由
     }
 
+    // 同一正式文件允许再次保存覆盖，但台账只能保留一条记录。
+    ledger.items = ledger.items.filter(existing => existing.fileName !== fileName)
     ledger.items.unshift(item)
     ledger.items = ledger.items.slice(0, 200)
 

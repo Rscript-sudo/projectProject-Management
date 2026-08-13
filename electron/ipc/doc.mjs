@@ -3,13 +3,14 @@ import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { app, BrowserWindow } from 'electron'
 import { ensureDir, getProjectDataPath, updateLedger } from './shared.mjs'
-import { getAndIncrementNumber } from './numbering.mjs'
+import { getAndIncrementNumber, previewNumber } from './numbering.mjs'
 import { buildFileName, getSubDir as getFilenameSubDir, nextVersion } from './filename.mjs'
 import { isPathSafe } from './file.mjs'
 import { safeCall } from './safe.mjs'
 import { scanForLeftoverPlaceholders } from '../placeholderScan.mjs'
 import { getMinWordCount, countEffectiveWords } from './docValidation.mjs'
 import { getDocumentRuleMinWords } from '../../src/shared/documentRules.mjs'
+import { recordIssuedDocument } from '../db/repo.mjs'
 // v1.2.0：主进程接入反编造铁律后处理（单一真相源：electron/shared/postProcess.mjs）
 import { postProcessTimeFields, postProcessFabricationGuard } from '../shared/postProcess.mjs'
 
@@ -26,7 +27,7 @@ function getTemplatesDir() {
 
 export function register(ipcMain) {
   // v1.2.1 P0 修复：用 safeCall 包装 handler，统一异常处理
-  ipcMain.handle('fs:saveDoc', safeCall(async (_, { projectPath, subDir, fileName, content, docType, projectName, userInput, savePath: customSavePath, meta, customSummary, version }) => {
+  ipcMain.handle('fs:saveDoc', safeCall(async (_, { projectPath, subDir, fileName, content, docType, projectName, userInput, savePath: customSavePath, meta, customSummary, version, preview = false }) => {
     // v1.2.0：主进程入口反编造铁律（兜底，前端 ProjectView.tsx 已调用一次）
     //   避免任何非前端入口（如直接 IPC）绕开后处理
     const _guardResult = postProcessFabricationGuard(content || '')
@@ -37,14 +38,8 @@ export function register(ipcMain) {
     }
     content = _processedContent
 
-    // 兼容旧版 AI 输出：系统字段曾使用“数据待核对”作为内部防编造标记。
-    // 对形如【建设单位】数据待核对的独立字段，保留字段名并交给项目配置/自动编号回填；
-    // 正文中的未知事实仍保留门禁，不能静默伪造。
-    content = content
-      .replace(/【([^】]+)】\s*(?:数据待核对|签发前请核对)\s*(?=\n|【|$)/g, '【$1】')
-      // 旧版 AI 也可能把该内部标记混进普通段落。删除标记本身而不补造事实；
-      // 用户仍可在预览编辑模式补充真实信息。
-      .replace(/数据待核对|签发前请核对/g, '')
+    // 未核对内容必须显式阻止正式件，绝不能在保存时静默删除提示后继续签发。
+    // 这也是 AI 生成与人工签发之间最关键的一道事实门禁。
 
     // 正式件硬门禁：不允许把未核验字段、旧校准块或跨专业术语写进 Word。
     const { validateDeliverableContent } = await import('../templateService.mjs')
@@ -101,12 +96,16 @@ export function register(ipcMain) {
       filenameMeta = built
     }
 
-    const savePath = customSavePath || path.join(projectPath, finalSubDir, finalFileName)
+    // 预览件只写系统临时目录，不占正式文号、不进入任何台账，也不会污染项目资料目录。
+    const savePath = preview
+      ? path.join(app.getPath('temp'), '项目文档管理系统预览', finalFileName)
+      : (customSavePath || path.join(projectPath, finalSubDir, finalFileName))
     // v1.2.1 P0 修复：写文件前校验路径在 home/tmp 下 + 不在敏感目录黑名单
     if (!isPathSafe(savePath)) {
       return { success: false, error: `保存路径不安全：${savePath}。仅允许写入用户主目录或系统临时目录下的非敏感路径。` }
     }
     ensureDir(path.dirname(savePath))
+    const temporarySavePath = `${savePath}.${process.pid}.${Date.now()}.draft`
 
     console.log('[saveDoc] Saving:', { docType, projectName, fileName: finalFileName, subDir: finalSubDir, ...(filenameMeta || {}) })
 
@@ -128,9 +127,8 @@ export function register(ipcMain) {
     if (template) {
       console.log('[saveDoc] Using template:', template.templatePath)
 
-      // 获取自动编号（使用后递增保存）
-      const autoNumber = await getAndIncrementNumber(docType, projectName)
-      console.log('[saveDoc] Auto number:', autoNumber)
+      // 先预览编号，全部渲染和校验通过后再正式占号，避免失败文件造成跳号。
+      const previewAutoNumber = previewNumber(docType, projectName)
 
       const data = buildPlaceholderData({
         docType,
@@ -149,7 +147,7 @@ export function register(ipcMain) {
       })
 
       // 覆盖文件编号占位符
-      data['文件编号'] = autoNumber
+      data['文件编号'] = previewAutoNumber
 
       console.log('[saveDoc] Placeholder keys:', Object.keys(data).join(', '))
 
@@ -161,38 +159,53 @@ export function register(ipcMain) {
         && !projectConfig.templateOverrides?.[docType]
         && !libraryTemplate
         && supportsStructuredSystemLayout(docType)
-      let buffer
-      if (engine === 'xlsx') {
+      const renderBuffer = async () => {
+        if (engine === 'xlsx') {
         const cellMappings = template.config.placeholder_cells || []
-        buffer = await renderXlsxTemplate(template.templatePath, data, cellMappings)
-      } else if (useStructuredSystemLayout) {
-        const structuredCheck = validateStructuredSystemData(docType, data)
-        if (!structuredCheck.valid) {
-          return { success: false, error: `未通过正式件字段校验：${structuredCheck.missing.join('、')}未填写。请在 AI 结果中补齐对应段落后再保存。` }
+          return renderXlsxTemplate(template.templatePath, data, cellMappings)
         }
-        buffer = await renderStructuredSystemDocument(docType, data)
-      } else {
-        buffer = await renderTemplate(template.templatePath, data)
+        if (useStructuredSystemLayout) {
+          const structuredCheck = validateStructuredSystemData(docType, data)
+          if (!structuredCheck.valid) throw new Error(`未通过正式件字段校验：${structuredCheck.missing.join('、')}未填写。请在 AI 结果中补齐对应段落后再保存。`)
+          return renderStructuredSystemDocument(docType, data)
+        }
+        return renderTemplate(template.templatePath, data)
       }
+      let buffer = await renderBuffer()
 
-      fs.writeFileSync(savePath, buffer)
-      await updateLedger(projectPath, finalSubDir, finalFileName, docType, meta)
-      console.log('[saveDoc] Template saved OK:', savePath, 'size:', buffer.length)
+      fs.writeFileSync(temporarySavePath, buffer)
 
       if (engine !== 'xlsx' && !useStructuredSystemLayout) {
-        await formatDocx(savePath, true)
+        await formatDocx(temporarySavePath, true)
       }
 
       // 渲染后再扫一次，防止模板默认值、空影像字段等绕过输入层校验。
       if (engine !== 'xlsx') {
         const PizZip = (await import('pizzip')).default
-        const renderedText = new PizZip(fs.readFileSync(savePath, 'binary')).file('word/document.xml')?.asText().replace(/<[^>]+>/g, '') || ''
+        const renderedText = new PizZip(fs.readFileSync(temporarySavePath, 'binary')).file('word/document.xml')?.asText().replace(/<[^>]+>/g, '') || ''
         const renderedCheck = validateDeliverableContent(renderedText, projectConfig.projectTypeCode || projectConfig.projectType)
         if (!renderedCheck.valid) {
-          try { fs.unlinkSync(savePath) } catch {}
+          try { fs.unlinkSync(temporarySavePath) } catch {}
           return { success: false, error: `模板渲染后未通过正式件校验：${[...renderedCheck.markers, ...renderedCheck.forbiddenTerms].join('、')}。文件未保留。` }
         }
       }
+
+      if (preview) {
+        fs.renameSync(temporarySavePath, savePath)
+        return { success: true, preview: true, path: savePath, fileName: finalFileName, subDir: finalSubDir, filenameMeta }
+      }
+      const autoNumber = await getAndIncrementNumber(docType, projectName)
+      // 单项目界面通常不会并发保存；若并发导致预览号变化，重新渲染为正式编号后才落盘。
+      if (autoNumber !== previewAutoNumber) {
+        data['文件编号'] = autoNumber
+        buffer = await renderBuffer()
+        fs.writeFileSync(temporarySavePath, buffer)
+        if (engine !== 'xlsx' && !useStructuredSystemLayout) await formatDocx(temporarySavePath, true)
+      }
+      fs.renameSync(temporarySavePath, savePath)
+      await updateLedger(projectPath, finalSubDir, finalFileName, docType, { ...meta, fileNumber: autoNumber, status: '正式件' })
+      recordIssuedDocument({ projectName, docType, fileName: finalFileName, subDir: finalSubDir, fileNumber: autoNumber, meta: { ...meta, status: '正式件' } })
+      console.log('[saveDoc] Template saved OK:', savePath, 'size:', buffer.length)
 
       return { success: true, path: savePath, fileName: finalFileName, subDir: finalSubDir, filenameMeta }
     }
@@ -213,20 +226,21 @@ export function register(ipcMain) {
       }],
     })
     const buffer = await Packer.toBuffer(doc)
-    fs.writeFileSync(savePath, buffer)
-
-    await updateLedger(projectPath, finalSubDir, finalFileName, docType, meta)
-    console.log('[saveDoc] Fallback saved OK:', savePath, 'size:', buffer.length)
-
-    await formatDocx(savePath, false)
+    fs.writeFileSync(temporarySavePath, buffer)
+    await formatDocx(temporarySavePath, false)
 
     const PizZip = (await import('pizzip')).default
-    const renderedText = new PizZip(fs.readFileSync(savePath, 'binary')).file('word/document.xml')?.asText().replace(/<[^>]+>/g, '') || ''
+    const renderedText = new PizZip(fs.readFileSync(temporarySavePath, 'binary')).file('word/document.xml')?.asText().replace(/<[^>]+>/g, '') || ''
     const renderedCheck = validateDeliverableContent(renderedText, preSaveConfig.projectTypeCode || preSaveConfig.projectType)
     if (!renderedCheck.valid) {
-      try { fs.unlinkSync(savePath) } catch {}
+      try { fs.unlinkSync(temporarySavePath) } catch {}
       return { success: false, error: `文档未通过正式件校验：${[...renderedCheck.markers, ...renderedCheck.forbiddenTerms].join('、')}。文件未保留。` }
     }
+    fs.renameSync(temporarySavePath, savePath)
+    if (preview) return { success: true, preview: true, path: savePath, fileName: finalFileName, subDir: finalSubDir, filenameMeta }
+    await updateLedger(projectPath, finalSubDir, finalFileName, docType, { ...meta, status: '正式件' })
+    recordIssuedDocument({ projectName, docType, fileName: finalFileName, subDir: finalSubDir, meta: { ...meta, status: '正式件' } })
+    console.log('[saveDoc] Fallback saved OK:', savePath, 'size:', buffer.length)
 
     return { success: true, path: savePath, fileName: finalFileName, subDir: finalSubDir, filenameMeta }
   }))
@@ -263,6 +277,20 @@ export function register(ipcMain) {
     const configPath = path.join(getProjectDataPath(projectName), 'project.config.json')
     if (fs.existsSync(configPath)) {
       try { projectConfig = JSON.parse(fs.readFileSync(configPath, 'utf8')) } catch (e) { console.warn('[exportPDF] Failed to parse project config:', e.message) }
+    }
+    // PDF 同样可能被用户作为对外交付件，不能绕过 Word 保存时的事实与占位符门禁。
+    const { validateDeliverableContent } = await import('../templateService.mjs')
+    const deliverableCheck = validateDeliverableContent(content, projectConfig.projectTypeCode || projectConfig.projectType)
+    if (!deliverableCheck.valid) {
+      const reasons = [
+        deliverableCheck.markers.length ? `未清理内容：${deliverableCheck.markers.join('、')}` : '',
+        deliverableCheck.forbiddenTerms.length ? `不适用专业术语：${deliverableCheck.forbiddenTerms.join('、')}` : '',
+      ].filter(Boolean).join('；')
+      return { success: false, error: `未通过正式件校验：${reasons}。请修订后再导出 PDF。` }
+    }
+    const leftoverAll = scanForLeftoverPlaceholders(content || '')
+    if (leftoverAll.length > 0) {
+      return { success: false, error: `AI 输出含未替换占位符：${leftoverAll.slice(0, 5).join(', ')}。请补齐后再导出 PDF。` }
     }
     const { resolveLibraryTemplate } = await import('../templateRegistry.mjs')
     const libraryTemplate = resolveLibraryTemplate(app.getPath('userData'), {
@@ -384,7 +412,7 @@ td, th { border: 1px solid #000; padding: 4pt 6pt; vertical-align: top; }
     }
 
     fs.writeFileSync(savePath, pdfData)
-    await updateLedger(projectPath, finalSubDir, pdfFileName, docType)
+    // PDF 是正式 Word 的派生交付物，不重复登记台账；避免同一编号出现 Word/PDF 两条记录。
 
     return { success: true, path: savePath, fileName: pdfFileName, subDir: finalSubDir }
   }))

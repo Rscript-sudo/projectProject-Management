@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Typography, Input, Button, Space, Spin, Modal, Form, Select, Tag, App, Dropdown, Tooltip, Checkbox, Popover } from 'antd'
+import { Typography, Input, Button, Space, Spin, Modal, Form, Select, Tag, App, Dropdown, Tooltip, Checkbox, Popover, DatePicker } from 'antd'
 import { SendOutlined, RobotOutlined, FileTextOutlined, SaveOutlined, ReloadOutlined, FilePdfOutlined, SettingOutlined, FolderOpenOutlined, HomeOutlined, EditOutlined, CloseOutlined, SearchOutlined, BookOutlined, EyeOutlined, ControlOutlined, DownOutlined } from '@ant-design/icons'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
@@ -12,6 +12,7 @@ import DirTree from '../components/DirTree'
 import type { DirNode, TemplateItem } from '../vite-env'
 import { useElectronAPI } from '../hooks/useElectronAPI'
 import ProjectTemplateCenterModal from '../components/ProjectTemplateCenterModal'
+import dayjs from 'dayjs'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -69,6 +70,7 @@ export default function ProjectView() {
   const [previewWidth, setPreviewWidth] = useState(380)
   const [attachedItems, setAttachedItems] = useState<Array<{ type: 'folder' | 'file'; path: string }>>([])
   const [writingSetupOpen, setWritingSetupOpen] = useState(false)
+  const [reportPeriod, setReportPeriod] = useState<{ start: string; end: string } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const dragCleanupRef = useRef<(() => void) | null>(null)
@@ -78,6 +80,12 @@ export default function ProjectView() {
     // 选文种后仍展示文档预览；扩写规则仅在用户主动打开“扩写规则”或点击“调整”时显示。
     setRightPanelTab('preview')
     setWritingSetupOpen(false)
+    if ((docType === '监理周报' || docType === '监理月报') && !reportPeriod) {
+      const now = dayjs()
+      setReportPeriod(docType === '监理周报'
+        ? { start: now.startOf('week').add(1, 'day').format('YYYY-MM-DD'), end: now.endOf('week').add(1, 'day').format('YYYY-MM-DD') }
+        : { start: now.startOf('month').format('YYYY-MM-DD'), end: now.endOf('month').format('YYYY-MM-DD') })
+    }
     setInput(previous => {
       const prefix = `写${docType}：`
       return previous.startsWith('写') && previous.includes('：') ? prefix : previous || prefix
@@ -358,7 +366,13 @@ export default function ProjectView() {
     }
 
     // ==== 意图分类 ====
-    const { mode, docType, dataToolIds } = identifyMode(trimmedInput)
+      const { mode, docType, dataToolIds } = identifyMode(trimmedInput)
+      const effectiveDocType = docType || activeDocumentType
+      const needsReportPeriod = effectiveDocType === '监理周报' || effectiveDocType === '监理月报'
+      if (needsReportPeriod && !reportPeriod) {
+        message.warning('请先选择报告期；周报和月报只能使用报告期内已确认的数据。')
+        return
+      }
     if (docType) setActiveDocumentType(docType)
     setLastInput(trimmedInput)
 
@@ -551,6 +565,7 @@ export default function ProjectView() {
         mode,
         projectName: currentProject?.name,
         dataToolIds,
+        reportPeriod: needsReportPeriod ? reportPeriod || undefined : undefined,
         messages: aiMessages,
       }
 
@@ -719,6 +734,7 @@ export default function ProjectView() {
             const raw = await window.electronAPI.dataQuery({
               projectName: currentProject.name,
               toolIds: dataToolIds,
+              reportPeriod: needsReportPeriod ? reportPeriod || undefined : undefined,
             })
             if (raw && Object.keys(raw).length > 0) {
               setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, rawData: raw } : m))
@@ -743,6 +759,7 @@ export default function ProjectView() {
         mode,
         projectName: currentProject?.name,
         dataToolIds,
+        reportPeriod: needsReportPeriod ? reportPeriod || undefined : undefined,
       })
       if (!result.success) throw new Error(result.error || 'AI 调用失败')
 
@@ -784,7 +801,8 @@ export default function ProjectView() {
         try {
           const raw = await window.electronAPI.dataQuery({
             projectName: currentProject.name,
-            toolIds: dataToolIds,
+              toolIds: dataToolIds,
+              reportPeriod: needsReportPeriod ? reportPeriod || undefined : undefined,
           })
           if (raw && Object.keys(raw).length > 0) {
             setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, rawData: raw } : m))
@@ -1345,6 +1363,22 @@ export default function ProjectView() {
           </div>
         </div>
 
+        {activeDocumentType && (activeDocumentType === '监理周报' || activeDocumentType === '监理月报') && (
+          <div style={{ padding: '8px 12px', borderBottom: '1px solid #edf1f5', background: '#fafcff' }}>
+            <Text strong style={{ fontSize: 12 }}>报告期数据</Text>
+            <DatePicker.RangePicker
+              size="small"
+              allowClear={false}
+              value={reportPeriod ? [dayjs(reportPeriod.start), dayjs(reportPeriod.end)] : undefined}
+              onChange={(dates) => {
+                if (dates?.[0] && dates?.[1]) setReportPeriod({ start: dates[0].format('YYYY-MM-DD'), end: dates[1].format('YYYY-MM-DD') })
+              }}
+              style={{ width: '100%', marginTop: 6 }}
+            />
+            <Text type="secondary" style={{ display: 'block', fontSize: 10, lineHeight: 1.45, marginTop: 5 }}>仅把该期间内已确认的进度、隐患、函件、影像带入生成；请先在进度台账确认导入结果。</Text>
+          </div>
+        )}
+
         {/* 内容区 */}
         <div style={{ flex: 1, overflow: 'auto' }}>
           {rightPanelTab === 'rules' ? <div style={{ padding: 12 }}>
@@ -1466,6 +1500,7 @@ export default function ProjectView() {
                               docType,
                               projectName: currentProject.name,
                               userInput: previewContent.userInput || lastInput,
+                              preview: true,
                             })
                             if (result.success && result.path) {
                               window.electronAPI.openFile(result.path)

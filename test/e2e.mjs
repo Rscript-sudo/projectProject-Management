@@ -58,7 +58,12 @@ async function main() {
   assert.equal(saved.success, true, saved.error)
   assert.ok(fs.existsSync(saved.path))
 
-  const templateContent = '现场设备安装情况已核查，施工过程符合当前报审资料要求。'.repeat(10)
+  const templateContent = `【施工部位】机房设备区
+【参与人员】总监理工程师、专业监理工程师、施工单位现场负责人
+【今日内容】现场设备安装情况已核查，施工过程符合已报审资料要求。
+【核心工作落实】复核设备安装质量、线缆标识和报验资料，已向施工单位提出完善要求。
+【协调解决情况】施工单位确认当日补齐设备报验附件，监理机构后续复核。
+【其他事项】次日继续复核机房设备安装及资料签认情况。`.repeat(3)
   const templated = await call('fs:saveDoc', {
     projectPath, docType: '监理日志', projectName,
     content: templateContent, customSummary: '模板渲染验证', userInput: '生成监理日志', meta: { subject: '模板渲染验证' },

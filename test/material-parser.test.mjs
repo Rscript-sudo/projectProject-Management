@@ -25,7 +25,7 @@ test('Excel 进度表解析为可确认的进度节点并保留来源位置', as
   assert.deepEqual(result.progressCandidates[0], {
     name: '1号楼主体结构', plan_start: '2026-08-01', plan_end: '2026-08-20',
     actual_start: '2026-08-02', actual_end: '', progress_percent: 85, weight: 2,
-    source: '八月计划!2',
+    source: '施工进度计划.xlsx｜八月计划!2', sourceSheet: '八月计划', sourceRow: 2,
   })
   assert.equal(result.progressCandidates[1].progress_percent, 40)
   fs.rmSync(path.dirname(fixture), { recursive: true, force: true })

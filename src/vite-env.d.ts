@@ -20,6 +20,7 @@ interface SaveDocOptions {
   customSummary?: string        // 虚竹 v2.0：摘要内容（事由等）
   version?: string              // 虚竹 v2.0：修订版本，如 'V2'/'V3'
   meta?: any                    // 台账登记用业务字段
+  preview?: boolean             // 临时预览件：不占文号、不写正式台账
 }
 
 export interface UpdateCheckResult {
@@ -57,6 +58,7 @@ interface AIOptions {
   mode?: string
   projectName?: string
   dataToolIds?: string[]
+  reportPeriod?: { start: string; end: string }
 }
 
 interface AIResult {
@@ -224,7 +226,7 @@ export interface ElectronAPI {
   progressMonthlyCompare: (options: { projectPath: string; yearMonth: string }) => Promise<any>
   progressDeviation: (projectPath: string) => Promise<any>
   parseMaterial: (options: { filePath: string }) => Promise<{ success: boolean; fileName?: string; ext?: string; type?: string; text?: string; note?: string; truncated?: boolean; progressCandidates?: any[]; error?: string }>
-  importProgressMaterial: (options: { projectPath: string; nodes: any[]; sourceFile?: string }) => Promise<{ success: boolean; count?: number; ids?: number[]; error?: string }>
+  importProgressMaterial: (options: { projectPath: string; nodes: any[]; sourceFile?: string }) => Promise<{ success: boolean; count?: number; ids?: number[]; batchId?: number; duplicate?: boolean; error?: string }>
 
   // 投资控制（B5）
   paymentList: (projectPath: string) => Promise<any[]>
@@ -356,7 +358,7 @@ export interface ElectronAPI {
   searchQuery: (query: string, options?: { limit?: number }) => Promise<any[]>
   searchRebuild: (progressCallback?: (current: number, total: number, name: string) => void) => Promise<{ success: boolean; docCount: number }>
   searchStatus: () => Promise<{ docCount: number; lastUpdated: string | null }>
-  dataQuery: (options: { projectName: string; toolIds: string[] }) => Promise<Record<string, any>>
+  dataQuery: (options: { projectName: string; toolIds: string[]; reportPeriod?: { start: string; end: string } }) => Promise<Record<string, any>>
   dbExport: () => Promise<{ success: boolean; path?: string; size?: number; exportedAt?: string; error?: string }>
   appInfo: () => Promise<{ name: string; version: string; repository: string }>
   checkForUpdates: () => Promise<UpdateCheckResult>

@@ -18,7 +18,7 @@ function column(headers, patterns) {
 }
 const cell = (row, index) => index >= 0 && row[index] != null ? row[index] : ''
 
-function progressCandidates(workbook, XLSX) {
+function progressCandidates(workbook, XLSX, fileName) {
   const output = []
   for (const sheetName of workbook.SheetNames) {
     const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' })
@@ -33,7 +33,7 @@ function progressCandidates(workbook, XLSX) {
     rows.slice(headerAt + 1).forEach((row, offset) => {
       const task = String(cell(row, name)).trim(); if (!task || /^合计|^总计|^备注/.test(task)) return
       const raw = Number(String(cell(row, percent)).replace('%', '').trim())
-      output.push({ name: task, plan_start: date(cell(row, planStart)), plan_end: date(cell(row, planEnd)), actual_start: date(cell(row, actualStart)), actual_end: date(cell(row, actualEnd)), progress_percent: Number.isFinite(raw) ? Math.min(100, Math.max(0, raw > 0 && raw <= 1 ? raw * 100 : raw)) : 0, weight: Number(cell(row, weight)) || 1, source: `${path.basename(sheetName)}!${headerAt + offset + 2}` })
+      output.push({ name: task, plan_start: date(cell(row, planStart)), plan_end: date(cell(row, planEnd)), actual_start: date(cell(row, actualStart)), actual_end: date(cell(row, actualEnd)), progress_percent: Number.isFinite(raw) ? Math.min(100, Math.max(0, raw > 0 && raw <= 1 ? raw * 100 : raw)) : 0, weight: Number(cell(row, weight)) || 1, source: `${fileName}｜${sheetName}!${headerAt + offset + 2}`, sourceSheet: sheetName, sourceRow: headerAt + offset + 2 })
     })
   }
   return output
@@ -45,7 +45,7 @@ export async function parseMaterial(filePath) {
   if (ext === '.xlsx' || ext === '.xls') {
     const module = await import('xlsx'); const XLSX = module.default || module; const workbook = XLSX.readFile(filePath, { cellDates: true })
     const text = workbook.SheetNames.map(name => `【工作表：${name}】\n${XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: '' }).map(row => row.join('\t')).join('\n')}`).join('\n\n')
-    return { success: true, fileName, ext, type: 'excel', text: text.slice(0, 50000), truncated: text.length > 50000, progressCandidates: progressCandidates(workbook, XLSX) }
+    return { success: true, fileName, ext, type: 'excel', text: text.slice(0, 50000), truncated: text.length > 50000, progressCandidates: progressCandidates(workbook, XLSX, fileName) }
   }
   if (ext === '.docx') { const { extractRawText } = await import('mammoth'); const result = await extractRawText({ buffer: fs.readFileSync(filePath) }); return { success: true, fileName, ext, type: 'word', text: (result.value || '').slice(0, 50000), truncated: (result.value || '').length > 50000, progressCandidates: [] } }
   if (ext === '.pdf') { try { const { stdout } = await execFileAsync('pdftotext', ['-layout', filePath, '-']); const text = String(stdout || ''); return { success: true, fileName, ext, type: 'pdf', text: text.slice(0, 50000), truncated: text.length > 50000, progressCandidates: [], note: text.trim() ? undefined : '该 PDF 未发现可提取文字，属于扫描件时需 OCR。' } } catch { return { success: false, fileName, ext, error: 'PDF 文字提取失败；扫描件需 OCR 后再导入。' } } }

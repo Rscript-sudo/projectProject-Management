@@ -273,15 +273,30 @@ export function insertProgressNode(n) {
   const now = new Date().toISOString()
   const info = getDb().prepare(`
     INSERT INTO progress_node
-    (project_name, name, plan_start, plan_end, actual_start, actual_end, progress_percent, weight, parent_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (project_name, name, plan_start, plan_end, actual_start, actual_end, progress_percent, weight, parent_id, source_file, source_sheet, source_row, import_batch_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     n.project_name, n.name, n.plan_start || null, n.plan_end || null,
     n.actual_start || null, n.actual_end || null,
     n.progress_percent || 0, n.weight || 1, n.parent_id || null,
+    n.source_file || null, n.source_sheet || null, n.source_row || null, n.import_batch_id || null,
     now, now,
   )
   return info.lastInsertRowid
+}
+
+export function importProgressNodes(projectName, nodes, sourceFile, sourceHash = '') {
+  assertSafeProjectName(projectName)
+  const db = getDb()
+  const existing = db.prepare('SELECT id FROM progress_import_batch WHERE project_name = ? AND source_file = ? AND source_hash = ?').get(projectName, sourceFile, sourceHash)
+  if (existing) return { duplicate: true, batchId: existing.id, ids: [] }
+  const tx = db.transaction(() => {
+    const batch = db.prepare('INSERT INTO progress_import_batch (project_name, source_file, source_hash, imported_at, imported_count) VALUES (?, ?, ?, ?, ?)')
+      .run(projectName, sourceFile, sourceHash, new Date().toISOString(), nodes.length)
+    const ids = nodes.map(node => insertProgressNode({ ...node, project_name: projectName, source_file: sourceFile, source_sheet: node.sourceSheet || node.source_sheet || '', source_row: node.sourceRow || node.source_row || null, import_batch_id: batch.lastInsertRowid }))
+    return { duplicate: false, batchId: batch.lastInsertRowid, ids }
+  })
+  return tx()
 }
 
 export function updateProgressNode(id, updates) {
@@ -471,6 +486,11 @@ export function listSimpleLedger(projectName, ledgerType, limit = 100) {
 
 export function insertSimpleLedger(projectName, ledgerType, item) {
   assertSafeProjectName(projectName)
+  const existing = getDb().prepare(`
+    SELECT id FROM ledger_simple
+    WHERE project_name = ? AND ledger_type = ? AND file_name = ?
+  `).get(projectName, ledgerType, item.fileName || '')
+  if (existing) return existing.id
   const meta = { ...item }
   delete meta.fileName
   delete meta.subDir
@@ -488,6 +508,29 @@ export function insertSimpleLedger(projectName, ledgerType, item) {
     JSON.stringify(meta),
   )
   return info.lastInsertRowid
+}
+
+/**
+ * 文书正式落盘后同步到 SQLite 业务台账。JSON 台账仍保留为可移交副本，
+ * 但 AI 数据查询、业务面板与签发状态统一使用这里，避免两套事实源漂移。
+ */
+export function recordIssuedDocument({ projectName, docType, fileName, subDir, fileNumber = '', meta = {} }) {
+  assertSafeProjectName(projectName)
+  const createdAt = new Date().toISOString()
+  const correspondenceTypes = new Set(['整改通知书', '安全通知书', '工程联系单', '工程函件', '停工令'])
+  if (correspondenceTypes.has(docType)) {
+    const exists = getDb().prepare('SELECT id FROM correspondence WHERE project_name = ? AND file_name = ?').get(projectName, fileName)
+    if (exists) return exists.id
+    return insertCorrespondence({
+      project_name: projectName, doc_type: docType, file_name: fileName, sub_dir: subDir,
+      file_number: fileNumber, subject: meta.subject || '', respondent: meta.respondent || '',
+      deadline: meta.deadline || '', responsible: meta.responsible || '', status: meta.status || '正式件',
+      source: 'ai生成', created_at: createdAt,
+    })
+  }
+  const ledgerType = docType === '监理日志' || docType === '监理周报' || docType === '监理月报'
+    ? 'log' : docType === '会议纪要' ? 'meeting' : docType === '施工方案' ? 'construction' : 'document'
+  return insertSimpleLedger(projectName, ledgerType, { fileName, subDir, createdAt, docType, fileNumber, status: meta.status || '正式件', subject: meta.subject || '' })
 }
 
 // ============ 审计日志 ============

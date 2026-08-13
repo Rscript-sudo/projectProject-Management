@@ -7,6 +7,7 @@ import { ensureDir, ensureProjectIndex, readProjectIndex, writeProjectIndex, cre
 import { generateProjectCodeFromName } from './filename.mjs'
 import { normalizeProjectProfile } from '../../src/shared/projectProfile.mjs'
 import { normalizeDocumentRules } from '../../src/shared/documentRules.mjs'
+import { assertSafeProjectName } from '../db/repo.mjs'
 
 function projectTemplateConfig(projectPath) {
   const dataDir = getProjectDataPath(path.basename(projectPath))
@@ -40,6 +41,7 @@ export function register(ipcMain) {
   })
 
   ipcMain.handle('fs:createProject', safeCall((_, rootPath, projectName, projectType = '未分类', projectProfile = {}) => {
+    assertSafeProjectName(projectName)
     const projectPath = path.join(rootPath, projectName)
     if (fs.existsSync(projectPath)) return { success: false, error: '项目已存在' }
     ensureDir(projectPath)
