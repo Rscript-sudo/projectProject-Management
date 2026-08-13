@@ -53,6 +53,16 @@
       "key": "weekly_detail",
       "default": ""
     },
+    "{{集采部分内容}}": {
+      "source": "param",
+      "key": "centralized_procurement",
+      "default": "数据待核对"
+    },
+    "{{非集采部分内容}}": {
+      "source": "param",
+      "key": "non_centralized_procurement",
+      "default": "数据待核对"
+    },
     "{{到货安装统计}}": {
       "source": "param",
       "key": "delivery_stats",
@@ -77,7 +87,15 @@
       "source": "param",
       "key": "supervisor_suggestions",
       "default": ""
-    }
+    },
+    "{{图1路径}}": { "source": "param", "key": "image1_path", "default": "数据待核对" },
+    "{{图1说明}}": { "source": "param", "key": "image1_caption", "default": "数据待核对" },
+    "{{图2路径}}": { "source": "param", "key": "image2_path", "default": "数据待核对" },
+    "{{图2说明}}": { "source": "param", "key": "image2_caption", "default": "数据待核对" },
+    "{{图3路径}}": { "source": "param", "key": "image3_path", "default": "数据待核对" },
+    "{{图3说明}}": { "source": "param", "key": "image3_caption", "default": "数据待核对" },
+    "{{图4路径}}": { "source": "param", "key": "image4_path", "default": "数据待核对" },
+    "{{图4说明}}": { "source": "param", "key": "image4_caption", "default": "数据待核对" }
   },
   "triggers": [
     "监理周报",

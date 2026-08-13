@@ -27,40 +27,44 @@ export interface ProgressNode {
 
 export type ProgressNodeForm = Omit<ProgressNode, 'id' | 'project_name' | 'created_at' | 'updated_at' | 'parent_id'>
 
-export interface GanttBar {
-  id: number
-  name: string
-  start: number  // 时间戳
-  end: number
-  progress: number
-  weight: number
+export interface GanttLayoutNode extends ProgressNode {
+  x?: number
+  width?: number
+  actualX?: number
+  actualWidth?: number
+  progressWidth?: number
+  status?: string
+  plan_days?: number
+  actual_days?: number
+  schedule_variance_days?: number
 }
 
 export interface GanttData {
-  bars: GanttBar[]
-  totalProgress: number
-  projectStart: number | null
-  projectEnd: number | null
+  minDate: string
+  maxDate: string
+  totalDays: number
+  dayPx: number
+  nodes: GanttLayoutNode[]
 }
 
 export interface DeviationData {
-  totalPlanned: number
-  totalActual: number
-  deviation: number  // 偏差天数，正=滞后
-  nodes: Array<{
-    id: number
-    name: string
-    planEnd: string | null
-    actualEnd: string | null
-    delayDays: number
-  }>
+  totalNodes: number
+  completed: number
+  inProgress: number
+  notStarted: number
+  overdue: number
+  overallProgress: number
+  weightedProgress: number
+  onTimeRate: number | null
 }
 
 export interface MonthlyCompare {
   yearMonth: string
   plannedCount: number
-  actualCount: number
-  completedNodes: Array<{ id: number; name: string; actualEnd: string }>
+  plannedNodes: string[]
+  doneCount: number
+  doneNodes: string[]
+  overdueNodes: string[]
 }
 
 // ============== 合同管理（B6） ==============
@@ -145,6 +149,17 @@ export interface PaymentRequest {
   status: '审批中' | '已通过' | '已驳回' | '已支付'
   created_at: string
   updated_at: string
+  // 运行时计算字段（由 enrichPayment 补充）
+  history?: ApprovalAction[]
+  approval_progress?: number
+}
+
+export interface ApprovalAction {
+  stage: string
+  person: string
+  opinion: string
+  time: string
+  action?: 'reject' | 'approve'
 }
 
 export type PaymentForm = Pick<PaymentRequest, 'period' | 'amount' | 'amount_upper' | 'description' | 'related_nodes' | 'status'>

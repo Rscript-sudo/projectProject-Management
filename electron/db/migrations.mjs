@@ -223,14 +223,16 @@ function migrateHazard(db, projectName, item, result) {
 
 function migrateNumbering(db, result) {
   const projects = db.prepare('SELECT project_name FROM project_meta').all()
-  for (const { project_name } of projects) {
-    const configPath = path.join(getProjectDataPath(project_name), 'project.config.json')
-    if (!fs.existsSync(configPath)) continue
+  // v1.2.1 P1 修复：包事务，中途崩溃不会部分写入
+  // better-sqlite3 transaction 失败自动 ROLLBACK
+  const migrateProject = db.transaction((projectName) => {
+    const configPath = path.join(getProjectDataPath(projectName), 'project.config.json')
+    if (!fs.existsSync(configPath)) return 0
     let cfg
     try {
       cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'))
     } catch {
-      continue
+      return 0
     }
     const numbering = cfg.numbering || {}
     const stmt = db.prepare(`
@@ -238,17 +240,23 @@ function migrateNumbering(db, result) {
       (project_name, doc_type, prefix, reset, last_date, last_seq)
       VALUES (?, ?, ?, ?, ?, ?)
     `)
+    let count = 0
     for (const [docType, rule] of Object.entries(numbering)) {
       if (!rule || typeof rule !== 'object') continue
       stmt.run(
-        project_name,
+        projectName,
         docType,
         rule.prefix || '',
         rule.reset || 'monthly',
         rule.lastDate || '',
         rule.lastSeq || 0,
       )
-      result.numberingRules++
+      count++
     }
+    return count
+  })
+  for (const { project_name } of projects) {
+    const cnt = migrateProject(project_name)
+    result.numberingRules += cnt
   }
 }

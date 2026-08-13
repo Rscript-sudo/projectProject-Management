@@ -22,6 +22,7 @@ import {
 import dayjs from 'dayjs'
 import { useAppStore } from '../stores/useProjectStore'
 import { useElectronAPI } from '../hooks/useElectronAPI'
+import type { PhotoMeta, PhotoForm } from '../types'
 
 const { Text, Title } = Typography
 const { Dragger } = Upload
@@ -36,15 +37,15 @@ export default function PhotoArchiveView() {
   const projectName = currentProject?.name || decodeURIComponent(routeProjectName || '')
   const projectPath = currentProject?.path || ''
 
-  const [photos, setPhotos] = useState<any[]>([])
+  const [photos, setPhotos] = useState<PhotoMeta[]>([])
   const [months, setMonths] = useState<{ month: string; count: number }[]>([])
   const [activeMonth, setActiveMonth] = useState<string | null>(null) // null = 全部
   const [activeLocation, setActiveLocation] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
-  const [editing, setEditing] = useState<any>(null)
-  const [editForm, setEditForm] = useState<any>({})
-  const [preview, setPreview] = useState<any>(null)
+  const [editing, setEditing] = useState<PhotoMeta | null>(null)
+  const [editForm, setEditForm] = useState<PhotoForm>({ location: '', tags: '', description: '', shoot_date: '' })
+  const [preview, setPreview] = useState<PhotoMeta | null>(null)
 
   useEffect(() => {
     if (!apiReady || !projectPath) return
@@ -155,6 +156,7 @@ export default function PhotoArchiveView() {
       location: photo.location || '',
       tags: photo.tags || '',
       description: photo.description || '',
+      shoot_date: photo.shoot_date || '',
     })
   }
 

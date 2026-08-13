@@ -5,14 +5,62 @@
 
 import { getDb } from './database.mjs'
 
+/**
+ * v1.2.1 P0 修复：项目名安全校验
+ * 防止路径穿越：拒绝包含 / \ : * ? " < > | .. 的项目名
+ * 项目名是磁盘目录名 + 路由 key，必须严格
+ */
+export function assertSafeProjectName(projectName) {
+  if (!projectName || typeof projectName !== 'string') {
+    throw new Error('项目名不能为空')
+  }
+  if (projectName.length > 100) {
+    throw new Error('项目名过长（>100 字符）')
+  }
+  if (/[\\/:*?"<>|\x00-\x1f]/.test(projectName)) {
+    throw new Error(`项目名含非法字符：${projectName}`)
+  }
+  if (projectName.includes('..')) {
+    throw new Error('项目名不能含 ".."')
+  }
+  if (projectName.startsWith('.')) {
+    throw new Error('项目名不能以 "." 开头')
+  }
+  return projectName
+}
+
+/**
+ * v1.2.1 P0 修复：文本字段长度限制（防 100KB 垃圾塞爆 DB）
+ */
+function clampText(value, max, fieldName) {
+  if (value == null) return ''
+  const s = String(value)
+  if (s.length > max) {
+    console.warn(`[repo] ${fieldName} 超过 ${max} 字符，已截断（原 ${s.length}）`)
+    return s.slice(0, max)
+  }
+  return s
+}
+
+/**
+ * v1.2.1 P2 修复：LIKE 参数转义（防 % _ 通配符误匹配）
+ * 与 SQL 中 ESCAPE '\\' 配合使用
+ */
+function escapeLike(s) {
+  if (s == null) return ''
+  return String(s).replace(/[\\%_]/g, '\\$&')
+}
+
 // ============ 项目元数据 ============
 
 export function getProjectMeta(projectName) {
+  assertSafeProjectName(projectName)
   return getDb().prepare('SELECT * FROM project_meta WHERE project_name = ?').get(projectName)
 }
 
 export function upsertProjectMeta(meta) {
   const now = new Date().toISOString()
+  assertSafeProjectName(meta.project_name)
   const existing = getProjectMeta(meta.project_name)
   if (existing) {
     getDb().prepare(`
@@ -25,7 +73,8 @@ export function upsertProjectMeta(meta) {
       meta.project_path, meta.project_type || '通用',
       meta.contractor || '', meta.owner_unit || '',
       meta.supervisor_unit || '', meta.chief_engineer || '',
-      meta.contract_amount || null,
+      // v1.2.1 P2 修复：合同金额 0 是合法值，?? null 替代 || null
+      meta.contract_amount ?? null,
       meta.start_date || null, meta.end_date || null, meta.chief_engineer_phone || null,
       now, meta.project_name,
     )
@@ -38,7 +87,8 @@ export function upsertProjectMeta(meta) {
       meta.project_name, meta.project_path, meta.project_type || '通用',
       meta.contractor || '', meta.owner_unit || '',
       meta.supervisor_unit || '', meta.chief_engineer || '',
-      meta.contract_amount || null,
+      // v1.2.1 P2 修复：合同金额 0 是合法值
+      meta.contract_amount ?? null,
       meta.start_date || null, meta.end_date || null, meta.chief_engineer_phone || null,
       now, now,
     )
@@ -50,12 +100,14 @@ export function listProjects() {
 }
 
 export function deleteProjectMeta(projectName) {
+  assertSafeProjectName(projectName)
   getDb().prepare('DELETE FROM project_meta WHERE project_name = ?').run(projectName)
 }
 
 // ============ 编号规则 ============
 
 export function getNumberingRules(projectName) {
+  assertSafeProjectName(projectName)
   const rows = getDb().prepare('SELECT * FROM numbering_rules WHERE project_name = ?').all(projectName)
   const out = {}
   for (const r of rows) {
@@ -67,6 +119,7 @@ export function getNumberingRules(projectName) {
 }
 
 export function saveNumberingRules(projectName, rules) {
+  assertSafeProjectName(projectName)
   const stmt = getDb().prepare(`
     INSERT OR REPLACE INTO numbering_rules
     (project_name, doc_type, prefix, reset, last_date, last_seq)
@@ -81,6 +134,7 @@ export function saveNumberingRules(projectName, rules) {
 }
 
 export function updateNumberingRule(projectName, docType, rule) {
+  assertSafeProjectName(projectName)
   getDb().prepare(`
     INSERT OR REPLACE INTO numbering_rules
     (project_name, doc_type, prefix, reset, last_date, last_seq)
@@ -89,12 +143,14 @@ export function updateNumberingRule(projectName, docType, rule) {
 }
 
 export function getNumberingRule(projectName, docType) {
+  assertSafeProjectName(projectName)
   return getDb().prepare('SELECT * FROM numbering_rules WHERE project_name = ? AND doc_type = ?').get(projectName, docType)
 }
 
 // ============ 函件（带状态机）============
 
 export function listCorrespondence(projectName, opts = {}) {
+  assertSafeProjectName(projectName)
   const { status, limit = 100, offset = 0 } = opts
   let sql = 'SELECT * FROM correspondence WHERE project_name = ?'
   const params = [projectName]
@@ -112,6 +168,8 @@ export function getCorrespondence(id) {
 }
 
 export function insertCorrespondence(c) {
+  // v1.2.1 P0 修复：项目名安全校验 + 文本字段长度限制
+  assertSafeProjectName(c.project_name)
   const now = new Date().toISOString()
   const stmt = getDb().prepare(`
     INSERT INTO correspondence
@@ -119,10 +177,17 @@ export function insertCorrespondence(c) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
   const info = stmt.run(
-    c.project_name, c.doc_type, c.file_name, c.sub_dir || '',
-    c.file_number || '', c.subject || '', c.respondent || '',
-    c.deadline || '', c.responsible || '',
-    c.status || '已发出', c.source || 'ai生成', c.source_ref || null,
+    c.project_name, clampText(c.doc_type, 50, 'doc_type'),
+    clampText(c.file_name, 200, 'file_name'),
+    c.sub_dir || '',
+    clampText(c.file_number, 100, 'file_number'),
+    clampText(c.subject, 200, 'subject'),
+    clampText(c.respondent, 200, 'respondent'),
+    clampText(c.deadline, 50, 'deadline'),
+    clampText(c.responsible, 100, 'responsible'),
+    clampText(c.status, 30, 'status') || '已发出',
+    clampText(c.source, 30, 'source') || 'ai生成',
+    c.source_ref || null,
     c.created_at || now, now,
   )
   return info.lastInsertRowid
@@ -147,6 +212,7 @@ export function updateCorrespondenceStatus(id, status, extra = {}) {
 // ============ 隐患 ============
 
 export function listHazard(projectName, opts = {}) {
+  assertSafeProjectName(projectName)
   const { status, dimension, limit = 100 } = opts
   let sql = 'SELECT * FROM hazard WHERE project_name = ?'
   const params = [projectName]
@@ -158,15 +224,23 @@ export function listHazard(projectName, opts = {}) {
 }
 
 export function insertHazard(h) {
+  // v1.2.1 P0 修复：项目名校验 + 文本字段长度限制
+  assertSafeProjectName(h.project_name)
   const now = new Date().toISOString()
   const info = getDb().prepare(`
     INSERT INTO hazard
     (project_name, dimension, dimension_name, location, description, severity, status, source, source_ref, deadline, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    h.project_name, h.dimension || '', h.dimension_name || '',
-    h.location || '', h.description || '', h.severity || '一般',
-    h.status || '待整改', h.source || '巡检', h.source_ref || null,
+    h.project_name,
+    clampText(h.dimension, 30, 'dimension'),
+    clampText(h.dimension_name, 100, 'dimension_name'),
+    clampText(h.location, 200, 'location'),
+    clampText(h.description, 1000, 'description'),
+    clampText(h.severity, 20, 'severity') || '一般',
+    clampText(h.status, 30, 'status') || '待整改',
+    clampText(h.source, 30, 'source') || '巡检',
+    h.source_ref || null,
     h.deadline || null, now,
   )
   return info.lastInsertRowid
@@ -190,10 +264,12 @@ export function linkHazardToRectification(hazardId, correspondenceId) {
 // ============ 进度节点 ============
 
 export function listProgressNodes(projectName) {
+  assertSafeProjectName(projectName)
   return getDb().prepare('SELECT * FROM progress_node WHERE project_name = ? ORDER BY plan_start ASC').all(projectName)
 }
 
 export function insertProgressNode(n) {
+  assertSafeProjectName(n.project_name)
   const now = new Date().toISOString()
   const info = getDb().prepare(`
     INSERT INTO progress_node
@@ -232,6 +308,7 @@ export function deleteProgressNode(id) {
 // ============ 付款审批 ============
 
 export function listPaymentRequests(projectName) {
+  assertSafeProjectName(projectName)
   return getDb().prepare('SELECT * FROM payment_request WHERE project_name = ? ORDER BY created_at DESC').all(projectName)
 }
 
@@ -240,6 +317,7 @@ export function getPaymentRequest(id) {
 }
 
 export function insertPaymentRequest(p) {
+  assertSafeProjectName(p.project_name)
   const now = new Date().toISOString()
   const info = getDb().prepare(`
     INSERT INTO payment_request
@@ -269,6 +347,7 @@ export function updatePaymentStatus(id, status) {
 // ============ 合同 ============
 
 export function listContracts(projectName) {
+  assertSafeProjectName(projectName)
   return getDb().prepare('SELECT * FROM contract WHERE project_name = ? ORDER BY created_at DESC').all(projectName)
 }
 
@@ -299,6 +378,7 @@ export function updateContractStatus(id, status) {
 // ============ 变更单 ============
 
 export function listChangeOrders(projectName) {
+  assertSafeProjectName(projectName)
   return getDb().prepare('SELECT * FROM change_order WHERE project_name = ? ORDER BY created_at DESC').all(projectName)
 }
 
@@ -320,6 +400,7 @@ export function insertChangeOrder(c) {
 // ============ 索赔 ============
 
 export function listClaims(projectName) {
+  assertSafeProjectName(projectName)
   return getDb().prepare('SELECT * FROM claim WHERE project_name = ? ORDER BY created_at DESC').all(projectName)
 }
 
@@ -341,16 +422,19 @@ export function insertClaim(c) {
 // ============ 照片 ============
 
 export function listPhotos(projectName, opts = {}) {
+  assertSafeProjectName(projectName)
   const { yearMonth, location, limit = 200 } = opts
   let sql = 'SELECT * FROM photo WHERE project_name = ?'
   const params = [projectName]
+  // v1.2.1 P2 修复：LIKE 加 ESCAPE 防 % _ 通配符误匹配
+  // 用户输入 "100%" 或 "_test" 不再通配全部
   if (yearMonth) {
-    sql += ' AND shoot_date LIKE ?'
-    params.push(`${yearMonth}%`)
+    sql += ' AND shoot_date LIKE ? ESCAPE \'\\\''
+    params.push(`${escapeLike(yearMonth)}%`)
   }
   if (location) {
-    sql += ' AND location LIKE ?'
-    params.push(`%${location}%`)
+    sql += ' AND location LIKE ? ESCAPE \'\\\''
+    params.push(`%${escapeLike(location)}%`)
   }
   sql += ' ORDER BY shoot_date DESC LIMIT ?'
   params.push(limit)
@@ -358,6 +442,7 @@ export function listPhotos(projectName, opts = {}) {
 }
 
 export function insertPhoto(p) {
+  assertSafeProjectName(p.project_name)
   const now = new Date().toISOString()
   const info = getDb().prepare(`
     INSERT INTO photo
@@ -376,6 +461,7 @@ export function insertPhoto(p) {
 // ============ 简易台账（其他 4 类）============
 
 export function listSimpleLedger(projectName, ledgerType, limit = 100) {
+  assertSafeProjectName(projectName)
   return getDb().prepare(`
     SELECT * FROM ledger_simple
     WHERE project_name = ? AND ledger_type = ?
@@ -384,6 +470,7 @@ export function listSimpleLedger(projectName, ledgerType, limit = 100) {
 }
 
 export function insertSimpleLedger(projectName, ledgerType, item) {
+  assertSafeProjectName(projectName)
   const meta = { ...item }
   delete meta.fileName
   delete meta.subDir
@@ -406,6 +493,7 @@ export function insertSimpleLedger(projectName, ledgerType, item) {
 // ============ 审计日志 ============
 
 export function logAudit(projectName, action, entityType, entityId, detail) {
+  assertSafeProjectName(projectName)
   getDb().prepare(`
     INSERT INTO audit_log (project_name, action, entity_type, entity_id, detail, created_at)
     VALUES (?, ?, ?, ?, ?, ?)

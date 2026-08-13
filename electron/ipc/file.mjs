@@ -1,23 +1,15 @@
 import path from 'path'
 import fs from 'fs'
-import os from 'os'
 import { safeCall } from './safe.mjs'
+import { isPathSafe } from '../shared/pathSafety.mjs'
 
 /**
  * 校验 filePath 必须在用户主目录或系统临时目录下（防止被诱导写 /etc/passwd 等）
  * 严格模式：绝对路径必须解析后落在允许前缀内
+ * v1.2.1 P0 修复：增加敏感目录黑名单（~/.ssh、~/.aws、~/.gnupg、系统目录）
+ * v1.2.2 修复：手动展开 ~ 为 home 目录（macOS path.resolve 不展开波浪号）
  */
-function isPathSafe(filePath) {
-  if (!filePath || typeof filePath !== 'string') return false
-  const resolved = path.resolve(filePath)
-  const home = os.homedir()
-  const tmp = os.tmpdir()
-  const desktop = path.join(home, 'Desktop')
-  return resolved.startsWith(home + path.sep) ||
-         resolved.startsWith(tmp + path.sep) ||
-         resolved === home ||
-         resolved === tmp
-}
+export { isPathSafe } from '../shared/pathSafety.mjs'
 
 export function register(ipcMain) {
   ipcMain.handle('fs:getDirTree', (_, dirPath, maxDepth = 2) => {
@@ -75,6 +67,12 @@ export function register(ipcMain) {
       if (!fs.statSync(filePath).isFile()) return null
       const ext = path.extname(filePath).toLowerCase()
       if (['.json', '.txt', '.md'].includes(ext)) {
+        // v1.2.1 P2 修复：限制文本文件最大 10MB（防主进程 OOM）
+        const MAX_TEXT_SIZE = 10 * 1024 * 1024
+        const stats = fs.statSync(filePath)
+        if (stats.size > MAX_TEXT_SIZE) {
+          return { error: `文件过大（${(stats.size / 1024 / 1024).toFixed(1)} MB > 10 MB），拒绝读取` }
+        }
         return fs.readFileSync(filePath, 'utf8')
       }
       const stats = fs.statSync(filePath)
@@ -124,13 +122,25 @@ export function register(ipcMain) {
   ipcMain.handle('fs:moveFile', safeCall((_, filePath, targetDir) => {
     if (!fs.existsSync(filePath)) return { success: false, error: '源文件不存在' }
     if (!isPathSafe(filePath)) return { success: false, error: '禁止移动系统目录文件' }
+    if (!isPathSafe(targetDir)) return { success: false, error: '禁止移动到系统目录' }
     if (!fs.existsSync(targetDir)) return { success: false, error: '目标目录不存在' }
     if (!fs.statSync(targetDir).isDirectory()) return { success: false, error: '目标不是目录' }
     const fileName = path.basename(filePath)
     const targetPath = path.join(targetDir, fileName)
     if (targetPath === filePath) return { success: true, path: filePath }
     if (fs.existsSync(targetPath)) return { success: false, error: '目标位置已存在同名文件' }
-    fs.renameSync(filePath, targetPath)
+    // v1.2.1 P2 修复：跨设备（EXDEV）fallback 到 copy+delete
+    try {
+      fs.renameSync(filePath, targetPath)
+    } catch (e) {
+      if (e.code === 'EXDEV') {
+        // 跨设备：rename 不允许 → 走 copy + delete
+        fs.copyFileSync(filePath, targetPath)
+        fs.unlinkSync(filePath)
+      } else {
+        throw e
+      }
+    }
     return { success: true, path: targetPath }
   }))
 }

@@ -9,6 +9,8 @@ import fs from 'fs'
 import { safeCall } from './safe.mjs'
 import { getSettings } from './shared.mjs'
 import * as repo from '../db/repo.mjs'
+import { isPathSafe } from '../shared/pathSafety.mjs'
+import { resolveAvailableFileName } from '../shared/fileNameCollision.mjs'
 
 // 支持的图片扩展名
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.heic', '.heif'])
@@ -107,8 +109,14 @@ export function register(ipcMain) {
     const db = repo.getDb()
     const row = db.prepare('SELECT * FROM photo WHERE id = ?').get(id)
     if (!row) return { success: false }
-    if (row.file_path && fs.existsSync(row.file_path)) {
-      try { fs.unlinkSync(row.file_path) } catch {}
+    // v1.2.1 P0 修复：删前 isPathSafe 校验，防 photo:update 改 file_path 绕过
+    if (row.file_path) {
+      if (!isPathSafe(row.file_path)) {
+        return { success: false, error: `文件路径不安全，拒绝删除：${row.file_path}` }
+      }
+      if (fs.existsSync(row.file_path)) {
+        try { fs.unlinkSync(row.file_path) } catch {}
+      }
     }
     db.prepare('DELETE FROM photo WHERE id = ?').run(id)
     return { success: true }
@@ -285,7 +293,13 @@ export function register(ipcMain) {
 
         for (const item of parsed) {
           const idx = (item.index || 1) - 1
-          const f = batch[idx] || batch[0]
+          // v1.2.1 P0 修复：严格校验 idx 范围，越界走降级（不静默用 batch[0]）
+          // 旧逻辑 batch[idx] || batch[0] → AI 输出 index:99 但 batch.length=50 时静默错位
+          if (idx < 0 || idx >= batch.length) {
+            console.warn(`[photo:aiArchive] AI 返回 index ${item.index} 越界 batch.length=${batch.length}，跳过该条`)
+            continue
+          }
+          const f = batch[idx]
           results.push({
             srcPath: f.path,
             shootDate: f.shootDate,
@@ -335,13 +349,18 @@ export function register(ipcMain) {
         group.forEach((file, idx) => {
           const ext = path.extname(file.srcPath) || '.jpg'
           const newName = generateStandardName(file.shootDate, file.location, file.description, idx + 1)
-          const destPath = path.join(archiveDir, newName)
+          // v1.2.2 P0 修复：同名检测，每次基于"已占用全集"挑下一个空位
+          //   v1.2.1 算法有 bug——子 agent 端到端测试发现第 3 次产 a-1-2.jpg
+          //   根因：循环只检测 finalName，不看已尝试过的"a-1"族
+          //   正确算法：把所有 -N 后缀都跳过，dup 继续递增
+          const finalName = resolveAvailableFileName(archiveDir, newName)
+          const destPath = path.join(archiveDir, finalName)
 
           try {
             fs.copyFileSync(file.srcPath, destPath)
             const id = repo.insertPhoto({
               project_name: projectName,
-              file_name: newName,
+              file_name: finalName,
               file_path: destPath,
               shoot_date: file.shootDate,
               location: file.location,

@@ -1,15 +1,18 @@
 /**
  * 字段注册表 — 业务字段单一真相源
  *
+ * ⚠️ 新增字段时，必须同步更新 src/shared/field-aliases.json
+ *    供 electron/templateService.mjs 使用（后端无法 import TS）
+ *
  * 问题背景：
  *   - AI prompt 用 `施工单位/致单位/致送单位` 多个并列 key 适配不同模板
- *   - templateService.buildPlaceholderData 又独立维护一份别名映射
+ *   - templateService.mjs 从 field-aliases.json 读取别名映射
  *   - 字段重命名要改 3 个地方，容易漏
  *
  * 解决：
  *   - 所有"业务字段"在这里声明一次（含 key、displayName、aliases、source、default）
  *   - AI prompt / 模板占位符 / 数据库字段 都通过 Registry 查
- *   - 新增字段只改这一处
+ *   - 新增字段：改这里 + field-aliases.json
  */
 
 export type FieldSource = 'env' | 'project' | 'computed' | 'user' | 'ai-extracted'
@@ -139,6 +142,26 @@ export const FIELD_REGISTRY: Record<string, FieldDef> = {
     source: 'user',
     aliases: ['用户输入'],
     group: 'content',
+  },
+
+  // ===== 节假日（安全通知书专用）=====
+  holiday_name: {
+    key: 'holiday_name',
+    displayName: '节日名称',
+    source: 'user',
+    aliases: ['节日名称', 'holiday_name'],
+    default: '',
+    group: 'content',
+    aiHint: '法定节假日名称（如"2026年国庆节"），用于节假日安全通知书标题',
+  },
+  holiday_period: {
+    key: 'holiday_period',
+    displayName: '放假日期',
+    source: 'user',
+    aliases: ['放假日期', 'holiday_period', '节假日日期'],
+    default: '',
+    group: 'content',
+    aiHint: '放假起止日期（如"2026年10月1日至2026年10月7日"），AI 应根据节假日常识和当前年份直接给出',
   },
 }
 

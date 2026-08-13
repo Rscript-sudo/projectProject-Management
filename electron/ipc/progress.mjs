@@ -98,10 +98,16 @@ export function register(ipcMain) {
  */
 function enrichNode(n) {
   const enriched = { ...n }
-  const planStart = n.plan_start ? new Date(n.plan_start) : null
-  const planEnd = n.plan_end ? new Date(n.plan_end) : null
-  const actualStart = n.actual_start ? new Date(n.actual_start) : null
-  const actualEnd = n.actual_end ? new Date(n.actual_end) : null
+  // v1.2.1 P1 修复：new Date() 失败时回退到 null，避免 Invalid Date 进入比较
+  const safeDate = (s) => {
+    if (!s) return null
+    const d = new Date(s)
+    return isNaN(d.getTime()) ? null : d
+  }
+  const planStart = safeDate(n.plan_start)
+  const planEnd = safeDate(n.plan_end)
+  const actualStart = safeDate(n.actual_start)
+  const actualEnd = safeDate(n.actual_end)
   const today = new Date()
 
   // 计划工期

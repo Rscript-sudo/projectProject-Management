@@ -20,6 +20,7 @@ import {
 import dayjs from 'dayjs'
 import { useAppStore } from '../stores/useProjectStore'
 import { useElectronAPI } from '../hooks/useElectronAPI'
+import type { ProgressNode, ProgressNodeForm, GanttData, DeviationData, MonthlyCompare } from '../types'
 
 const { Text, Title } = Typography
 
@@ -41,17 +42,17 @@ export default function ProgressView() {
   const projectName = currentProject?.name || decodeURIComponent(routeProjectName || '')
   const projectPath = currentProject?.path || ''
 
-  const [nodes, setNodes] = useState<any[]>([])
-  const [gantt, setGantt] = useState<any>(null)
-  const [deviation, setDeviation] = useState<any>(null)
-  const [monthly, setMonthly] = useState<any>(null)
+  const [nodes, setNodes] = useState<ProgressNode[]>([])
+  const [gantt, setGantt] = useState<GanttData | null>(null)
+  const [deviation, setDeviation] = useState<DeviationData | null>(null)
+  const [monthly, setMonthly] = useState<MonthlyCompare | null>(null)
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('gantt')
   const [yearMonth, setYearMonth] = useState(dayjs().format('YYYY-MM'))
 
   // 编辑弹窗
-  const [editing, setEditing] = useState<any>(null) // null | 'new' | node
-  const [editForm, setEditForm] = useState<any>({
+  const [editing, setEditing] = useState<ProgressNode | 'new' | null>(null)
+  const [editForm, setEditForm] = useState<ProgressNodeForm>({
     name: '', plan_start: '', plan_end: '', actual_start: '', actual_end: '',
     progress_percent: 0, weight: 1,
   })
@@ -119,7 +120,7 @@ export default function ProgressView() {
       if (editing === 'new') {
         await window.electronAPI.progressAdd({ projectPath, node: editForm })
         message.success('已新增节点')
-      } else {
+      } else if (editing && 'id' in editing) {
         await window.electronAPI.progressUpdate({ id: editing.id, updates: editForm })
         message.success('已更新')
       }
@@ -347,19 +348,19 @@ export default function ProgressView() {
                 title="准时率"
                 value={deviation.onTimeRate === null ? '-' : deviation.onTimeRate}
                 suffix={deviation.onTimeRate === null ? '' : '%'}
-                valueStyle={{ fontSize: 20, color: deviation.onTimeRate >= 80 ? '#52c41a' : '#faad14' }}
+                valueStyle={{ fontSize: 20, color: (deviation.onTimeRate ?? 0) >= 80 ? '#52c41a' : '#faad14' }}
               />
             </Card>
           </Col>
         </Row>
       )}
 
-      {deviation?.overdue > 0 && (
+      {(deviation?.overdue ?? 0) > 0 && (
         <Alert
           type="warning"
           showIcon
           style={{ marginBottom: 12 }}
-          message={`${deviation.overdue} 个节点已超期，请关注进度偏差并采取纠偏措施`}
+          message={`${deviation!.overdue} 个节点已超期，请关注进度偏差并采取纠偏措施`}
         />
       )}
 

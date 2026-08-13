@@ -19,6 +19,7 @@ import {
 } from '@ant-design/icons'
 import { useAppStore } from '../stores/useProjectStore'
 import { useElectronAPI } from '../hooks/useElectronAPI'
+import type { PaymentRequest, PaymentForm, PaymentSummary, ApprovalAction } from '../types'
 
 const { Text, Title } = Typography
 const { TextArea } = Input
@@ -40,14 +41,14 @@ export default function PaymentView() {
   const projectName = currentProject?.name || decodeURIComponent(routeProjectName || '')
   const projectPath = currentProject?.path || ''
 
-  const [payments, setPayments] = useState<any[]>([])
-  const [summary, setSummary] = useState<any>(null)
+  const [payments, setPayments] = useState<PaymentRequest[]>([])
+  const [summary, setSummary] = useState<PaymentSummary | null>(null)
   const [loading, setLoading] = useState(false)
-  const [editing, setEditing] = useState<any>(null)
-  const [historyOf, setHistoryOf] = useState<any>(null)
-  const [editForm, setEditForm] = useState<any>({
+  const [editing, setEditing] = useState<PaymentRequest | 'new' | null>(null)
+  const [historyOf, setHistoryOf] = useState<PaymentRequest | null>(null)
+  const [editForm, setEditForm] = useState<PaymentForm>({
     period: '', amount: 0, amount_upper: '', description: '',
-    related_nodes: [], status: '审批中',
+    related_nodes: null, status: '审批中',
   })
 
   useEffect(() => {
@@ -76,7 +77,7 @@ export default function PaymentView() {
     setEditing('new')
     const now = new Date()
     const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-    setEditForm({ period, amount: 0, amount_upper: '', description: '', related_nodes: [], status: '审批中' })
+    setEditForm({ period, amount: 0, amount_upper: '', description: '', related_nodes: null, status: '审批中' })
   }
 
   const handleSave = async () => {
@@ -265,15 +266,15 @@ export default function PaymentView() {
         </Row>
       )}
 
-      {summary?.contractAmount > 0 && (
+      {(summary?.contractAmount ?? 0) > 0 && (
         <Card size="small" style={{ marginBottom: 16 }}>
           <div style={{ marginBottom: 4 }}>
             <Text type="secondary" style={{ fontSize: 11 }}>累计付款占合同比</Text>
           </div>
           <Progress
-            percent={Math.min(100, summary.approvedPercent || 0)}
+            percent={Math.min(100, summary!.approvedPercent || 0)}
             strokeColor={{ '0%': '#1677ff', '100%': '#52c41a' }}
-            format={p => `¥${summary.approvedAmount?.toLocaleString()} / ¥${summary.contractAmount?.toLocaleString()} (${p}%)`}
+            format={p => `¥${summary!.approvedAmount?.toLocaleString()} / ¥${summary!.contractAmount?.toLocaleString()} (${p}%)`}
           />
         </Card>
       )}
@@ -304,11 +305,11 @@ export default function PaymentView() {
           </Row>
           <div>
             <Text type="secondary" style={{ fontSize: 12 }}>大写（自动可改）</Text>
-            <Input value={editForm.amount_upper} onChange={e => setEditForm({ ...editForm, amount_upper: e.target.value })} placeholder="壹佰贰拾叁万肆仟伍佰陆拾柒元整" />
+            <Input value={editForm.amount_upper ?? ''} onChange={e => setEditForm({ ...editForm, amount_upper: e.target.value })} placeholder="壹佰贰拾叁万肆仟伍佰陆拾柒元整" />
           </div>
           <div>
             <Text type="secondary" style={{ fontSize: 12 }}>工程内容描述</Text>
-            <TextArea value={editForm.description} onChange={e => setEditForm({ ...editForm, description: e.target.value })} rows={3} placeholder="本月完成 XXX 工程..." />
+            <TextArea value={editForm.description ?? ''} onChange={e => setEditForm({ ...editForm, description: e.target.value })} rows={3} placeholder="本月完成 XXX 工程..." />
           </div>
         </Space>
       </Modal>
@@ -341,7 +342,7 @@ export default function PaymentView() {
             </div>
             {historyOf.history?.length ? (
               <Timeline
-                items={historyOf.history.map((h: any, i: number) => ({
+                items={(historyOf.history as ApprovalAction[]).map((h, i) => ({
                   color: h.action === 'reject' ? 'red' : 'blue',
                   children: (
                     <div style={{ fontSize: 12 }}>

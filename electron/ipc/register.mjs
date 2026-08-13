@@ -13,6 +13,7 @@ import { register as registerContract } from './contract.mjs'
 import { register as registerPhoto } from './photo.mjs'
 import { register as registerDb } from './db.mjs'
 import { register as registerFilename } from './filename.mjs'
+import { register as registerSop } from './sop.mjs'
 
 export function registerAll(ipcMain, mainWindow) {
   registerProject(ipcMain)
@@ -30,4 +31,5 @@ export function registerAll(ipcMain, mainWindow) {
   registerPhoto(ipcMain)
   registerDb(ipcMain, mainWindow)
   registerFilename(ipcMain)
+  registerSop(ipcMain)
 }

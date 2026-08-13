@@ -20,6 +20,7 @@ import {
 import dayjs from 'dayjs'
 import { useAppStore } from '../stores/useProjectStore'
 import { useElectronAPI } from '../hooks/useElectronAPI'
+import type { Contract, ChangeOrder, Claim, ContractDashboard } from '../types'
 
 const { Text, Title } = Typography
 const { TextArea } = Input
@@ -55,10 +56,10 @@ export default function ContractView() {
   const projectName = currentProject?.name || decodeURIComponent(routeProjectName || '')
   const projectPath = currentProject?.path || ''
 
-  const [contracts, setContracts] = useState<any[]>([])
-  const [changes, setChanges] = useState<any[]>([])
-  const [claims, setClaims] = useState<any[]>([])
-  const [dashboard, setDashboard] = useState<any>(null)
+  const [contracts, setContracts] = useState<Contract[]>([])
+  const [changes, setChanges] = useState<ChangeOrder[]>([])
+  const [claims, setClaims] = useState<Claim[]>([])
+  const [dashboard, setDashboard] = useState<ContractDashboard | null>(null)
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState('contract')

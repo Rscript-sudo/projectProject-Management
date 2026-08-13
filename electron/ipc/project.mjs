@@ -1,8 +1,10 @@
-import { shell } from 'electron'
+import { app, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import { fileURLToPath } from 'url'
 import { safeCall } from './safe.mjs'
-import { ensureDir, ensureProjectIndex, readProjectIndex, writeProjectIndex, createProjectStructure, getProjectDataPath, ensureProjectDataDir, getDefaultRoot, getSettings, generateProjectCodeFromName } from './shared.mjs'
+import { ensureDir, ensureProjectIndex, readProjectIndex, writeProjectIndex, createProjectStructure, getProjectDataPath, ensureProjectDataDir, getDefaultRoot, getSettings } from './shared.mjs'
+import { generateProjectCodeFromName } from './filename.mjs'
 
 export function register(ipcMain) {
   ipcMain.handle('fs:getRoot', () => {
@@ -60,6 +62,49 @@ export function register(ipcMain) {
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
     return { success: true }
   }))
+
+  // 项目模板独立保存到项目目录；项目配置仅记录当前生效版本。
+  // 这样替换模板不会影响其他项目，通用模板仍可作为未配置项目的兜底。
+  ipcMain.handle('fs:assignProjectTemplate', safeCall((_, projectPath, docType, sourcePath) => {
+    if (!projectPath || !docType || !sourcePath || path.extname(sourcePath).toLowerCase() !== '.docx') {
+      return { success: false, error: '请选择有效的 Word 模板文件' }
+    }
+    if (!fs.existsSync(sourcePath)) return { success: false, error: '模板文件不存在' }
+    const templateDir = path.join(projectPath, '项目模板')
+    ensureDir(templateDir)
+    const safeType = String(docType).replace(/[\\/:*?"<>|]/g, '_')
+    const targetPath = path.join(templateDir, `${safeType}_${Date.now()}.docx`)
+    fs.copyFileSync(sourcePath, targetPath)
+
+    const dataDir = getProjectDataPath(path.basename(projectPath))
+    ensureDir(dataDir)
+    const configPath = path.join(dataDir, 'project.config.json')
+    let config = {}
+    if (fs.existsSync(configPath)) {
+      try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')) } catch {}
+    }
+    config.templateOverrides = { ...(config.templateOverrides || {}), [docType]: { path: targetPath, sourceName: path.basename(sourcePath), updatedAt: new Date().toISOString() } }
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+    return { success: true, path: targetPath, templateOverride: config.templateOverrides[docType] }
+  }))
+
+  ipcMain.handle('fs:getProjectTemplateContract', async (_, projectPath, docType) => {
+    try {
+      const dataDir = getProjectDataPath(path.basename(projectPath))
+      const configPath = path.join(dataDir, 'project.config.json')
+      let config = {}
+      if (fs.existsSync(configPath)) config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+      const templatesDir = app.isPackaged
+        ? path.join(process.resourcesPath, 'templates')
+        : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'templates')
+      const { findTemplate, getTemplatePlaceholders } = await import('../templateService.mjs')
+      const template = findTemplate(templatesDir, docType, { templateOverride: config.templateOverrides?.[docType] })
+      if (!template) return { found: false, fields: [] }
+      return { found: true, fields: await getTemplatePlaceholders(template.templatePath), source: template.source, path: template.templatePath }
+    } catch (e) {
+      return { found: false, fields: [], error: e.message }
+    }
+  })
 
   ipcMain.handle('fs:getProjectLedgers', (_, projectPath) => {
     const LEDGER_FILES = [

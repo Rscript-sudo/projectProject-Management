@@ -15,17 +15,46 @@ const api = {
   unbindProject: (projectPath) => ipcRenderer.invoke('fs:unbindProject', projectPath),
   saveDoc: (options) => ipcRenderer.invoke('fs:saveDoc', options),
   callAI: (options) => ipcRenderer.invoke('ai:call', options),
+  listModels: (options) => ipcRenderer.invoke('ai:listModels', options),
   callAIStream: (options) => ipcRenderer.invoke('ai:stream', options),
   abortAIStream: (requestId) => ipcRenderer.send(`ai:abort:${requestId}`),
+  // v1.2.1 P0 修复：流式 listener Set 去重（防 HMR 重复添加）
+  // channel 名仍用全局 ai:stream:chunk（带 requestId 字段），callback 内部用 requestId 过滤
+  // 旧实现：每次组件挂载 addListener 不去重 → 同一个 chunk 被 N 个 callback 处理
+  _streamListeners: new Set(),
   onAIStreamChunk: (callback) => {
     const listener = (_event, data) => callback(data)
+    if (api._streamListeners.has(listener)) {
+      // 已注册过同一个函数引用 → 跳过（防 HMR 重复添加）
+      return () => api._streamListeners.delete(listener)
+    }
+    api._streamListeners.add(listener)
     ipcRenderer.on('ai:stream:chunk', listener)
-    return () => ipcRenderer.removeListener('ai:stream:chunk', listener)
+    return () => {
+      api._streamListeners.delete(listener)
+      ipcRenderer.removeListener('ai:stream:chunk', listener)
+    }
   },
   onAIStreamEnd: (callback) => {
     const listener = (_event, data) => callback(data)
+    if (api._streamListeners.has(listener)) {
+      return () => api._streamListeners.delete(listener)
+    }
+    api._streamListeners.add(listener)
     ipcRenderer.on('ai:stream:end', listener)
-    return () => ipcRenderer.removeListener('ai:stream:end', listener)
+    return () => {
+      api._streamListeners.delete(listener)
+      ipcRenderer.removeListener('ai:stream:end', listener)
+    }
+  },
+  // v1.2.1 P0 修复：HMR 卸载 / 页面关闭时清空所有 stream listener
+  // 防主进程 callback 引用泄漏 + 重复触发
+  _removeAllStreamListeners: () => {
+    for (const l of api._streamListeners) {
+      ipcRenderer.removeListener('ai:stream:chunk', l)
+      ipcRenderer.removeListener('ai:stream:end', l)
+    }
+    api._streamListeners.clear()
   },
   inspectionSave: (options) => ipcRenderer.invoke('inspection:save', options),
   inspectionList: (options) => ipcRenderer.invoke('inspection:list', options),
@@ -111,9 +140,12 @@ const api = {
   diagnoseStorage: () => ipcRenderer.invoke('settings:diagnose'),
   getTemplateCatalog: () => ipcRenderer.invoke('fs:getTemplateCatalog'),
   selectSavePath: (defaultPath) => ipcRenderer.invoke('dialog:selectSavePath', defaultPath),
+  selectTemplateFile: () => ipcRenderer.invoke('dialog:selectTemplateFile'),
   getProjectDataPath: (projectPath) => ipcRenderer.invoke('fs:getProjectDataPath', projectPath),
   readProjectConfig: (projectPath) => ipcRenderer.invoke('fs:readProjectConfig', projectPath),
   writeProjectConfig: (projectPath, config) => ipcRenderer.invoke('fs:writeProjectConfig', projectPath, config),
+  assignProjectTemplate: (projectPath, docType, sourcePath) => ipcRenderer.invoke('fs:assignProjectTemplate', projectPath, docType, sourcePath),
+  getProjectTemplateContract: (projectPath, docType) => ipcRenderer.invoke('fs:getProjectTemplateContract', projectPath, docType),
   getProjectLedgers: (projectPath) => ipcRenderer.invoke('fs:getProjectLedgers', projectPath),
   deleteFile: (filePath) => ipcRenderer.invoke('fs:deleteFile', filePath),
   renameFile: (filePath, newName) => ipcRenderer.invoke('fs:renameFile', filePath, newName),
@@ -134,6 +166,15 @@ const api = {
   searchQuery: (query, options) => ipcRenderer.invoke('search:query', query, options),
   searchRebuild: (progressCallback) => ipcRenderer.invoke('search:rebuild', progressCallback),
   searchStatus: () => ipcRenderer.invoke('search:status'),
+  readSop: (params) => ipcRenderer.invoke('sop:read', params),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', api)
+
+// v1.2.1 P0 修复：页面卸载时清理所有流式 listener 防泄漏
+// 在 preload scope 执行，不走 contextBridge 暴露
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    api._removeAllStreamListeners()
+  })
+}

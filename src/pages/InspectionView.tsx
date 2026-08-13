@@ -7,9 +7,10 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Button, Card, Checkbox, Input, Select, Space, Typography, Tag, App, Empty, Spin, Modal, List } from 'antd'
 import { EnvironmentOutlined, ExclamationCircleOutlined, CheckCircleOutlined, FileTextOutlined, SaveOutlined, RobotOutlined, HistoryOutlined } from '@ant-design/icons'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
 import { useElectronAPI } from '../hooks/useElectronAPI'
+import type { InspectionIssue } from '../types'
 
 const { Text, Title } = Typography
 const { TextArea } = Input
@@ -55,7 +56,6 @@ const DIMENSIONS = [
 
 export default function InspectionView() {
   const navigate = useNavigate()
-  const { projectName } = useParams()
   const { currentProject, setCurrentProject } = useAppStore()
   const { message, modal } = App.useApp()
   const apiReady = useElectronAPI()
@@ -64,20 +64,11 @@ export default function InspectionView() {
   const [location, setLocation] = useState('')
   const [inspector, setInspector] = useState('')
   // issues 数组：每个 element { dimKey, dimensionName, itemId, label, found, location, description, severity }
-  const [issues, setIssues] = useState<any[]>([])
+  const [issues, setIssues] = useState<InspectionIssue[]>([])
   const [saving, setSaving] = useState(false)
   const [history, setHistory] = useState<any[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
-
-  // 同步 currentProject（从 URL 进来时）
-  useEffect(() => {
-    if (!currentProject && projectName) {
-      // 简单兜底：让用户回到 Home 选
-    } else if (currentProject && projectName && decodeURIComponent(projectName) !== currentProject.name) {
-      // 路由变了但 store 没变，不处理
-    }
-  }, [projectName, currentProject])
 
   // 加载历史
   const loadHistory = async () => {
@@ -97,8 +88,8 @@ export default function InspectionView() {
   }, [apiReady, currentProject])
 
   // 切换某项"发现问题"
-  const toggleIssue = (dimKey: any, dimensionName: any, itemId: any, label: any, checked: any) => {
-    setIssues((prev: any[]) => {
+  const toggleIssue = (dimKey: string, dimensionName: string, itemId: string, label: string, checked: boolean) => {
+    setIssues((prev: InspectionIssue[]) => {
       const idx = prev.findIndex(i => i.dimKey === dimKey && i.itemId === itemId)
       if (checked && idx === -1) {
         return [...prev, {
@@ -119,8 +110,8 @@ export default function InspectionView() {
     })
   }
 
-  const updateIssueField = (idx: any, field: any, value: any) => {
-    setIssues((prev: any[]) => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it))
+  const updateIssueField = (idx: number, field: string, value: string) => {
+    setIssues((prev: InspectionIssue[]) => prev.map((it, i) => i === idx ? { ...it, [field]: value } as InspectionIssue : it))
   }
 
   // 全部问题的快速检查

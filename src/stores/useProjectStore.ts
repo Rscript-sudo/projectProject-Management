@@ -74,11 +74,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   createProject: async (name, projectType = '通用') => {
     const { projectRoot } = get()
-    console.log('[Store] createProject:', projectRoot, name, projectType)
     try {
       const api = await waitForElectronAPI(10000)
       const result = await api.createProject(projectRoot, name, projectType)
-      console.log('[Store] createProject result:', result)
       if (result.success) {
         await get().loadProjects()
       }
@@ -179,13 +177,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         return { success: false, error: result?.error || '保存失败' }
       }
       // 同步顶层 projectRoot：settings 变 → store 顶层跟着变 → Home 页立刻刷新
-      const newRoot = payload.projectRoot || get().projectRoot
+      const oldRoot = get().projectRoot
+      const newRoot = payload.projectRoot || oldRoot
       set({
         settings: { ...get().settings, ...payload },
         projectRoot: newRoot,
       })
       // 根目录变了 → 立刻刷项目列表（不依赖再 loadSettings 触发）
-      if (newRoot !== get().projectRoot || payload.projectRoot) {
+      if (newRoot !== oldRoot) {
         await get().loadProjects()
       }
       return { success: true }

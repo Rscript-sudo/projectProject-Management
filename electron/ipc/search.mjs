@@ -7,11 +7,16 @@ import fs from 'fs'
 import { app } from 'electron'
 import { safeCall } from './safe.mjs'
 import { readProjectIndex } from './shared.mjs'
+import { getDocsFingerprint } from '../shared/searchCache.mjs'
 
 // FlexSearch 动态导入
 let FlexSearch = null
 let cachedFlexSearchEngine = null
 let cachedDocs = []
+// v1.2.1 P1 修复：docById Map 提升为模块级缓存，避免每次 query 重建
+let cachedDocById = new Map()
+
+let cachedDocsFingerprint = ''
 
 async function getFlexSearch() {
   if (!FlexSearch) {
@@ -141,7 +146,8 @@ async function readXlsxContent(filePath) {
   const stat = fs.statSync(filePath)
   if (stat.size > 10 * 1024 * 1024) return ''
 
-  const XLSX = await import('xlsx')
+  const xlsxModule = await import('xlsx')
+  const XLSX = xlsxModule.default || xlsxModule
   const wb = XLSX.readFile(filePath)
   const parts = []
   for (const sheetName of wb.SheetNames) {
@@ -229,6 +235,10 @@ async function rebuildAllIndexes(progressCallback) {
   let processed = 0
   const total = projectIndex.projects.length
 
+  // v1.2.1 P2 修复：每处理完一个 project 用 setImmediate 让出主线程
+  // 否则 1000+ 文件项目索引时主进程被报告为"未响应"
+  const yieldToLoop = () => new Promise(r => setImmediate(r))
+
   for (const proj of projectIndex.projects) {
     if (!fs.existsSync(proj.path)) continue
     try {
@@ -247,6 +257,8 @@ async function rebuildAllIndexes(progressCallback) {
 
       processed++
       if (progressCallback) progressCallback(processed, total, proj.name)
+      // 每 5 个 project 让出一次事件循环（防主进程"未响应"）
+      if (processed % 5 === 0) await yieldToLoop()
     } catch (e) {
       console.warn('[Search] Index project failed:', proj.name, e.message)
     }
@@ -267,6 +279,9 @@ export function register(ipcMain) {
     if (result.docs.length > 0) {
       cachedFlexSearchEngine = await buildFlexSearchEngine(result.docs)
       cachedDocs = [...result.docs]
+      cachedDocsFingerprint = getDocsFingerprint(result.docs)
+      // v1.2.1 P1 修复：同步重建 docById
+      cachedDocById = new Map(result.docs.map(d => [String(d.id), d]))
     }
     return { success: true, docCount: result.docs.length }
   }))
@@ -277,12 +292,22 @@ export function register(ipcMain) {
 
     const index = loadIndex()
     const docs = index.index || []
+    const docsFingerprint = getDocsFingerprint(docs)
+
+    // v1.2.1 P1 修复：建 docById Map 把 O(N*M) 降到 O(N+M)
+    // 旧的 docs.find(d => String(d.id) === String(id)) 在 10000+ 文档时是 1 亿次比对
+    // v1.2.2 优化：提升为模块级 cachedDocById，索引重建时同步刷新
+    let docById = cachedDocById
+    if (cachedDocById.size !== docs.length) {
+      docById = new Map(docs.map(d => [String(d.id), d]))
+      cachedDocById = docById
+    }
 
     // 尝试使用缓存的 FlexSearch 引擎
-    if (cachedFlexSearchEngine && docs.length > 0 && cachedDocs.length === docs.length) {
+    if (cachedFlexSearchEngine && docs.length > 0 && cachedDocsFingerprint === docsFingerprint) {
       try {
         const fsResults = await cachedFlexSearchEngine.searchAsync(query, { limit })
-        return fsResults.map(id => docs.find(d => String(d.id) === String(id))).filter(Boolean)
+        return fsResults.map(id => docById.get(String(id))).filter(Boolean)
       } catch (e) {
         console.warn('[Search] FlexSearch query failed, falling back:', e.message)
       }
@@ -293,8 +318,11 @@ export function register(ipcMain) {
       try {
         cachedFlexSearchEngine = await buildFlexSearchEngine(docs)
         cachedDocs = [...docs]
+        cachedDocsFingerprint = docsFingerprint
+        docById = new Map(docs.map(d => [String(d.id), d]))
+        cachedDocById = docById
         const fsResults = await cachedFlexSearchEngine.searchAsync(query, { limit })
-        return fsResults.map(id => docs.find(d => String(d.id) === String(id))).filter(Boolean)
+        return fsResults.map(id => docById.get(String(id))).filter(Boolean)
       } catch (e) {
         console.warn('[Search] FlexSearch rebuild failed, falling back:', e.message)
       }

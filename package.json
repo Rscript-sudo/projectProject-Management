@@ -1,6 +1,6 @@
 {
   "name": "project-management-system",
-  "version": "1.1.0",
+  "version": "1.1.2",
   "description": "项目文档管理系统 - AI 文档生成",
   "main": "electron/main.mjs",
   "scripts": {
@@ -9,7 +9,9 @@
     "build": "npm run build:renderer && electron-builder",
     "build:win": "npm run build:renderer && electron-builder --win --publish never",
     "package:mac": "npm run build:renderer && electron-builder --mac",
-    "preview": "electron-builder --dir && open ./dist/mac/项目文档管理系统.app"
+    "preview": "electron-builder --dir && open ./dist/mac/项目文档管理系统.app",
+    "test": "node --test test/*.test.mjs",
+    "test:e2e": "electron test/e2e.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.6.0",
@@ -50,7 +52,8 @@
       "dist/**/*",
       "electron/**/*",
       "resources/**/*",
-      "templates/**/*"
+      "templates/**/*",
+      "src/shared/field-aliases.json"
     ],
     "extraResources": [
       {

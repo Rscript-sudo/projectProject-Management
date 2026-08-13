@@ -3,7 +3,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Modal, Input, List, Typography, Spin, Badge, Empty } from 'antd'
+import { Modal, Input, List, Typography, Spin, Badge, Empty, type InputRef } from 'antd'
 import { FileTextOutlined, SearchOutlined, ClockCircleOutlined } from '@ant-design/icons'
 import { useElectronAPI } from '../hooks/useElectronAPI'
 
@@ -48,7 +48,7 @@ export default function GlobalSearch({ open, onClose, onOpenFile }: GlobalSearch
   const [loading, setLoading] = useState(false)
   const [searching, setSearching] = useState(false)
   const [rebuilding, setRebuilding] = useState(false)
-  const inputRef = useRef<any>(null)
+  const inputRef = useRef<InputRef>(null)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // 打开时自动聚焦

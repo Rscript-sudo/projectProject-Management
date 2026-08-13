@@ -8,26 +8,16 @@
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
+import { getKnownAliases, EXPECTED_PLACEHOLDER_RE } from './placeholderScan.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const TEMPLATES_DIR = path.resolve(__dirname, '..', 'templates')
 
-// 字段别名映射（与 src/shared/fieldRegistry.ts 保持一致，服务端独立维护副本）
-// 模板里出现 {{XXX}} 时，这里给出所有可能的标准 key 别名
-const FIELD_ALIASES = {
-  projectName: ['项目名称', '工程名称'],
-  ownerUnit: ['建设单位', '甲方', '建设方', '业主单位', '业主'],
-  contractor: ['施工单位', '乙方', '承建单位', '致单位', '致送单位'],
-  supervisorUnit: ['监理单位', '监理公司', '监理机构'],
-  chiefEngineer: ['总监理工程师', '总监姓名', '总监理'],
-  date: ['日期', '签章日期', '报告日期', '检查日期'],
-  fileNumber: ['文件编号', '编号', '文号'],
-  weekNumber: ['周数'],
-  monthNumber: ['月份'],
-  subject: ['事由', '主题', '摘要'],
-  content: ['正文内容', '内容', '正文', '主要内容'],
-}
+// 字段别名映射 — 唯一真相源：src/shared/field-aliases.json
+// 在 fieldRegistry.ts 中新增字段时，必须同步更新此 JSON
+const FIELD_ALIASES_PATH = path.resolve(__dirname, '..', 'src', 'shared', 'field-aliases.json')
+const FIELD_ALIASES = JSON.parse(fs.readFileSync(FIELD_ALIASES_PATH, 'utf8'))
 
 // 反向索引：alias → 标准 key
 const ALIAS_TO_KEY = {}
@@ -98,7 +88,7 @@ const DOC_TYPE_DIR_MAP = {
  * @param {string} docType - 文档类型
  * @returns {null|{templatePath: string, config: object}}
  */
-export function findTemplate(templatesDir, docType) {
+export function findTemplate(templatesDir, docType, options = {}) {
   const dirName = DOC_TYPE_DIR_MAP[docType]
   if (!dirName) return null
 
@@ -124,10 +114,144 @@ export function findTemplate(templatesDir, docType) {
     return null
   }
 
+  const defaultTemplatePath = path.join(dirPath, tmplFile)
+  const overridePath = options.templateOverride?.path
+  const templatePath = overridePath && fs.existsSync(overridePath) && path.extname(overridePath).toLowerCase() === '.docx'
+    ? overridePath
+    : defaultTemplatePath
+
   return {
-    templatePath: path.join(dirPath, tmplFile),
+    templatePath,
     config,
+    source: templatePath === defaultTemplatePath ? 'global' : 'project',
   }
+}
+
+/** 读取 DOCX 主文档中的 {{字段}}；项目模板可自由替换，因此字段以文件实际内容为准。 */
+export async function getTemplatePlaceholders(templatePath) {
+  try {
+    const PizZip = (await import('pizzip')).default
+    const zip = new PizZip(fs.readFileSync(templatePath))
+    const xml = zip.file('word/document.xml')?.asText() || ''
+    return [...new Set([...xml.matchAll(/\{\{([^}]{1,80})\}\}/g)].map(m => m[1].trim()).filter(Boolean))]
+  } catch (e) {
+    console.warn('[templateService] Failed to read template placeholders:', e.message)
+    return []
+  }
+}
+
+
+/**
+ * v1.2.2（2026-06-28）：正文段格式清洗（docx 渲染前的兜底）
+ *
+ * 修两个老板反馈的渲染问题：
+ *  1. AI 输出"    一、安全防范要求" → 前面有 4 空格 + 模板首行缩进另设 → 视觉上"缩进不严谨"
+ *     → 剥掉"一、""（一）""1."等序号前的所有前导空格
+ *  2. AI 用单 \n 分段 → docxtemplater linebreaks:true 转软换行 <w:br/> → 视觉上"标题与正文没换行"
+ *     → 把"段落标题行末尾的 \n"升级为 \n\n，让 docxtemplater 识别为新段落
+ *
+ * v1.2.4（2026-06-29 老板反馈）：AI 输出"事由：：国庆假期..."双冒号
+ *   v1.2.3 regex 只剥一次前缀，剩"：国庆..."。修法：循环剥 + 兜底剥任何残留"：xxx"开头的列
+ *
+ * 不动 \n\n（已经是段落分隔）
+ */
+function sanitizeBodyContent(value, projectType) {
+  if (!value || typeof value !== 'string') return value
+  let v = value
+  // 1. 剥掉序号前的空格（"    一、" → "一、"，"  （一）" → "（一）"，"   1." → "1."）
+  v = v.replace(/^[ \t]+(?=[一二三四五六七八九十]+[、.]|[（(][一二三四五六七八九十][）)]|\d+[.)、])/gm, '')
+  // 2. 段落标题行末尾的 \n 升级为 \n\n（让 docxtemplater 渲染成新段落而不是软换行）
+  v = v.replace(/([一二三四五六七八九十]+[、.][^\n]*)\n(?![\n])/g, '$1\n\n')
+  v = v.replace(/([（(][一二三四五六七八九十][）)][^\n]*)\n(?![\n])/g, '$1\n\n')
+  v = v.replace(/(\d+[.)、][^\n]*)\n(?![\n])/g, '$1\n\n')
+  // 3. v1.2.5 兜底：项目类型禁用术语替换
+  v = sanitizeForbiddenTerms(v, projectType)
+  // 4. v1.2.7 兜底：信件语体清理（"尊敬的..."/"此致敬礼"）
+  //   与 src/services/aiService.ts 的 sanitizeLetterStyle 词表双向同步
+  //   非前端入口（直接 IPC 调用 saveDoc/exportPDF）会绕过 aiService parse-time 防线
+  v = sanitizeLetterStyle(v)
+  return v
+}
+
+/**
+ * v1.2.7（2026-06-29 老板反馈）：信件语体清理（独立函数，便于在 sanitizeBodyContent 内调用）
+ * 监理文书【不是书信】，AI 不应输出信件式开场/结尾。
+ * 词表与 src/services/aiService.ts 的 sanitizeLetterStyle 双向同步。
+ */
+const LETTER_OPENING_RE = /(^|\n)\s*(?:尊敬(?:的)?[^：:\n]{0,30}[：:])\s*(?=\S)/g
+const LETTER_CLOSING_RE = /(此致敬礼|顺祝商祺|敬请审阅|以上请批复|特此函达|特此通知|此复|此令|为盼|为荷)[！!。.\s]*/g
+
+export function sanitizeLetterStyle(value) {
+  if (!value || typeof value !== 'string') return value
+  let v = value
+
+  // 1. 开头客套话
+  const openingHits = []
+  v = v.replace(LETTER_OPENING_RE, (m, lead) => {
+    const matched = m.replace(/^\s*/, '').replace(/\s*$/, '')
+    const label = matched.length > 30 ? matched.slice(0, 30) + '…' : matched
+    openingHits.push(label)
+    return lead || ''
+  })
+
+  // 2. 结尾客套话
+  const closingHits = []
+  v = v.replace(LETTER_CLOSING_RE, (m) => {
+    const label = m.replace(/[！!。.\s]*$/, '')
+    closingHits.push(label)
+    return ''
+  })
+
+  const allHits = [...openingHits, ...closingHits]
+  if (allHits.length > 0) {
+    const placeholder = `\n\n{{待清理：信件语体 - ${allHits.join('、')}}}`
+    v = `${v.trim()}${placeholder}`
+  }
+  return v
+}
+
+/**
+ * v1.2.4（2026-06-29）：【事由】【主题】等字段值的前缀清洗
+ * 循环剥（事由|主题|关于|标题|摘要）：前缀，直到不再匹配为止 —— 解决"事由：：xxx"双冒号
+ * 同时剥纯冒号残留（"：xxx" → "xxx"），解决 AI 写的"：尊敬的建设单位..."无主语前缀
+ */
+export function sanitizeFieldValue(value) {
+  if (!value || typeof value !== 'string') return value
+  let v = value
+  let prev
+  do {
+    prev = v
+    v = v.replace(/^(事由|主题|关于|标题|摘要)\s*[：:]\s*/g, '')
+    v = v.replace(/^[：:]\s*/g, '')
+  } while (v !== prev)
+  return v
+}
+
+/**
+ * v1.2.5（2026-06-29）：项目类型禁用术语兜底替换
+ * 老板反馈：信息化项目 AI 输出含"塔吊、升降机、电焊机、木工、扬尘"等土建术语
+ *   prompt 已加设备术语硬约束，但 AI 偶尔还是照抄旧示例
+ *   这里做兜底：按 projectType 把禁用术语替换为 {{待替换：...}} 占位提示
+ *   让老板在预览里一眼看到需要改的位置
+ */
+const PROJECT_TYPE_FORBIDDEN_TERMS = {
+  信息化: ['塔吊', '升降机', '电焊机', '木工', '扬尘', '木工棚', '木工加工', '混凝土', '钢筋', '砌体', '模板', '脚手架', '深基坑', '高支模', '桩号', '围挡围栏'],
+  园林: ['塔吊', '升降机', '电焊机', '木工', '混凝土', '钢筋', '砌体', '脚手架', '深基坑', '高支模'],
+  装饰: ['塔吊', '升降机', '混凝土', '钢筋', '砌体', '深基坑', '高支模', '苗木'],
+  钢结构: ['木工', '砌体', '苗木', '机房', 'UPS', '精密空调'],
+}
+
+export function sanitizeForbiddenTerms(value, projectType) {
+  if (!value || typeof value !== 'string' || !projectType) return value
+  const forbidden = PROJECT_TYPE_FORBIDDEN_TERMS[projectType]
+  if (!forbidden) return value
+  let v = value
+  for (const term of forbidden) {
+    if (v.includes(term)) {
+      v = v.replace(new RegExp(term, 'g'), `{{待替换：${term}（${projectType}项目禁用）}}`)
+    }
+  }
+  return v
 }
 
 /**
@@ -140,8 +264,11 @@ function parseSections(content) {
   let match
   while ((match = regex.exec(content)) !== null) {
     const key = match[1].trim()
-    const value = match[2].trim()
+    let value = match[2].trim()
     if (key && value) {
+      // v1.2.4（2026-06-29）：循环剥前缀（事由：：xxx → 事由：xxx → xxx）
+      // 老板反馈 v1.2.3 的单次 regex 剥不干净，剩"：xxx"
+      value = sanitizeFieldValue(value)
       result[key] = value
     }
   }
@@ -158,13 +285,14 @@ function parseSections(content) {
 export function buildPlaceholderData({
   docType,
   projectName = '',
-  ownerUnit = '建设单位',
-  contractor = '施工单位',
-  supervisorUnit = '监理单位',
-  chiefEngineer = '总监理工程师',
+  ownerUnit = '',
+  contractor = '',
+  supervisorUnit = '',
+  chiefEngineer = '',
   userInput = '',
   content = '',
   config = {},
+  projectType = '',  // v1.2.5：用于正文禁用术语兜底替换
 }) {
   const now = new Date()
   const dateStr = `${now.getFullYear()}年${String(now.getMonth() + 1).padStart(2, '0')}月${String(now.getDate()).padStart(2, '0')}日`
@@ -173,10 +301,11 @@ export function buildPlaceholderData({
   // 1. 标准 canonical（基于 FieldRegistry 的 key）
   const canonical = {
     projectName: projectName || '',
-    ownerUnit: ownerUnit || '建设单位',
-    contractor: contractor || '施工单位',
-    supervisorUnit: supervisorUnit || '监理单位',
-    chiefEngineer: chiefEngineer || '总监理工程师',
+    // 未提供的项目事实不得伪造默认单位/人员；模板 config 可另行提供确定默认值。
+    ownerUnit: ownerUnit || '',
+    contractor: contractor || '',
+    supervisorUnit: supervisorUnit || '',
+    chiefEngineer: chiefEngineer || '',
     date: dateStr,
     fileNumber: `${dateNum}-001`,
     subject: userInput || '',
@@ -222,7 +351,12 @@ export function buildPlaceholderData({
     const stdKey = resolveKey(key)
     const aliases = stdKey ? (FIELD_ALIASES[stdKey] || [key]) : [key]
     for (const alias of aliases) {
-      data[alias] = value
+      // v1.2.2（2026-06-28）：正文段格式清洗（解决"一、安全防范要求"前空格 + 不换行 bug）
+      //   docxtemplater linebreaks:true 把单 \n 转软换行，要段落分隔必须 \n\n
+      //   但 AI 经常输出"    一、安全防范要求\n（一）..." → 软换行 + 空格，渲染成一段
+      //   修法：1) 剥"标题"前导空格  2) 单 \n 升级为 \n\n（除非已在 \n\n 中）
+      // v1.2.5：传 projectType 进去做禁用术语兜底替换
+      data[alias] = sanitizeBodyContent(value, projectType)
     }
   }
 
@@ -232,6 +366,11 @@ export function buildPlaceholderData({
 
 /**
  * 渲染模板 — 用 docxtemplater 替换占位符并输出 buffer
+ * v1.2.0 增强：替换后扫描 word/document.xml，发现未替换的 {{xxx}} 直接抛错（老板 2026-06-26 拍板）
+ * 防止 AI 输出残留占位符 → 脏 DOCX 出厂
+ *
+ * v1.2.1 修复（P0）：扫描源必须从「渲染后 buffer」重新解 zip 读取，
+ *   不能用源 zip 引用——v1.2.0 的扫描永远命中源模板（永远空），防线失效。
  */
 export async function renderTemplate(templatePath, data) {
   const Docxtemplater = (await import('docxtemplater')).default
@@ -240,6 +379,12 @@ export async function renderTemplate(templatePath, data) {
   // 读取模板文件
   const tmplContent = fs.readFileSync(templatePath, 'binary')
   const zip = new PizZip(tmplContent)
+  const templateXml = zip.file('word/document.xml')?.asText() || ''
+  // 模板可由项目自行替换，字段集合不能再靠全局 config 假定。
+  // 未提供的字段必须显式标记待核对，不能让 docxtemplater 输出 undefined。
+  for (const key of new Set([...templateXml.matchAll(/\{\{([^}]{1,80})\}\}/g)].map(m => m[1].trim()))) {
+    if (data[key] === undefined || data[key] === null) data[key] = '数据待核对'
+  }
 
   // 创建模板引擎实例
   // 模板使用 {{ 和 }} 作为占位符定界符（如 {{项目名称}}）
@@ -253,10 +398,46 @@ export async function renderTemplate(templatePath, data) {
   doc.render(data)
 
   // 生成输出 buffer
-  return doc.getZip().generate({
+  const buffer = doc.getZip().generate({
     type: 'nodebuffer',
     mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   })
+
+  // 兜底扫描：未替换的 {{xxx}} 残留
+  // docxtemplater 在缺少字段时会保留原样（部分场景），脏数据不允许出厂
+  // v1.2.1 关键修复：从 buffer 重新解 zip 扫描，不能用源 zip
+  // 反编造铁律：白名单里的占位符（{{待补充：...}} / {{未指定时间}} / {{CURRENT_DATE}}）
+  // 是 AI 主动注入的合法残留，doc.mjs 入口已经放过，这里也要同步白名单
+  // v1.2.3（2026-06-29）：三段划分规则的🟡必须人工填字段名（监理部联系电话等）也同步放行
+  const MANUAL_FILL_PLACEHOLDERS = new Set([
+    '监理部联系电话', '项目编号', '合同编号', '签发人姓名', '签发日期',
+    '责任人姓名', '联系电话', '具体时间', '具体责任人', '具体部位',
+    '经济损失金额', '伤亡人数',
+  ])
+  try {
+    const resultZip = new PizZip(buffer)
+    const xml = resultZip.file('word/document.xml')?.asText() || ''
+    const known = getKnownAliases()
+    const leftover = [...xml.matchAll(/\{\{([^}]{1,40})\}\}/g)]
+      .map(m => m[1].trim())
+      .filter(s =>
+        !s.startsWith('{') &&
+        !s.endsWith('}') &&
+        !EXPECTED_PLACEHOLDER_RE.test(s) &&
+        !known.has(s) &&
+        !MANUAL_FILL_PLACEHOLDERS.has(s)
+      )
+    if (leftover.length > 0) {
+      const unique = [...new Set(leftover)]
+      throw new Error(`模板占位符未全部替换：${unique.slice(0, 10).join(', ')}${unique.length > 10 ? ` 等 ${unique.length} 处` : ''}`)
+    }
+  } catch (scanErr) {
+    // 扫描失败不能掩盖原始错误；只有扫描器自身的 bug 才吞
+    if (scanErr.message.includes('占位符未全部替换')) throw scanErr
+    console.warn('[renderTemplate] leftover scan failed:', scanErr.message)
+  }
+
+  return buffer
 }
 
 /**
@@ -265,7 +446,8 @@ export async function renderTemplate(templatePath, data) {
  * 目前主要供 监理日志 使用
  */
 export async function renderXlsxTemplate(templatePath, data, cellMappings) {
-  const XLSX = await import('xlsx')
+  const xlsxModule = await import('xlsx')
+  const XLSX = xlsxModule.default || xlsxModule
 
   // 读取模板
   const wb = XLSX.readFile(templatePath)
@@ -303,9 +485,131 @@ export async function renderXlsxTemplate(templatePath, data, cellMappings) {
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
 }
 
+// =============================================================================
+// GB/T 9704-2012 格式规范常量与辅助函数
+// =============================================================================
+
+const STYLE_MAP = {
+  h1:      { font: '黑体',         sz: 30, bold: false, align: 'left',    firstLine: 0    },
+  h2:      { font: '楷体_GB2312', sz: 32, bold: true,  align: 'left',    firstLine: 0    },
+  h3:      { font: '仿宋_GB2312', sz: 32, bold: false, align: 'left',    firstLine: 0    },
+  h4:      { font: '仿宋_GB2312', sz: 32, bold: false, align: 'left',    firstLine: 0    },
+  body:    { font: '仿宋_GB2312', sz: 32, bold: false, align: 'justify', firstLine: 640  },
+  closing: { font: '仿宋_GB2312', sz: 32, bold: false, align: 'right',   firstLine: 0    },
+}
+
+// GB/T 9704-2012 A4 页边距（单位：twips，1cm ≈ 567 twips）
+// 上 3.7cm ≈ 2098twips，下 3.5cm ≈ 1984twips，左 2.8cm ≈ 1587twips，右 2.6cm ≈ 1474twips
+const GB_PAGE_MARGINS = '<w:pgMar w:top="2098" w:bottom="1984" w:left="1587" w:right="1474" w:header="720" w:footer="720" w:gutter="0"/>'
+
+const TYPE_PATTERNS = [
+  { type: 'h1',      pattern: /^\s*[一二三四五六七八九十]+[、]/ },
+  { type: 'h2',      pattern: /^\s*[（(][一二三四五六七八九十][）)]/ },
+  { type: 'h3',      pattern: /^\s*\d+\.[\s　]/ },
+  { type: 'h4',      pattern: /^\s*[（(]\d+[）)]/ },
+  { type: 'closing', pattern: /^(?:编制人|审核人|审批人|批准人|总监理工程师|编制单位|编制日期|报告日期)/ },
+  { type: 'body',    pattern: /^./ },
+]
+
+function detectType(text) {
+  const trimmed = (text || '').trim()
+  if (!trimmed) return 'body'
+  for (const { type, pattern } of TYPE_PATTERNS) {
+    if (pattern.test(trimmed)) return type
+  }
+  return 'body'
+}
+
 /**
- * 格式刷 — 对已生成的 docx 文件应用格式规范（字体/字号/行距/页边距）
- * 纯 JS 实现，无 Python 依赖
+ * 构建指定风格的 rPr XML 片段
+ */
+function buildRPrXml(style) {
+  const boldXml = style.bold ? '<w:b/><w:bCs/>' : ''
+  return `<w:rPr><w:rFonts w:ascii="${style.font}" w:hAnsi="${style.font}" w:eastAsia="${style.font}"/><w:sz w:val="${style.sz}"/><w:szCs w:val="${style.sz}"/>${boldXml}</w:rPr>`
+}
+
+/**
+ * 把 pPr 应用行距/对齐/缩进（不修改 rPr）
+ */
+function applyPPrFormatting(pPr, defaultAlign, firstLine) {
+  const jcMap = { left: 'left', right: 'right', center: 'center', justify: 'both' }
+  const jcVal = jcMap[defaultAlign] || 'both'
+  let out = pPr
+  // 设置行距
+  if (/<w:spacing\b/.test(out)) {
+    out = out.replace(/<w:spacing\s[^/]*\/>/, '<w:spacing w:line="560" w:lineRule="exact"/>')
+  } else {
+    out = out.replace('</w:pPr>', '<w:spacing w:line="560" w:lineRule="exact"/></w:pPr>')
+  }
+  // 设置对齐
+  if (/<w:jc\b/.test(out)) {
+    out = out.replace(/<w:jc\s[^/]*\/>/, `<w:jc w:val="${jcVal}"/>`)
+  } else {
+    out = out.replace('</w:pPr>', `<w:jc w:val="${jcVal}"/></w:pPr>`)
+  }
+  // 设置首行缩进
+  if (firstLine) {
+    if (/<w:ind\b/.test(out)) {
+      out = out.replace(/<w:ind\s[^/]*\/>/, `<w:ind w:firstLine="${firstLine}"/>`)
+    } else {
+      out = out.replace('</w:pPr>', `<w:ind w:firstLine="${firstLine}"/></w:pPr>`)
+    }
+  }
+  return out
+}
+
+/**
+ * 格式化含 <w:br/> 的段落：只修正行距/对齐/缩进，不改变字体
+ * 字体由模板本身的设计决定
+ */
+function formatBrParagraph(pBlock) {
+  let result = pBlock
+
+  // 段落级 pPr：行距 28pt + 两端对齐 + 首行缩进 2 字符
+  result = result.replace(/<w:pPr[\s\S]*?<\/w:pPr>/, (pPr) => {
+    return applyPPrFormatting(pPr, 'justify', 640)
+  })
+  if (!result.includes('<w:pPr')) {
+    result = result.replace('<w:p>', '<w:p><w:pPr><w:spacing w:line="560" w:lineRule="exact"/><w:jc w:val="both"/><w:ind w:firstLine="640"/></w:pPr>')
+  }
+
+  return result
+}
+
+/**
+ * 为普通段落（不含 <w:br/>）应用统一的 GB 样式
+ */
+function applyStyleToParagraph(pBlock) {
+  const firstT = pBlock.match(/<w:t[^>]*>([^<]*)<\/w:t>/)
+  const firstText = firstT ? firstT[1] : ''
+  const type = detectType(firstText)
+  const style = STYLE_MAP[type] || STYLE_MAP.body
+
+  let result = pBlock
+
+  // 行距/对齐/缩进
+  result = result.replace(/<w:pPr[\s\S]*?<\/w:pPr>/, (pPr) => {
+    return applyPPrFormatting(pPr, style.align, style.firstLine)
+  })
+  if (!result.includes('<w:pPr')) {
+    const jcMap = { left: 'left', right: 'right', center: 'center', justify: 'both' }
+    const jcVal = jcMap[style.align] || 'both'
+    const spacing = '<w:spacing w:line="560" w:lineRule="exact"/>'
+    const jc = `<w:jc w:val="${jcVal}"/>`
+    const indent = style.firstLine ? `<w:ind w:firstLine="${style.firstLine}"/>` : ''
+    result = result.replace('<w:p>', `<w:p><w:pPr>${spacing}${indent}${jc}</w:pPr>`)
+  }
+
+  // rPr — 统一用一种字体
+  const rPrXml = buildRPrXml(style)
+  result = result.replace(/<w:rPr[\s\S]*?<\/w:rPr>/g, rPrXml)
+
+  return result
+}
+
+/**
+ * 格式刷 — 对已生成的 docx 文件应用 GB/T 9704-2012 格式规范
+ * 纯 JS 实现（操作 docx ZIP 中 word/document.xml），无 Python 依赖
  * templateUsed: 是否使用了模板（true=轻量模式, false=全量模式）
  */
 export async function formatDocx(docxPath, templateUsed = true) {
@@ -325,44 +629,45 @@ export async function formatDocx(docxPath, templateUsed = true) {
 
     let xml = docFile.asText()
 
-    // === 1. 确保每段落都有 <w:pPr> ===
-    xml = xml.replace(/<w:p\b[^>]*>(?!\s*<w:pPr\b)/g, '$&<w:pPr/>')
-
-    // === 2. 行距：固定28pt（560 twips）===
-    // 对每个段落的 <w:pPr> 添加 spacing（已有则跳过）
-    xml = xml.replace(
-      /(<w:pPr[\s\S]*?)(?:<\/w:pPr>)/g,
-      (match, pPrContent) => {
-        if (/<w:spacing\b/.test(pPrContent)) return match
-        return pPrContent + '<w:spacing w:line="560" w:lineRule="exact"/></w:pPr>'
+    // === 1. 模板路径：只格式化含 <w:br/> 的段落（即 {{正文内容}} 产物）===
+    //     有 <w:br/> → 分段检测（按 <w:br/> 分组，每行独立识别标题/正文）
+    //     无 <w:br/> → 统一检测（第一段文本决定整段字体）
+    xml = xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (pBlock) => {
+      if (templateUsed && !/<w:br\/>/.test(pBlock)) return pBlock
+      if (!/<w:t[^>]*>/.test(pBlock)) return pBlock
+      if (/<w:br\/>/.test(pBlock)) {
+        return formatBrParagraph(pBlock)
       }
-    )
+      return applyStyleToParagraph(pBlock)
+    })
 
-    // === 3. 全量模式：页边距（GB/T 9704-2012 A4标准） ===
-    // 上3.7cm(1332000emu) 下3.5cm(1260000emu) 左2.8cm(1008000emu) 右2.6cm(936000emu)
-    if (!templateUsed) {
-      const pgMar = '<w:pgMar w:top="1332000" w:bottom="1260000" w:left="1008000" w:right="936000" w:header="720" w:footer="720" w:gutter="0"/>'
-      // 检查 section 属性中是否已有 pgMar
-      if (/<w:pgMar\b/.test(xml)) {
-        xml = xml.replace(/<w:pgMar\s[^/]*\/>/g, pgMar)
-      } else {
-        xml = xml.replace(/<w:sectPr>/g, '<w:sectPr>' + pgMar)
-      }
+    // === 2. 行距兜底（28pt 固定）===
+    xml = xml.replace(/(<w:pPr[\s\S]*?)(?:<\/w:pPr>)/g, (match, pPrContent) => {
+      if (/<w:spacing\b/.test(pPrContent)) return match
+      return pPrContent + '<w:spacing w:line="560" w:lineRule="exact"/></w:pPr>'
+    })
+
+    // === 3. 页边距（GB/T 9704-2012 A4标准）===
+    if (/<w:pgMar\b/.test(xml)) {
+      xml = xml.replace(/<w:pgMar\s[^/]*\/>/g, GB_PAGE_MARGINS)
+    } else {
+      xml = xml.replace(/<w:sectPr>/g, '<w:sectPr>' + GB_PAGE_MARGINS)
     }
 
-    // === 4. 全量模式：为无字体设置的 run 添加默认字体 ===
+    // === 4. 降级路径 run 字体兜底 ===
     if (!templateUsed) {
       xml = xml.replace(/<w:r>([\s\S]*?)<\/w:r>/g, (match, inner) => {
         if (/<w:rPr>/.test(inner)) return match
-        return '<w:r><w:rPr><w:rFonts w:ascii="仿宋" w:hAnsi="仿宋" w:eastAsia="仿宋"/><w:sz w:val="32"/><w:szCs w:val="32"/></w:rPr>' + inner + '</w:r>'
+        return '<w:r><w:rPr><w:rFonts w:ascii="仿宋_GB2312" w:hAnsi="仿宋_GB2312" w:eastAsia="仿宋_GB2312"/><w:sz w:val="32"/><w:szCs w:val="32"/></w:rPr>' + inner + '</w:r>'
       })
     }
 
-    // === 5. 写入修改后的 XML ===
+    // === 5. 确保每段都有 <w:pPr>（兜底）===
+    xml = xml.replace(/<w:p\b[^>]*>(?!\s*<w:pPr\b)/g, '$&<w:pPr/>')
     zip.file('word/document.xml', xml)
     fs.writeFileSync(docxPath, zip.generate({ type: 'nodebuffer' }))
 
-    console.log('[formatDocx] OK:', docxPath, templateUsed ? '(light)' : '(full)')
+    console.log('[formatDocx] OK:', docxPath, templateUsed ? '(template)' : '(fallback)')
     return true
   } catch (e) {
     console.error('[formatDocx] Error:', e.message)

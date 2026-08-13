@@ -1,0 +1,17 @@
+{
+  "projectName": ["项目名称", "工程名称"],
+  "projectType": ["项目类型", "工程类型"],
+  "ownerUnit": ["建设单位", "甲方", "建设方", "业主单位", "业主"],
+  "contractor": ["施工单位", "乙方", "承建单位", "致单位", "致送单位"],
+  "supervisorUnit": ["监理单位", "监理公司", "监理机构"],
+  "chiefEngineer": ["总监理工程师", "总监姓名", "总监理"],
+  "date": ["日期", "签章日期", "报告日期", "检查日期"],
+  "fileNumber": ["文件编号", "编号", "文号"],
+  "weekNumber": ["周数"],
+  "monthNumber": ["月份"],
+  "subject": ["事由", "主题", "摘要"],
+  "content": ["正文内容", "内容", "正文", "主要内容"],
+  "userInput": ["用户输入"],
+  "holiday_name": ["节日名称", "holiday_name"],
+  "holiday_period": ["放假日期", "holiday_period", "节假日日期"]
+}

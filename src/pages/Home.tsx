@@ -15,7 +15,6 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
 import DirTree from '../components/DirTree'
-import DashboardCard from '../components/DashboardCard'
 import CompletenessPanel from '../components/CompletenessPanel'
 import LedgerPanel from '../components/LedgerPanel'
 import DataBoard from '../components/DataBoard'
@@ -210,18 +209,16 @@ export default function Home() {
     if (!selectedProject || !window.electronAPI) return
     try {
       const values = configForm.getFieldsValue(true)
-      console.log('[Home] Saving config:', selectedProject.path, values)
-      const result = await window.electronAPI.writeProjectConfig(selectedProject.path, values)
-      console.log('[Home] Save result:', result)
+      const nextConfig = { ...projectConfig, ...values }
+      const result = await window.electronAPI.writeProjectConfig(selectedProject.path, nextConfig)
       if (!result || !result.success) {
         message.error('保存失败：' + (result?.error || '服务端返回异常'))
         return
       }
-      setProjectConfig(values)
+      setProjectConfig(nextConfig)
       setEditMode(false)
       setTimeout(() => message.success('项目配置已保存'), 100)
     } catch (e: any) {
-      console.error('[Home] Save config error:', e)
       const errMsg = e?.message || e?.toString() || '表单验证失败'
       message.error('保存失败：' + errMsg)
     }

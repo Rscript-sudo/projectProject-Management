@@ -41,6 +41,10 @@ interface AIOptions {
   model: string
   messages: { role: string; content: string }[]
   provider?: string
+  // v1.2.1 扩展：DOC/DATA_QUERY/HYBRID/CHAT 路由标记，主进程按 mode 走不同处理
+  mode?: string
+  projectName?: string
+  dataToolIds?: string[]
 }
 
 interface AIResult {
@@ -177,10 +181,21 @@ export interface ElectronAPI {
     error?: string
   }>
   callAI: (options: AIOptions) => Promise<AIResult>
+  listModels: (options: { baseUrl: string; apiKey: string }) => Promise<{ success: boolean; models?: string[]; error?: string }>
   callAIStream: (options: AIOptions) => Promise<{ success: boolean; error?: string; requestId?: string }>
   abortAIStream: (requestId: string) => void
   onAIStreamChunk: (callback: (data: { requestId: string; type: 'content' | 'error'; content?: string; error?: string }) => void) => () => void
   onAIStreamEnd: (callback: (data: { requestId: string }) => void) => () => void
+  // v1.2.1 项目类型 SOP 加载（来源：src/shared/sop/{projectType}/safety-notice.json）
+  readSop: (params: { projectType: string; docType?: string }) => Promise<{
+    found: boolean
+    projectType: string
+    sopFile: string
+    sections: Array<{ title: string; mustInclude: string[]; forbiddenTerms: string[] }>
+    globalForbiddenTerms: string[]
+    minWords: number
+    error?: string
+  }>
   inspectionSave: (options: { projectPath: string; record: any }) => Promise<{ success: boolean; recordPath?: string; hazardIds?: number[]; hazardCount?: number; error?: string }>
   inspectionList: (options: { projectPath: string }) => Promise<any[]>
   inspectionLinkHazard: (options: { hazardId: number; correspondenceId: number }) => Promise<{ success: boolean }>
@@ -229,9 +244,12 @@ export interface ElectronAPI {
   setSettings: (settings: AppSettings) => Promise<{ success: boolean; error?: string }>
   getTemplateCatalog: () => Promise<TemplateItem[]>
   selectSavePath: (defaultPath: string) => Promise<string | null>
+  selectTemplateFile: () => Promise<string | null>
   getProjectDataPath: (projectPath: string) => Promise<string>
-  readProjectConfig: (projectPath: string) => Promise<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; projectCode?: string }>
+  readProjectConfig: (projectPath: string) => Promise<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; projectCode?: string; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }> }>
   writeProjectConfig: (projectPath: string, config: object) => Promise<{ success: boolean; error?: string }>
+  assignProjectTemplate: (projectPath: string, docType: string, sourcePath: string) => Promise<{ success: boolean; path?: string; templateOverride?: { path: string; sourceName?: string; updatedAt?: string }; error?: string }>
+  getProjectTemplateContract: (projectPath: string, docType: string) => Promise<{ found: boolean; fields: string[]; source?: 'global' | 'project'; path?: string; error?: string }>
   deleteFile: (filePath: string) => Promise<{ success: boolean; error?: string }>
   renameFile: (filePath: string, newName: string) => Promise<{ success: boolean; path?: string; error?: string }>
   moveFile: (filePath: string, targetDir: string) => Promise<{ success: boolean; path?: string; error?: string }>

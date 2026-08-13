@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Typography, Input, Button, Space, Spin, Modal, Form, Select, Tag, App, Dropdown } from 'antd'
+import { Typography, Input, Button, Space, Spin, Modal, Form, Select, Tag, App, Dropdown, Tooltip } from 'antd'
 import { SendOutlined, RobotOutlined, FileTextOutlined, SaveOutlined, ReloadOutlined, FilePdfOutlined, SettingOutlined, FolderOpenOutlined, HomeOutlined, EditOutlined, CloseOutlined, SearchOutlined, BookOutlined, EyeOutlined } from '@ant-design/icons'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
-import { identifyDocType, identifyMode, buildChatPrompt, inferDataTools, postProcessTimeFields, generateFileName, getDocSavePath, providerConfigs, buildDocPrompt, callAI, extractSubject } from '../services/aiService'
+import { identifyDocType, identifyMode, buildChatPrompt, inferDataTools, postProcessTimeFields, postProcessFabricationGuard, generateFileName, getDocSavePath, providerConfigs, buildDocPrompt, callAI, extractSubject, appendCalibrationStatement, sanitizeFieldValue, sanitizeLetterStyle } from '../services/aiService'
+import { countEffectiveWords, getMinWordCount } from '../shared/docTypeMinWords'
 import type { SessionMode } from '../services/aiService'
 import DirTree from '../components/DirTree'
 import type { DirNode, TemplateItem } from '../vite-env'
@@ -18,6 +19,7 @@ interface ChatMessage {
   content: string
   docType?: string
   rawData?: Record<string, any>
+  wordCount?: number  // v1.0.0：AI 扩写字数实时统计
   timestamp: Date
 }
 
@@ -40,7 +42,7 @@ export default function ProjectView() {
   const apiReady = useElectronAPI()
   const [lastInput, setLastInput] = useState('')
   const [configModalOpen, setConfigModalOpen] = useState(false)
-  const [projectConfig, setProjectConfig] = useState<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string }>({
+  const [projectConfig, setProjectConfig] = useState<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }> }>({
     contractor: '',
     ownerUnit: '',
     supervisorUnit: '',
@@ -215,17 +217,34 @@ export default function ProjectView() {
     const values = await configForm.validateFields()
     if (!currentProject || !window.electronAPI) return
     try {
-      const result = await window.electronAPI.writeProjectConfig(currentProject.path, values)
+      const nextConfig = { ...projectConfig, ...values }
+      const result = await window.electronAPI.writeProjectConfig(currentProject.path, nextConfig)
       if (!result || !result.success) {
         message.error('保存失败：' + (result?.error || '服务端返回异常'))
         return
       }
-      setProjectConfig(values)
+      setProjectConfig(nextConfig)
       setConfigModalOpen(false)
       message.success('项目配置已保存')
     } catch (e: any) {
       message.error('保存失败：' + e.message)
     }
+  }
+
+  const handleAssignProjectTemplate = async (docType: string) => {
+    if (!currentProject || !window.electronAPI) return
+    const sourcePath = await window.electronAPI.selectTemplateFile()
+    if (!sourcePath) return
+    const result = await window.electronAPI.assignProjectTemplate(currentProject.path, docType, sourcePath)
+    if (!result.success || !result.templateOverride) {
+      message.error('模板替换失败：' + (result.error || '未知错误'))
+      return
+    }
+    setProjectConfig(prev => ({
+      ...prev,
+      templateOverrides: { ...(prev.templateOverrides || {}), [docType]: result.templateOverride! },
+    }))
+    message.success(`${docType} 已切换为项目专用模板`)
   }
 
   // 发送消息 — 支持 CHAT / DATA_QUERY / DOC / HYBRID 四模式
@@ -286,8 +305,31 @@ export default function ProjectView() {
     const { mode, docType, dataToolIds } = identifyMode(trimmedInput)
     setLastInput(trimmedInput)
 
+    // v1.2.0：DOC/HYBRID 模式必须先选项目，避免 AI 在没有项目信息时凭空扩写
+    //   v1.1.x 行为：currentProject 为 null 时 projectInfo=undefined，AI 仍生成但内容空泛
+    //   v1.2.0 行为：弹 toast 提示选项目，中断生成
+    if ((mode === 'DOC' || mode === 'HYBRID') && !currentProject) {
+      message.warning('请先在顶部选择项目，再生成文档', 3)
+      setLoading(false)
+      setProgressStage('')
+      return
+    }
+
     // 添加用户消息
     const attachSummary = attachedItems.map(i => `  ${i.type === 'folder' ? '📁' : '📄'} ${i.path}`).join('\n')
+
+    // v1.2.1（2026-06-28）：识别节假日类型，给 postProcessTimeFields 传 context
+    //   避免【放假日期】字段被误替换成今天（老板反馈的"国庆 → 2026年06月28日"）
+    let holidayType: string | undefined
+    if (docType === '安全通知书') {
+      const lower = trimmedInput.toLowerCase()
+      if (lower.includes('五一') || lower.includes('劳动节')) holidayType = '五一'
+      else if (lower.includes('端午') || lower.includes('端阳')) holidayType = '端午'
+      else if (lower.includes('国庆') || lower.includes('十一')) holidayType = '国庆'
+      else if (lower.includes('春节') || lower.includes('过年')) holidayType = '春节'
+      else if (lower.includes('清明')) holidayType = '清明'
+    }
+    const postProcessCtx = { docType: docType || '通用文档', holidayType }
     setMessages(prev => [...prev, {
       id: Date.now().toString(),
       role: 'user',
@@ -310,13 +352,15 @@ export default function ProjectView() {
     }])
 
     try {
+      // v1.2.0：删除假值兜底（v1.1.x 用了 '建设单位'/'施工单位' 等字面字符串作为 fallback，
+      //   AI 会把这些字面字符串当真值写进文档。改为 undefined 让 AI 走反编造铁律的占位符逻辑）
       const projectInfo = currentProject ? {
         projectName: currentProject.name,
-        ownerUnit: projectConfig.ownerUnit || '建设单位',
-        contractor: projectConfig.contractor || '施工单位',
-        supervisorUnit: projectConfig.supervisorUnit || '监理单位',
-        chiefEngineer: projectConfig.chiefEngineer || '总监理工程师',
-        projectType: projectConfig.projectType || '通用',
+        ownerUnit: projectConfig.ownerUnit || undefined,
+        contractor: projectConfig.contractor || undefined,
+        supervisorUnit: projectConfig.supervisorUnit || undefined,
+        chiefEngineer: projectConfig.chiefEngineer || undefined,
+        projectType: projectConfig.projectType || undefined,
       } : undefined
 
       // ==== 附件信息注入 AI 上下文 ====
@@ -363,11 +407,33 @@ export default function ProjectView() {
       // ==== 按模式构建 messages ====
       let aiMessages: { role: string; content: string }[]
       const userContent = attachContext ? trimmedInput + attachContext : trimmedInput
+      const extractedSubject = extractSubject(trimmedInput)  // 提取事由摘要，不让 AI 照抄原始输入
 
       switch (mode) {
         case 'DOC':
         case 'HYBRID': {
-          const { system, user } = buildDocPrompt(docType || '通用文档', userContent, projectInfo)
+          // v1.2.1（2026-06-28）：预加载项目类型 SOP JSON 注入 prompt
+          // 不阻塞：失败时降级到 router enabledSections 摘要（buildDocPrompt 兜底）
+          let sopData: any = undefined
+          try {
+            const projectType = projectInfo?.projectType || '土建'
+            if (window.electronAPI?.readSop) {
+              const r = await window.electronAPI.readSop({ projectType, docType: docType || '' })
+              if (r && r.found) sopData = r
+            }
+          } catch (e) {
+            console.warn('[ProjectView] SOP 预加载失败，降级到 router:', e)
+          }
+          let templateFields: string[] = []
+          try {
+            if (currentProject && docType && window.electronAPI?.getProjectTemplateContract) {
+              const contract = await window.electronAPI.getProjectTemplateContract(currentProject.path, docType)
+              templateFields = contract.fields || []
+            }
+          } catch (e) {
+            console.warn('[ProjectView] 模板字段契约读取失败，继续使用文种规则:', e)
+          }
+          const { system, user } = buildDocPrompt(docType || '通用文档', userContent, projectInfo, extractedSubject, sopData, templateFields)
           aiMessages = [
             { role: 'system', content: system },
             { role: 'user', content: user },
@@ -394,7 +460,7 @@ export default function ProjectView() {
           break
         }
         default: {
-          const { system, user } = buildDocPrompt('通用文档', userContent, projectInfo)
+          const { system, user } = buildDocPrompt('通用文档', userContent, projectInfo, extractedSubject)
           aiMessages = [
             { role: 'system', content: system },
             { role: 'user', content: user },
@@ -448,7 +514,11 @@ export default function ProjectView() {
             if (data.requestId !== requestId) return
             if (data.type === 'content' && data.content) {
               accumulated += data.content
-              setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: accumulated } : m))
+              setMessages(prev => prev.map(m => m.id === assistantId ? {
+                ...m,
+                content: accumulated,
+                wordCount: countEffectiveWords(accumulated),
+              } : m))
             } else if (data.type === 'error') {
               message.error(data.error || 'AI 流式错误')
             }
@@ -465,9 +535,118 @@ export default function ProjectView() {
           }, 300000)
         })
 
-        // 时间字段后处理
-        accumulated = postProcessTimeFields(accumulated)
-        setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: accumulated } : m))
+        // 后处理：先跑反编造守门员（捕获原始日期），再处理时间字段占位符
+        const guardResult = postProcessFabricationGuard(accumulated)
+        if (guardResult.warnings.length > 0) {
+          message.warning(`⚠️ ${guardResult.warnings.join('；')}，已替换为占位符请补充`, 5)
+        }
+        accumulated = postProcessTimeFields(guardResult.content, postProcessCtx)
+
+        // v1.2.1（2026-06-28 接入）：DOC/HYBRID 模式下自动续写
+        //   AI 输出 < getMinWordCount(docType) → 追加一轮 user 消息要求扩写，最多 1 次
+        if ((mode === 'DOC' || mode === 'HYBRID') && docType && docType !== '通用文档') {
+          const minWords = getMinWordCount(docType)
+          let wordCount = countEffectiveWords(accumulated)
+          if (minWords > 0 && wordCount < minWords) {
+            // 尝试追加一轮 user 消息（不重新走 system prompt，直接续写）
+            const extraUserMsg = `【字数补足要求】你刚刚输出 ${wordCount} 字，远低于本文档要求的 ${minWords} 字下限。请在原文基础上直接续写扩写，不要重写开头、不要重写已正确的内容。重点：补充缺失条款的细节、给出可执行的检查/整改步骤、引用规范条款编号；不得编造具体时间/人员/部位。继续输出正文即可。`
+            try {
+              console.log(`[AI] 触发续写：当前 ${wordCount}/${minWords} 字`)
+              const reRequestId = `retry-${Date.now()}`
+              const retryResult = await window.electronAPI.callAIStream({
+                ...aiCfg,
+                mode: 'CHAT',  // 续写走 CHAT 模式避免再次走 DOC 复杂提示
+                projectName: currentProject?.name,
+                messages: [
+                  ...aiMessages,
+                  { role: 'assistant', content: accumulated },
+                  { role: 'user', content: extraUserMsg },
+                ],
+              })
+              if (!retryResult.success) {
+                console.error('[AI] 续写启动失败:', retryResult.error)
+                message.error(`续写启动失败：${retryResult.error || '未知错误'}，当前字数 ${wordCount}/${minWords}`)
+              } else if (retryResult.requestId) {
+                console.log('[AI] 续写流式已启动 requestId:', retryResult.requestId)
+                await new Promise<void>((resolve) => {
+                  let retryAcc = ''
+                  let retryEnded = false
+                  const cleanup = () => { if (retryEnded) return; retryEnded = true; offChunk(); offEnd(); resolve() }
+                  const offChunk = window.electronAPI.onAIStreamChunk((d) => {
+                    if (d.requestId !== retryResult.requestId) return
+                    if (d.type === 'content' && d.content) {
+                      retryAcc += d.content
+                      const merged = accumulated + '\n' + retryAcc
+                      setMessages(prev => prev.map(m => m.id === assistantId ? {
+                        ...m,
+                        content: merged,
+                        wordCount: countEffectiveWords(merged),
+                      } : m))
+                    } else if (d.type === 'error') {
+                      console.error('[AI] 续写流式 chunk error:', d.error)
+                      message.error(`续写中断：${d.error || '未知错误'}`)
+                    }
+                  })
+                  const offEnd = window.electronAPI.onAIStreamEnd((d) => {
+                    if (d.requestId !== retryResult.requestId) return
+                    console.log(`[AI] 续写完成，追加 ${retryAcc.length} 字符`)
+                    if (retryAcc) {
+                      accumulated = accumulated + '\n' + retryAcc
+                      const mergedFinal = postProcessTimeFields(
+                        postProcessFabricationGuard(accumulated).content,
+                        postProcessCtx
+                      )
+                      accumulated = mergedFinal
+                      setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: accumulated } : m))
+                    } else {
+                      console.warn('[AI] 续写流式结束但 retryAcc 为空')
+                    }
+                    cleanup()
+                  })
+                  // 续写也限 90 秒
+                  setTimeout(() => {
+                    if (!retryEnded) {
+                      console.warn('[AI] 续写 90s 超时')
+                      cleanup()
+                    }
+                  }, 90000)
+                })
+              }
+            } catch (e) {
+              console.error('[ProjectView] 续写异常:', e)
+              message.error(`续写异常：${e instanceof Error ? e.message : String(e)}`)
+            }
+            wordCount = countEffectiveWords(accumulated)
+            if (wordCount < minWords) {
+              message.warning(`⚠️ AI 仅输出 ${wordCount} 字（要求 ≥ ${minWords} 字），内容可能不足，建议在输入中补充具体要求后重新生成`, 6)
+            }
+          } else if (wordCount < 600) {
+            message.warning(`⚠️ AI 仅输出 ${wordCount} 字（建议 ≥ 600 字），内容可能过于简单，建议在输入中补充具体要求后重新生成`, 6)
+          }
+        }
+
+        // v1.2.1（2026-06-28 接入）：DOC/HYBRID 模式下追加项目类型校准声明
+        //   之前写了 appendCalibrationStatement 但 0 调用点，v1.2.0 的 SOP 注入等于无反馈闭环
+        if ((mode === 'DOC' || mode === 'HYBRID') && docType) {
+          const projectType = projectInfo?.projectType || '土建'
+          accumulated = appendCalibrationStatement(accumulated, projectType, docType)
+          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: accumulated } : m))
+        }
+
+        // v1.2.4（2026-06-29）：预览前对【事由】【主题】字段值兜底剥前缀
+        //   老板反馈 v1.2.3 双重冒号还在 → 模板渲染走 templateService 已修，
+        //   但预览面板直接显示 AI 原文，需要前端再清洗一次
+        //   只对【事由】【主题】【标题】【摘要】字段清洗，不动正文
+        if (mode === 'DOC' || mode === 'HYBRID') {
+          accumulated = accumulated.replace(
+            /【(事由|主题|标题|摘要)】\s*([\s\S]*?)(?=【|$)/g,
+            (m, k, v) => `【${k}】${sanitizeFieldValue(v.trim())}`
+          )
+          // v1.2.7（2026-06-29 老板反馈）：信件语体清理（"尊敬的..."/"此致敬礼"）
+          //   全文扫一遍，覆盖正文任意位置
+          accumulated = sanitizeLetterStyle(accumulated)
+          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: accumulated } : m))
+        }
 
         // DOC / HYBRID 模式显示文档预览
         if (mode === 'DOC' || mode === 'HYBRID') {
@@ -509,8 +688,40 @@ export default function ProjectView() {
       if (!result.success) throw new Error(result.error || 'AI 调用失败')
 
       let aiContent = result.content || ''
-      aiContent = postProcessTimeFields(aiContent)
+      // 后处理：先跑反编造守门员（捕获原始日期），再处理时间字段占位符
+      const guardResult = postProcessFabricationGuard(aiContent)
+      if (guardResult.warnings.length > 0) {
+        message.warning(`⚠️ ${guardResult.warnings.join('；')}，已替换为占位符请补充`, 5)
+      }
+      aiContent = postProcessTimeFields(guardResult.content, postProcessCtx)
       setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: aiContent } : m))
+
+      // v1.2.0：AI 扩写字数软警告（与流式路径同源，老板 2026-06-27 反馈内容过简）
+      if (mode === 'DOC' || mode === 'HYBRID') {
+        const wordCount = countEffectiveWords(aiContent)
+        if (wordCount < 600) {
+          message.warning(`⚠️ AI 仅输出 ${wordCount} 字（建议 ≥ 600 字），内容可能过于简单，建议在输入中补充具体要求后重新生成`, 6)
+        }
+      }
+
+      // v1.2.1（2026-06-28 接入）：DOC/HYBRID 模式下追加项目类型校准声明
+      //   与流式路径同源，避免校准声明只在一条路径上出现
+      if ((mode === 'DOC' || mode === 'HYBRID') && docType) {
+        const projectType = projectInfo?.projectType || '土建'
+        aiContent = appendCalibrationStatement(aiContent, projectType, docType)
+        setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: aiContent } : m))
+      }
+
+      // v1.2.4（2026-06-29）：非流式降级路径同样兜底剥【事由】前缀
+      if (mode === 'DOC' || mode === 'HYBRID') {
+        aiContent = aiContent.replace(
+          /【(事由|主题|标题|摘要)】\s*([\s\S]*?)(?=【|$)/g,
+          (m, k, v) => `【${k}】${sanitizeFieldValue(v.trim())}`
+        )
+        // v1.2.7（2026-06-29 老板反馈）：信件语体清理（覆盖全文，含正文）
+        aiContent = sanitizeLetterStyle(aiContent)
+        setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: aiContent } : m))
+      }
 
       if (mode === 'DOC' || mode === 'HYBRID') {
         setProgressStage('processing')
@@ -1165,6 +1376,24 @@ export default function ProjectView() {
                   {previewContent && (
                     <Text style={{ fontSize: 12, color: '#888' }}>{previewContent.docType}</Text>
                   )}
+                  {previewContent && (() => {
+                    const msgWordCount = (() => {
+                      // 从最后一条 assistant 消息拿 wordCount（流式实时更新）
+                      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
+                      return lastAssistant?.wordCount ?? countEffectiveWords(previewContent.content)
+                    })()
+                    const minWords = getMinWordCount(previewContent.docType)
+                    const ok = msgWordCount >= minWords
+                    return (
+                      <Tag
+                        color={ok ? 'success' : 'error'}
+                        style={{ fontSize: 11, lineHeight: '18px', marginLeft: 8 }}
+                        title={`当前 ${msgWordCount} 字${minWords > 0 ? `，要求 ≥ ${minWords} 字` : ''}`}
+                      >
+                        {ok ? `✓ ${msgWordCount}` : `${msgWordCount}/${minWords}`}
+                      </Tag>
+                    )
+                  })()}
                 </Space>
                 <Space size={4}>
                   {previewContent && (
@@ -1185,9 +1414,21 @@ export default function ProjectView() {
                       >
                         {editMode ? '取消' : '编辑'}
                       </Button>
-                      <Button type="primary" size="small" icon={<SaveOutlined />} onClick={handleSave} loading={generating}>
-                        {generating ? '保存中...' : '保存'}
-                      </Button>
+                      {previewContent && (() => {
+                        const msgWordCount = (() => {
+                          const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
+                          return lastAssistant?.wordCount ?? countEffectiveWords(previewContent.content)
+                        })()
+                        const minWords = getMinWordCount(previewContent.docType)
+                        const insufficient = minWords > 0 && msgWordCount < minWords
+                        return (
+                          <Tooltip title={insufficient ? `当前 ${msgWordCount} 字，不足 ${minWords} 字` : undefined}>
+                            <Button type="primary" size="small" icon={<SaveOutlined />} onClick={handleSave} loading={generating} disabled={insufficient}>
+                              {generating ? '保存中...' : (insufficient ? `不足 ${minWords} 字` : '保存')}
+                            </Button>
+                          </Tooltip>
+                        )
+                      })()}
                       <Button
                         size="small"
                         type="text"
@@ -1434,6 +1675,20 @@ export default function ProjectView() {
               ]}
             />
           </Form.Item>
+          <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 12, marginTop: 4 }}>
+            <Text strong style={{ fontSize: 12 }}>项目专用模板</Text>
+            <Text type="secondary" style={{ display: 'block', fontSize: 11, margin: '4px 0 8px' }}>
+              选择后会复制到本项目“项目模板”目录，仅影响当前项目；未配置时仍使用通用模板。
+            </Text>
+            {['监理日志', '监理周报', '监理月报', '会议纪要'].map(docType => (
+              <div key={docType} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <Text style={{ fontSize: 12 }}>{docType}</Text>
+                <Button size="small" onClick={() => handleAssignProjectTemplate(docType)}>
+                  {projectConfig.templateOverrides?.[docType] ? '替换模板' : '选择模板'}
+                </Button>
+              </div>
+            ))}
+          </div>
         </Form>
       </Modal>
     </div>

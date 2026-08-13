@@ -121,10 +121,13 @@ export function register(ipcMain) {
  */
 function computeCumulative(projectName, newAmount, contractAmount) {
   const list = repo.listPaymentRequests(projectName)
-  const prevPaid = list
+  // v1.2.1 P1 修复：金额用整数分（×100）累加避免浮点误差
+  // 浮点累加 10 次后差几毛——监理审计场景绝对不允许
+  const prevPaidCents = list
     .filter(p => p.status === '已支付' || p.status === '已通过')
-    .reduce((s, p) => s + (p.amount || 0), 0)
-  const cumulative_amount = prevPaid + (newAmount || 0)
+    .reduce((s, p) => s + Math.round((p.amount || 0) * 100), 0)
+  const newCents = Math.round((newAmount || 0) * 100)
+  const cumulative_amount = (prevPaidCents + newCents) / 100
   const cumulative_percent = contractAmount > 0
     ? Math.round((cumulative_amount / contractAmount) * 1000) / 10
     : 0

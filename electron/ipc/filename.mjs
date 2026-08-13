@@ -55,7 +55,9 @@ export const DOC_CODE_MAP = {
 
 // ===== 扩展名映射（虚竹规则：.doc / .xlsx 区分） =====
 export const DOC_EXT_MAP = {
-  '监理日志': '.xlsx',
+  // 监理日志当前登记模板为 Word（templates/01_监理日志/监理日志模版.docx），
+  // 不能把 DOCX 二进制错误命名成 .xlsx。
+  '监理日志': '.docx',
   '监理月报': '.docx',
   '监理周报': '.docx',
   '会议纪要': '.docx',
@@ -99,9 +101,10 @@ export function generateProjectCodeFromName(projectName) {
   // 优先匹配 ^([A-Z0-9]+)_ 形式
   const m = projectName.match(/^([A-Z][A-Z0-9]+)_/)
   if (m) return sanitizeCode(m[1])
-  // 含数字：PJ + 数字
-  const numMatch = projectName.match(/(\d+)/)
-  if (numMatch) return `PJ${numMatch[1]}`
+  // 含数字：取最后一段数字。项目名称前缀可能含版本号/英文编号（如 E2E测试项目803），
+  // 第一个数字不一定是项目码。
+  const numberGroups = projectName.match(/\d+/g)
+  if (numberGroups?.length) return `PJ${numberGroups[numberGroups.length - 1]}`
   // 纯字母数字：取前8位
   const alphanum = projectName.slice(0, 8).replace(/[^A-Za-z0-9]/g, '')
   if (alphanum) return alphanum.toUpperCase()

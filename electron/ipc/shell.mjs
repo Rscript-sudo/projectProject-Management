@@ -97,7 +97,8 @@ export function register(ipcMain, mainWindow) {
 
     // Excel 文件
     if (ext === '.xlsx' || ext === '.xls') {
-      const XLSX = await import('xlsx')
+      const xlsxModule = await import('xlsx')
+      const XLSX = xlsxModule.default || xlsxModule
       const workbook = XLSX.readFile(filePath)
       const parts = []
       for (const sheetName of workbook.SheetNames) {
@@ -132,6 +133,15 @@ export function register(ipcMain, mainWindow) {
     })
     if (result.canceled) return null
     return result.filePath
+  })
+
+  ipcMain.handle('dialog:selectTemplateFile', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择项目专用 Word 模板',
+      properties: ['openFile'],
+      filters: [{ name: 'Word 模板', extensions: ['docx'] }],
+    })
+    return result.canceled ? null : result.filePaths[0]
   })
 
   ipcMain.handle('fs:getTemplateCatalog', async () => {
@@ -303,7 +313,7 @@ ${dataContext}
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({ model, messages: finalMessages, stream: true, temperature: 0.7 }),
+        body: JSON.stringify({ model, messages: finalMessages, stream: true, temperature: 0.7, max_tokens: 4096 }),
       })
       clearTimeout(timeout)
 
@@ -418,7 +428,7 @@ ${dataContext}
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({ model, messages: finalMessages, stream: false, temperature: 0.7 }),
+        body: JSON.stringify({ model, messages: finalMessages, stream: false, temperature: 0.7, max_tokens: 4096 }),
       })
       clearTimeout(timeout)
 
@@ -446,6 +456,58 @@ ${dataContext}
         return { success: false, error: 'AI 请求超时（60秒），请稍后重试' }
       }
       throw e
+    }
+  }))
+
+  // 获取 AI 模型列表（调用各服务商的 /models 接口）
+  ipcMain.handle('ai:listModels', safeCall(async (_, { baseUrl, apiKey }) => {
+    if (!apiKey) return { success: false, error: 'API Key 未填写' }
+    if (!baseUrl) return { success: false, error: 'API 地址未填写' }
+
+    // 构造 /models 请求地址
+    const base = baseUrl.replace(/\/+$/, '')  // 去掉末尾斜杠
+    let modelUrl = `${base}/models`
+
+    // 通义千问 DashScope 的模型列表地址特殊
+    if (base.includes('dashscope')) {
+      modelUrl = 'https://dashscope.aliyuncs.com/api/v1/models'
+    }
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    try {
+      const response = await fetch(modelUrl, {
+        signal: controller.signal,
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Accept': 'application/json',
+        },
+      })
+      clearTimeout(timeout)
+
+      if (!response.ok) {
+        let errorMsg = `获取模型列表失败 (${response.status})`
+        try { const d = await response.json(); errorMsg = d.error?.message || d.error || errorMsg } catch {}
+        return { success: false, error: errorMsg }
+      }
+
+      const data = await response.json()
+      // OpenAI 兼容格式: { data: [{ id: 'gpt-4', ... }] }
+      // DashScope 格式: { data: { models: [...] } }
+      let models = []
+      if (Array.isArray(data.data)) {
+        models = data.data.map(m => m.id).filter(Boolean)
+      } else if (data.data?.models) {
+        models = data.data.models.map(m => m.model_name || m.name).filter(Boolean)
+      }
+
+      return { success: true, models }
+    } catch (e) {
+      clearTimeout(timeout)
+      if (e.name === 'AbortError') {
+        return { success: false, error: '请求超时，请检查 API 地址是否正确' }
+      }
+      return { success: false, error: e.message || '网络请求失败' }
     }
   }))
 }

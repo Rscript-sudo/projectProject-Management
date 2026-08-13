@@ -2,6 +2,7 @@ import { app } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { encryptSecret, decryptSecret } from './secret.mjs'
+import { generateProjectCodeFromName } from './filename.mjs'
 
 export function getDefaultRoot() {
   return path.join(app.getPath('home'), 'Desktop')
@@ -93,18 +94,6 @@ export function createProjectStructure(projectPath, projectName, projectType = '
       projectCode,
     }, null, 2), 'utf8')
   }
-}
-
-// 复用 filename.mjs 的项目码生成（避免重复实现）
-export function generateProjectCodeFromName(projectName) {
-  if (!projectName) return 'PROJECT'
-  const m = projectName.match(/^([A-Z][A-Z0-9]+)_/)
-  if (m) return m[1].replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 16) || 'PROJECT'
-  const numMatch = projectName.match(/(\d+)/)
-  if (numMatch) return `PJ${numMatch[1]}`
-  const alphanum = projectName.slice(0, 8).replace(/[^A-Za-z0-9]/g, '')
-  if (alphanum) return alphanum.toUpperCase()
-  return 'PROJECT'
 }
 
 // ===== 项目注册索引 =====
@@ -230,7 +219,16 @@ export function updateLedger(projectPath, subDir, fileName, docType, meta = null
     ledger.items.unshift(item)
     ledger.items = ledger.items.slice(0, 200)
 
-    fs.writeFileSync(ledgerPath, JSON.stringify(ledger, null, 2), 'utf8')
+    // 原子写：先落临时文件，再替换正式台账。断电或磁盘异常不会留下半截 JSON。
+    const tempPath = `${ledgerPath}.${process.pid}.${Date.now()}.tmp`
+    try {
+      fs.writeFileSync(tempPath, JSON.stringify(ledger, null, 2), 'utf8')
+      fs.renameSync(tempPath, ledgerPath)
+    } finally {
+      if (fs.existsSync(tempPath)) {
+        try { fs.unlinkSync(tempPath) } catch {}
+      }
+    }
   } catch (e) {
     console.error('[updateLedger] Error:', e.message)
   }
