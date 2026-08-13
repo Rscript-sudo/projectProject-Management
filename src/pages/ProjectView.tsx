@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Typography, Input, Button, Space, Spin, Modal, Form, Select, Tag, App, Dropdown, Tooltip, Checkbox, Popover, DatePicker } from 'antd'
-import { SendOutlined, RobotOutlined, FileTextOutlined, SaveOutlined, ReloadOutlined, FilePdfOutlined, SettingOutlined, FolderOpenOutlined, HomeOutlined, EditOutlined, CloseOutlined, SearchOutlined, BookOutlined, EyeOutlined, ControlOutlined, DownOutlined } from '@ant-design/icons'
+import { Typography, Input, Button, Space, Spin, Tag, App, Dropdown, Tooltip, Checkbox, Popover, DatePicker } from 'antd'
+import { SendOutlined, RobotOutlined, FileTextOutlined, SaveOutlined, ReloadOutlined, FilePdfOutlined, FolderOpenOutlined, HomeOutlined, EditOutlined, CloseOutlined, SearchOutlined, BookOutlined, EyeOutlined, ControlOutlined, DownOutlined } from '@ant-design/icons'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
 import { identifyDocType, identifyMode, buildChatPrompt, inferDataTools, postProcessTimeFields, postProcessFabricationGuard, sanitizeUnsupportedLogParticipants, generateFileName, getDocSavePath, providerConfigs, buildDocPrompt, callAI, extractSubject, stripCalibrationStatement, sanitizeFieldValue, sanitizeLetterStyle } from '../services/aiService'
-import { PROJECT_TYPE_OPTIONS, getProjectTypeProfile, normalizeProjectType, normalizeTags } from '../shared/projectProfile.mjs'
+import { normalizeProjectType, normalizeTags } from '../shared/projectProfile.mjs'
 import { countEffectiveWords, getMinWordCount } from '../shared/docTypeMinWords'
 import { getApplicableRulePacks, getDocumentRuleMinWords, normalizeDocumentRules, RULE_PACKS } from '../shared/documentRules.mjs'
 import type { SessionMode } from '../services/aiService'
@@ -47,7 +47,6 @@ export default function ProjectView() {
   const [savedPath, setSavedPath] = useState('')
   const apiReady = useElectronAPI()
   const [lastInput, setLastInput] = useState('')
-  const [configModalOpen, setConfigModalOpen] = useState(false)
   const [projectConfig, setProjectConfig] = useState<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; projectTypeCode?: string; projectTags?: string[]; projectFeatures?: string; projectPhase?: string; documentRules?: { rulePackIds?: string[]; additionalInstruction?: string }; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }>; templateSelections?: Record<string, string | null> }>({
     contractor: '',
     ownerUnit: '',
@@ -55,7 +54,6 @@ export default function ProjectView() {
     chiefEngineer: '',
     projectType: '未分类', projectTypeCode: 'unclassified', projectTags: [], projectFeatures: '', projectPhase: '',
   })
-  const [configForm] = Form.useForm()
   const [editMode, setEditMode] = useState(false)
   const [editableContent, setEditableContent] = useState('')
   const [rightPanelTab, setRightPanelTab] = useState<'preview' | 'templates' | 'rules'>('preview')
@@ -65,7 +63,6 @@ export default function ProjectView() {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [templateSearch, setTemplateSearch] = useState('')
   const [projectTemplateCenterOpen, setProjectTemplateCenterOpen] = useState(false)
-  const [templateLibrary, setTemplateLibrary] = useState<Array<{ id: string; name: string; docType: string; scope: 'global' | 'professional'; projectType: string; sourceName: string; path: string; fields?: string[] }>>([])
   const [treeWidth, setTreeWidth] = useState(260)
   const [previewWidth, setPreviewWidth] = useState(380)
   const [attachedItems, setAttachedItems] = useState<Array<{ type: 'folder' | 'file'; path: string }>>([])
@@ -259,56 +256,6 @@ export default function ProjectView() {
     if (!window.electronAPI) return
     const files = await window.electronAPI.selectFiles()
     if (files?.length) setAttachedItems(prev => [...prev, ...files.map(f => ({ type: 'file' as const, path: f }))])
-  }
-
-  const handleSaveConfig = async () => {
-    const values = await configForm.validateFields()
-    if (!currentProject || !window.electronAPI) return
-    try {
-      const nextConfig = { ...projectConfig, ...values }
-      const result = await window.electronAPI.writeProjectConfig(currentProject.path, nextConfig)
-      if (!result || !result.success) {
-        message.error('保存失败：' + (result?.error || '服务端返回异常'))
-        return
-      }
-      setProjectConfig(nextConfig)
-      setConfigModalOpen(false)
-      message.success('项目配置已保存')
-    } catch (e: any) {
-      message.error('保存失败：' + e.message)
-    }
-  }
-
-  const handleAssignProjectTemplate = async (docType: string) => {
-    if (!currentProject || !window.electronAPI) return
-    const sourcePath = await window.electronAPI.selectTemplateFile()
-    if (!sourcePath) return
-    const result = await window.electronAPI.assignProjectTemplate(currentProject.path, docType, sourcePath)
-    if (!result.success || !result.templateOverride) {
-      message.error('模板替换失败：' + (result.error || '未知错误'))
-      return
-    }
-    setProjectConfig(prev => ({
-      ...prev,
-      templateOverrides: { ...(prev.templateOverrides || {}), [docType]: result.templateOverride! },
-    }))
-    message.success(`${docType} 已切换为项目专用模板`)
-  }
-
-  const loadTemplateLibrary = async () => {
-    if (!window.electronAPI) return
-    setTemplateLibrary(await window.electronAPI.listTemplateLibrary())
-  }
-
-  const handleSelectLibraryTemplate = async (docType: string, templateId: string | null) => {
-    if (!currentProject || !window.electronAPI) return
-    const result = await window.electronAPI.selectProjectTemplate(currentProject.path, docType, templateId)
-    if (!result.success) {
-      message.error('模板选择失败：' + (result.error || '未知错误'))
-      return
-    }
-    setProjectConfig(prev => ({ ...prev, templateSelections: { ...(prev.templateSelections || {}), [docType]: templateId } }))
-    message.success(templateId ? `${docType} 已选择模板中心版本` : `${docType} 已恢复自动匹配`)
   }
 
   // 发送消息 — 支持 CHAT / DATA_QUERY / DOC / HYBRID 四模式
@@ -945,13 +892,9 @@ export default function ProjectView() {
             <Button
               type="text"
               size="small"
-              icon={<SettingOutlined />}
-              onClick={() => {
-                configForm.setFieldsValue(projectConfig)
-                loadTemplateLibrary()
-                setConfigModalOpen(true)
-              }}
-              title="项目配置"
+              icon={<BookOutlined />}
+              onClick={() => setProjectTemplateCenterOpen(true)}
+              title="项目模板"
             />
             <Button
               type="text"
@@ -1662,65 +1605,6 @@ export default function ProjectView() {
           )}
         </div>
       </div>
-
-      {/* 项目配置弹窗 */}
-      <Modal
-        title="项目配置"
-        open={configModalOpen}
-        onOk={handleSaveConfig}
-        onCancel={() => setConfigModalOpen(false)}
-        okText="保存"
-        width={400}
-      >
-        <Form
-          form={configForm}
-          layout="vertical"
-          style={{ paddingTop: 16 }}
-        >
-          <Text type="secondary" style={{ display: 'block', marginBottom: 16, fontSize: 12 }}>
-            配置后生成文档时自动填入模板中的 {'{{'}建设单位{'}}'}、{'{{'}施工单位{'}}'}、{'{{'}监理单位{'}}'}、{'{{'}总监姓名{'}}'} 等占位符
-          </Text>
-          <Form.Item name="ownerUnit" label="建设单位">
-            <Input placeholder="如：XX投资集团" />
-          </Form.Item>
-          <Form.Item name="contractor" label="施工单位">
-            <Input placeholder="如：XX建设集团有限公司" />
-          </Form.Item>
-          <Form.Item name="supervisorUnit" label="监理单位">
-            <Input placeholder="如：XX项目管理有限公司" />
-          </Form.Item>
-          <Form.Item name="chiefEngineer" label="总监理工程师">
-            <Input placeholder="如：张三" />
-          </Form.Item>
-          <Form.Item name="projectType" label="项目类型">
-            <Select
-              options={PROJECT_TYPE_OPTIONS.map(item => ({ value: item.label, label: item.label }))}
-            />
-          </Form.Item>
-          <Form.Item name="projectTags" label="专业标签（可自定义）">
-            <Select mode="tags" placeholder="如：机房、网络、安防" options={getProjectTypeProfile(projectConfig.projectType).suggestedTags.map(tag => ({ value: tag, label: tag }))} />
-          </Form.Item>
-          <Form.Item name="projectFeatures" label="项目特点 / 建设范围">
-            <Input.TextArea rows={2} placeholder="只填写已确认的建设范围、系统和约束；AI 会以此为事实边界。" />
-          </Form.Item>
-          <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 10, marginTop: 2 }}>
-            <Space style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-              <Text strong style={{ fontSize: 12 }}>项目模板</Text>
-              <Button type="link" size="small" icon={<BookOutlined />} onClick={() => setProjectTemplateCenterOpen(true)}>管理项目模板</Button>
-            </Space>
-            <Text type="secondary" style={{ display: 'block', fontSize: 11, margin: '0 0 8px' }}>
-              在这里为当前项目指定模板库版本或上传专属模板，不影响其他项目。
-            </Text>
-            <Space style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-              <Text strong style={{ fontSize: 12 }}>文书规则</Text>
-              <Button type="link" size="small" icon={<ControlOutlined />} onClick={() => { setRightPanelTab('rules'); setConfigModalOpen(false) }}>在 AI 写文书区设置</Button>
-            </Space>
-            <Text type="secondary" style={{ display: 'block', fontSize: 11 }}>
-              用勾选规则包控制数据来源、日志、周报和月报写法；不需要自行写提示词。
-            </Text>
-          </div>
-        </Form>
-      </Modal>
 
       <ProjectTemplateCenterModal open={projectTemplateCenterOpen} onClose={() => { setProjectTemplateCenterOpen(false); loadProjectConfig() }} project={{ name: currentProject.name, path: currentProject.path, projectType: projectConfig.projectType, templateOverrides: projectConfig.templateOverrides, templateSelections: projectConfig.templateSelections }} />
     </div>
