@@ -42,7 +42,7 @@ export default function ProjectView() {
   const apiReady = useElectronAPI()
   const [lastInput, setLastInput] = useState('')
   const [configModalOpen, setConfigModalOpen] = useState(false)
-  const [projectConfig, setProjectConfig] = useState<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }> }>({
+  const [projectConfig, setProjectConfig] = useState<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }>; templateSelections?: Record<string, string | null> }>({
     contractor: '',
     ownerUnit: '',
     supervisorUnit: '',
@@ -57,6 +57,9 @@ export default function ProjectView() {
   const [templateLoading, setTemplateLoading] = useState(false)
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [templateSearch, setTemplateSearch] = useState('')
+  const [templateCenterOpen, setTemplateCenterOpen] = useState(false)
+  const [templateLibrary, setTemplateLibrary] = useState<Array<{ id: string; name: string; docType: string; scope: 'global' | 'professional'; projectType: string; sourceName: string; path: string; fields?: string[] }>>([])
+  const [templateImportForm] = Form.useForm()
   const [treeWidth, setTreeWidth] = useState(260)
   const [previewWidth, setPreviewWidth] = useState(380)
   const [attachedItems, setAttachedItems] = useState<Array<{ type: 'folder' | 'file'; path: string }>>([])
@@ -245,6 +248,37 @@ export default function ProjectView() {
       templateOverrides: { ...(prev.templateOverrides || {}), [docType]: result.templateOverride! },
     }))
     message.success(`${docType} 已切换为项目专用模板`)
+  }
+
+  const loadTemplateLibrary = async () => {
+    if (!window.electronAPI) return
+    setTemplateLibrary(await window.electronAPI.listTemplateLibrary())
+  }
+
+  const handleImportTemplate = async () => {
+    if (!window.electronAPI) return
+    const values = await templateImportForm.validateFields()
+    const sourcePath = await window.electronAPI.selectTemplateFile()
+    if (!sourcePath) return
+    const result = await window.electronAPI.importTemplateToLibrary({ ...values, sourcePath })
+    if (!result.success) {
+      message.error('导入失败：' + (result.error || '未知错误'))
+      return
+    }
+    templateImportForm.resetFields()
+    await loadTemplateLibrary()
+    message.success('模板已进入模板中心')
+  }
+
+  const handleSelectLibraryTemplate = async (docType: string, templateId: string | null) => {
+    if (!currentProject || !window.electronAPI) return
+    const result = await window.electronAPI.selectProjectTemplate(currentProject.path, docType, templateId)
+    if (!result.success) {
+      message.error('模板选择失败：' + (result.error || '未知错误'))
+      return
+    }
+    setProjectConfig(prev => ({ ...prev, templateSelections: { ...(prev.templateSelections || {}), [docType]: templateId } }))
+    message.success(templateId ? `${docType} 已选择模板中心版本` : `${docType} 已恢复自动匹配`)
   }
 
   // 发送消息 — 支持 CHAT / DATA_QUERY / DOC / HYBRID 四模式
@@ -871,13 +905,17 @@ export default function ProjectView() {
               {currentProject?.name || '未选定项目'}
             </Text>
           </Space>
-          <Space size={2}>
+          <Space size={4}>
+            <Button type="primary" size="small" icon={<BookOutlined />} onClick={() => { loadTemplateLibrary(); setTemplateCenterOpen(true) }} title="管理通用、专业与项目模板">
+              模板中心
+            </Button>
             <Button
               type="text"
               size="small"
               icon={<SettingOutlined />}
               onClick={() => {
                 configForm.setFieldsValue(projectConfig)
+                loadTemplateLibrary()
                 setConfigModalOpen(true)
               }}
               title="项目配置"
@@ -1683,13 +1721,48 @@ export default function ProjectView() {
             {['监理日志', '监理周报', '监理月报', '会议纪要'].map(docType => (
               <div key={docType} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                 <Text style={{ fontSize: 12 }}>{docType}</Text>
-                <Button size="small" onClick={() => handleAssignProjectTemplate(docType)}>
-                  {projectConfig.templateOverrides?.[docType] ? '替换模板' : '选择模板'}
-                </Button>
+                <Space size={4}>
+                  <Select
+                    size="small"
+                    style={{ width: 132 }}
+                    value={projectConfig.templateSelections?.[docType] || undefined}
+                    placeholder="自动匹配"
+                    allowClear
+                    onClear={() => handleSelectLibraryTemplate(docType, null)}
+                    onChange={(value) => handleSelectLibraryTemplate(docType, value)}
+                    options={templateLibrary.filter(t => t.docType === docType).map(t => ({ value: t.id, label: `${t.scope === 'professional' ? t.projectType : '通用'} · ${t.name}` }))}
+                  />
+                  <Button size="small" onClick={() => handleAssignProjectTemplate(docType)}>
+                    {projectConfig.templateOverrides?.[docType] ? '替换' : '专用'}
+                  </Button>
+                </Space>
               </div>
             ))}
+            <Button block size="small" icon={<BookOutlined />} style={{ marginTop: 6 }} onClick={() => { loadTemplateLibrary(); setTemplateCenterOpen(true) }}>
+              打开模板中心（导入通用 / 专业模板）
+            </Button>
           </div>
         </Form>
+      </Modal>
+
+      <Modal title="模板中心" open={templateCenterOpen} onCancel={() => setTemplateCenterOpen(false)} footer={null} width={680}>
+        <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>
+          通用模板供所有项目兜底；专业模板会随项目类型自动匹配；项目专用模板仅用于当前项目。
+        </Text>
+        <Form form={templateImportForm} layout="inline" initialValues={{ docType: '监理周报', scope: 'professional', projectType: projectConfig.projectType }} style={{ marginBottom: 16 }}>
+          <Form.Item name="docType" rules={[{ required: true }]}><Select style={{ width: 150 }} options={['监理日志', '监理周报', '监理月报', '会议纪要', '整改通知书', '安全通知书', '工程联系单', '停工令', '开工通知', '竣工通知', '工程变更单', '工程款支付证书', '进度分析报告', '开工条件检查表', '承建资格报审表', '施工组织设计报审表', '总监理工程师任命书', '监理规划', '监理细则', '方案审核意见', '索赔报告', '巡视记录', '安全检查记录', '质量评估报告', '付款审核意见', '通用文档'].map(v => ({ value: v, label: v }))} /></Form.Item>
+          <Form.Item name="scope" rules={[{ required: true }]}><Select style={{ width: 100 }} options={[{ value: 'professional', label: '专业模板' }, { value: 'global', label: '通用模板' }]} /></Form.Item>
+          <Form.Item name="projectType"><Select style={{ width: 110 }} options={['通用', '通信工程', '信息化工程', '电力工程'].map(v => ({ value: v, label: v }))} /></Form.Item>
+          <Button type="primary" onClick={handleImportTemplate}>导入 Word 模板</Button>
+        </Form>
+        <div style={{ maxHeight: 320, overflow: 'auto', borderTop: '1px solid #f0f0f0' }}>
+          {templateLibrary.length === 0 ? <div style={{ padding: 24, color: '#999' }}>模板中心暂无用户导入模板</div> : templateLibrary.map(item => (
+            <div key={item.id} style={{ padding: '10px 4px', borderBottom: '1px solid #f5f5f5', display: 'flex', justifyContent: 'space-between' }}>
+              <div><Text strong style={{ fontSize: 12 }}>{item.name}</Text><br /><Text type="secondary" style={{ fontSize: 11 }}>{item.docType} · {item.scope === 'professional' ? item.projectType : '所有项目'} · {item.sourceName}{item.fields ? ` · 已识别 ${item.fields.length} 个字段` : ''}</Text></div>
+              <Button size="small" onClick={() => window.electronAPI?.openFile(item.path)}>查看</Button>
+            </div>
+          ))}
+        </div>
       </Modal>
     </div>
   )

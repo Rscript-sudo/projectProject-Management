@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Card, Form, Input, Select, Button, Space, Typography, Tag, Checkbox, Spin, Descriptions, Alert, App, Tabs, Table } from 'antd'
+import { Card, Form, Input, Select, Button, Space, Typography, Tag, Checkbox, Spin, Descriptions, Alert, App, Tabs, Table, Modal } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   SaveOutlined,
@@ -13,10 +13,13 @@ import {
   DatabaseOutlined,
   KeyOutlined,
   ThunderboltOutlined,
+  CloudDownloadOutlined,
+  SyncOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
 import { providerConfigs, AIProvider } from '../services/aiService'
+import type { UpdateCheckResult } from '../vite-env'
 import { useElectronAPI } from '../hooks/useElectronAPI'
 
 const { Title, Text } = Typography
@@ -43,6 +46,8 @@ export default function Settings() {
     tabParam && VALID_TABS.includes(tabParam) ? tabParam : 'ai'
   )
   const [editingApiKey, setEditingApiKey] = useState(false)
+  const [appVersion, setAppVersion] = useState('—')
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
   const apiReady = useElectronAPI()
 
   // 判断是否从首页设置入口进入
@@ -55,6 +60,33 @@ export default function Settings() {
       form.setFieldsValue(currentSettings)
     })
   }, [apiReady])
+
+  useEffect(() => {
+    if (apiReady) window.electronAPI.appInfo().then(info => setAppVersion(info.version)).catch(() => setAppVersion('未知'))
+  }, [apiReady])
+
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true)
+    try {
+      const result: UpdateCheckResult = await window.electronAPI.checkForUpdates()
+      if (!result.success) throw new Error(result.error || '检查更新失败')
+      if (!result.hasUpdate) {
+        message.success(`当前已是最新版本 v${result.currentVersion}`)
+        return
+      }
+      Modal.confirm({
+        title: `发现新版本 v${result.latestVersion}`,
+        content: `当前版本为 v${result.currentVersion}。点击“前往下载”将从 GitHub Release 打开最新版安装包；下载完成后安装即可保留现有项目数据。`,
+        okText: '前往下载', cancelText: '稍后更新',
+        onOk: async () => {
+          const opened = await window.electronAPI.downloadUpdate(result.downloadUrl || result.releaseUrl || '')
+          if (!opened.success) message.error(opened.error || '无法打开下载页面')
+        },
+      })
+    } catch (error: any) {
+      message.error(error?.message || '检查更新失败')
+    } finally { setCheckingUpdate(false) }
+  }
 
   const handleBack = () => {
     if (fromHome) navigate('/')
@@ -489,7 +521,16 @@ export default function Settings() {
         title={<Space><SettingOutlined /><span>基本设置</span></Space>}
         size="small"
       >
-        <Form.Item
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '0 0 16px', marginBottom: 16, borderBottom: '1px solid #f0f0f0' }}>
+        <div>
+          <Text strong>当前版本</Text><br />
+          <Text type="secondary">v{appVersion} · 更新来源：GitHub Release</Text>
+        </div>
+        <Button icon={checkingUpdate ? <SyncOutlined spin /> : <CloudDownloadOutlined />} loading={checkingUpdate} onClick={handleCheckUpdate}>
+          检查更新
+        </Button>
+      </div>
+      <Form.Item
         name="projectRoot"
         label={<Space size={4}><FolderOpenOutlined style={{ color: '#1677ff' }} />项目根目录</Space>}
         extra={

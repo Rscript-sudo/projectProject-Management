@@ -11,6 +11,7 @@ import {
   LinkOutlined,
   EditOutlined,
   FileSearchOutlined,
+  BookOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
@@ -415,6 +416,13 @@ export default function Home() {
           <Space>
             <Button size="small" icon={<ReloadOutlined />} onClick={() => { loadDirTree(projectRoot); loadProjects() }}>
               刷新
+            </Button>
+            <Button
+              size="small"
+              icon={<BookOutlined />}
+              onClick={() => document.querySelector<HTMLButtonElement>('[title="模板中心"]')?.click()}
+            >
+              模板中心
             </Button>
             <Button
               type="primary"

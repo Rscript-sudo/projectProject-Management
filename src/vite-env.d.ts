@@ -22,6 +22,18 @@ interface SaveDocOptions {
   meta?: any                    // 台账登记用业务字段
 }
 
+export interface UpdateCheckResult {
+  success: boolean
+  currentVersion: string
+  latestVersion?: string
+  hasUpdate?: boolean
+  releaseName?: string
+  releaseUrl?: string
+  downloadUrl?: string | null
+  assetName?: string | null
+  error?: string
+}
+
 export interface BuildFileNameResult {
   fileName: string
   subDir: string
@@ -246,10 +258,13 @@ export interface ElectronAPI {
   selectSavePath: (defaultPath: string) => Promise<string | null>
   selectTemplateFile: () => Promise<string | null>
   getProjectDataPath: (projectPath: string) => Promise<string>
-  readProjectConfig: (projectPath: string) => Promise<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; projectCode?: string; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }> }>
+  readProjectConfig: (projectPath: string) => Promise<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; projectCode?: string; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }>; templateSelections?: Record<string, string | null> }>
   writeProjectConfig: (projectPath: string, config: object) => Promise<{ success: boolean; error?: string }>
   assignProjectTemplate: (projectPath: string, docType: string, sourcePath: string) => Promise<{ success: boolean; path?: string; templateOverride?: { path: string; sourceName?: string; updatedAt?: string }; error?: string }>
-  getProjectTemplateContract: (projectPath: string, docType: string) => Promise<{ found: boolean; fields: string[]; source?: 'global' | 'project'; path?: string; error?: string }>
+  getProjectTemplateContract: (projectPath: string, docType: string) => Promise<{ found: boolean; fields: string[]; source?: string; path?: string; templateId?: string; error?: string }>
+  listTemplateLibrary: () => Promise<Array<{ id: string; name: string; docType: string; scope: 'global' | 'professional'; projectType: string; path: string; sourceName: string; fields?: string[]; createdAt: string; updatedAt: string }>>
+  importTemplateToLibrary: (payload: { sourcePath: string; docType: string; scope: 'global' | 'professional'; projectType?: string; name?: string }) => Promise<{ success: boolean; template?: any; error?: string }>
+  selectProjectTemplate: (projectPath: string, docType: string, templateId: string | null) => Promise<{ success: boolean; templateId?: string | null; error?: string }>
   deleteFile: (filePath: string) => Promise<{ success: boolean; error?: string }>
   renameFile: (filePath: string, newName: string) => Promise<{ success: boolean; path?: string; error?: string }>
   moveFile: (filePath: string, targetDir: string) => Promise<{ success: boolean; path?: string; error?: string }>
@@ -334,6 +349,9 @@ export interface ElectronAPI {
   searchStatus: () => Promise<{ docCount: number; lastUpdated: string | null }>
   dataQuery: (options: { projectName: string; toolIds: string[] }) => Promise<Record<string, any>>
   dbExport: () => Promise<{ success: boolean; path?: string; size?: number; exportedAt?: string; error?: string }>
+  appInfo: () => Promise<{ name: string; version: string; repository: string }>
+  checkForUpdates: () => Promise<UpdateCheckResult>
+  downloadUpdate: (downloadUrl: string) => Promise<{ success: boolean; error?: string }>
 }
 
 declare global {

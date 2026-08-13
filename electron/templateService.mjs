@@ -90,15 +90,17 @@ const DOC_TYPE_DIR_MAP = {
  */
 export function findTemplate(templatesDir, docType, options = {}) {
   const dirName = DOC_TYPE_DIR_MAP[docType]
-  if (!dirName) return null
+  const overridePath = options.templateOverride?.path
+  const hasOverride = overridePath && fs.existsSync(overridePath) && path.extname(overridePath).toLowerCase() === '.docx'
+  // 自定义模板优先于系统映射；这样没有内置模板的新文种也可由企业模板库直接支持。
+  if (!dirName && !hasOverride) return null
 
-  const dirPath = path.join(templatesDir, dirName)
-  if (!fs.existsSync(dirPath)) return null
+  const dirPath = dirName ? path.join(templatesDir, dirName) : null
 
   // 读取 config.json
-  const configPath = path.join(dirPath, 'config.json')
+  const configPath = dirPath ? path.join(dirPath, 'config.json') : null
   let config = {}
-  if (fs.existsSync(configPath)) {
+  if (configPath && fs.existsSync(configPath)) {
     try {
       config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
     } catch (e) {
@@ -107,18 +109,15 @@ export function findTemplate(templatesDir, docType, options = {}) {
   }
 
   // 查找 .docx 模板文件（排除 macOS 临时文件和备份文件）
-  const files = fs.readdirSync(dirPath)
+  const files = dirPath && fs.existsSync(dirPath) ? fs.readdirSync(dirPath) : []
   const tmplFile = files.find(f => f.endsWith('.docx') && !f.startsWith('~$') && !f.startsWith('.~'))
-  if (!tmplFile) {
+  if (!tmplFile && !hasOverride) {
     console.error('[templateService] No .docx file found in', dirPath)
     return null
   }
 
-  const defaultTemplatePath = path.join(dirPath, tmplFile)
-  const overridePath = options.templateOverride?.path
-  const templatePath = overridePath && fs.existsSync(overridePath) && path.extname(overridePath).toLowerCase() === '.docx'
-    ? overridePath
-    : defaultTemplatePath
+  const defaultTemplatePath = tmplFile ? path.join(dirPath, tmplFile) : null
+  const templatePath = hasOverride ? overridePath : defaultTemplatePath
 
   return {
     templatePath,

@@ -93,7 +93,13 @@ export function register(ipcMain) {
     if (fs.existsSync(configPath)) {
       try { projectConfig = JSON.parse(fs.readFileSync(configPath, 'utf8')) } catch (e) { console.warn('[saveDoc] Failed to parse project config:', e.message) }
     }
-    const template = findTemplate(templatesDir, docType, { templateOverride: projectConfig.templateOverrides?.[docType] })
+    const { resolveLibraryTemplate } = await import('../templateRegistry.mjs')
+    const libraryTemplate = resolveLibraryTemplate(app.getPath('userData'), {
+      docType,
+      projectType: projectConfig.projectType || '通用',
+      selectedTemplateId: projectConfig.templateSelections?.[docType],
+    })
+    const template = findTemplate(templatesDir, docType, { templateOverride: projectConfig.templateOverrides?.[docType] || libraryTemplate })
 
     if (template) {
       console.log('[saveDoc] Using template:', template.templatePath)
@@ -203,7 +209,13 @@ export function register(ipcMain) {
     if (fs.existsSync(configPath)) {
       try { projectConfig = JSON.parse(fs.readFileSync(configPath, 'utf8')) } catch (e) { console.warn('[exportPDF] Failed to parse project config:', e.message) }
     }
-    const template = findTemplate(templatesDir, docType, { templateOverride: projectConfig.templateOverrides?.[docType] })
+    const { resolveLibraryTemplate } = await import('../templateRegistry.mjs')
+    const libraryTemplate = resolveLibraryTemplate(app.getPath('userData'), {
+      docType,
+      projectType: projectConfig.projectType || '通用',
+      selectedTemplateId: projectConfig.templateSelections?.[docType],
+    })
+    const template = findTemplate(templatesDir, docType, { templateOverride: projectConfig.templateOverrides?.[docType] || libraryTemplate })
 
     let docBuffer
     if (template) {

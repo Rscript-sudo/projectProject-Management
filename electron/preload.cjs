@@ -146,6 +146,9 @@ const api = {
   writeProjectConfig: (projectPath, config) => ipcRenderer.invoke('fs:writeProjectConfig', projectPath, config),
   assignProjectTemplate: (projectPath, docType, sourcePath) => ipcRenderer.invoke('fs:assignProjectTemplate', projectPath, docType, sourcePath),
   getProjectTemplateContract: (projectPath, docType) => ipcRenderer.invoke('fs:getProjectTemplateContract', projectPath, docType),
+  listTemplateLibrary: () => ipcRenderer.invoke('fs:listTemplateLibrary'),
+  importTemplateToLibrary: (payload) => ipcRenderer.invoke('fs:importTemplateToLibrary', payload),
+  selectProjectTemplate: (projectPath, docType, templateId) => ipcRenderer.invoke('fs:selectProjectTemplate', projectPath, docType, templateId),
   getProjectLedgers: (projectPath) => ipcRenderer.invoke('fs:getProjectLedgers', projectPath),
   deleteFile: (filePath) => ipcRenderer.invoke('fs:deleteFile', filePath),
   renameFile: (filePath, newName) => ipcRenderer.invoke('fs:renameFile', filePath, newName),
@@ -167,6 +170,9 @@ const api = {
   searchRebuild: (progressCallback) => ipcRenderer.invoke('search:rebuild', progressCallback),
   searchStatus: () => ipcRenderer.invoke('search:status'),
   readSop: (params) => ipcRenderer.invoke('sop:read', params),
+  appInfo: () => ipcRenderer.invoke('app:getInfo'),
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  downloadUpdate: (downloadUrl) => ipcRenderer.invoke('update:download', downloadUrl),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', api)

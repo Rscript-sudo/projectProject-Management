@@ -7,9 +7,11 @@ import {
   FolderOpenOutlined,
   ProjectOutlined,
   SearchOutlined,
+  BookOutlined,
 } from '@ant-design/icons'
 import { useAppStore } from '../stores/useProjectStore'
 import GlobalSearch from './GlobalSearch'
+import TemplateCenterModal from './TemplateCenterModal'
 
 const { Sider, Content } = Layout
 const { Text } = Typography
@@ -23,6 +25,8 @@ export default function AppLayout() {
   const [newProjectType, setNewProjectType] = useState('通用')
   const [loading, setLoading] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [templateCenterOpen, setTemplateCenterOpen] = useState(false)
+  const [appVersion, setAppVersion] = useState('')
 
   // 键盘快捷键 Cmd+K / Ctrl+K 打开搜索
   useEffect(() => {
@@ -38,6 +42,10 @@ export default function AppLayout() {
 
   useEffect(() => {
     loadSettings()
+  }, [])
+
+  useEffect(() => {
+    window.electronAPI?.appInfo().then(info => setAppVersion(info.version)).catch(() => {})
   }, [])
 
   const handleCreateProject = async () => {
@@ -93,6 +101,13 @@ export default function AppLayout() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 0' }}>
           <Button
             type="text"
+            icon={<BookOutlined />}
+            onClick={() => setTemplateCenterOpen(true)}
+            style={{ fontSize: 18, width: 40, height: 40 }}
+            title="模板中心"
+          />
+          <Button
+            type="text"
             icon={<PlusOutlined />}
             onClick={() => setCreateModalOpen(true)}
             style={{ fontSize: 18, width: 40, height: 40 }}
@@ -120,6 +135,14 @@ export default function AppLayout() {
             title="控制台"
           />
         </div>
+        <Button
+          type="text"
+          onClick={() => navigate('/settings')}
+          title="版本与更新"
+          style={{ width: '100%', height: 34, marginBottom: 6, color: '#8c8c8c', fontSize: 11 }}
+        >
+          v{appVersion || '…'}
+        </Button>
       </Sider>
 
       {/* 新建项目弹窗 */}
@@ -175,6 +198,7 @@ export default function AppLayout() {
         onClose={() => setSearchOpen(false)}
         onOpenFile={(path) => window.electronAPI?.openFile(path)}
       />
+      <TemplateCenterModal open={templateCenterOpen} onClose={() => setTemplateCenterOpen(false)} />
     </Layout>
   )
 }
