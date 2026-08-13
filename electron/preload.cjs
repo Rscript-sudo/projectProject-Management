@@ -175,7 +175,8 @@ const api = {
   setProjectCode: (projectName, projectCode) => ipcRenderer.invoke('filename:setProjectCode', { projectName, projectCode }),
   dataQuery: (options) => ipcRenderer.invoke('data:query', options),
   searchQuery: (query, options) => ipcRenderer.invoke('search:query', query, options),
-  searchRebuild: (progressCallback) => ipcRenderer.invoke('search:rebuild', progressCallback),
+  // IPC invoke 参数必须可结构化克隆，不可传递回调函数
+  searchRebuild: () => ipcRenderer.invoke('search:rebuild'),
   searchStatus: () => ipcRenderer.invoke('search:status'),
   readSop: (params) => ipcRenderer.invoke('sop:read', params),
   appInfo: () => ipcRenderer.invoke('app:getInfo'),

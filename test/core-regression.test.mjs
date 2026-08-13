@@ -10,6 +10,7 @@ import { getDocsFingerprint } from '../electron/shared/searchCache.mjs'
 import { countEffectiveWords, getMinWordCount } from '../electron/ipc/docValidation.mjs'
 import { postProcessFabricationGuard, postProcessTimeFields } from '../electron/shared/postProcess.mjs'
 import { buildPlaceholderData, sanitizeFieldValue, sanitizeForbiddenTerms, sanitizeLetterStyle } from '../electron/templateService.mjs'
+import { computeMonthlyComparison } from '../electron/shared/progressAnalysis.mjs'
 
 const tempDirs = []
 function makeTempDir() {
@@ -133,4 +134,17 @@ test('未知参建单位不会被伪造为默认单位', () => {
   assert.equal(data['施工单位'], '')
   assert.equal(data['监理单位'], '')
   assert.equal(data['总监理工程师'], '')
+})
+
+test('月度进度对比能识别以前月份逾期且未完成的节点', () => {
+  const result = computeMonthlyComparison([
+    { name: '已逾期', plan_start: '2026-05-01', plan_end: '2026-06-30', progress_percent: 80 },
+    { name: '本月计划', plan_start: '2026-07-10', plan_end: '2026-08-20', progress_percent: 50 },
+    { name: '已完成', plan_start: '2026-05-01', plan_end: '2026-06-30', actual_end: '2026-08-03', progress_percent: 100 },
+    { name: '无计划日期', plan_start: '', plan_end: '', progress_percent: 0 },
+  ], '2026-08')
+
+  assert.deepEqual(result.plannedNodes, ['本月计划'])
+  assert.deepEqual(result.doneNodes, ['已完成'])
+  assert.deepEqual(result.overdueNodes, ['已逾期'])
 })

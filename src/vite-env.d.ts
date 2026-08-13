@@ -356,7 +356,7 @@ export interface ElectronAPI {
   getNumberingRules: (projectName: string) => Promise<Record<string, any>>
   saveNumberingRules: (projectName: string, numbering: Record<string, any>) => Promise<{ success: boolean }>
   searchQuery: (query: string, options?: { limit?: number }) => Promise<any[]>
-  searchRebuild: (progressCallback?: (current: number, total: number, name: string) => void) => Promise<{ success: boolean; docCount: number }>
+  searchRebuild: () => Promise<{ success: boolean; docCount: number }>
   searchStatus: () => Promise<{ docCount: number; lastUpdated: string | null }>
   dataQuery: (options: { projectName: string; toolIds: string[]; reportPeriod?: { start: string; end: string } }) => Promise<Record<string, any>>
   dbExport: () => Promise<{ success: boolean; path?: string; size?: number; exportedAt?: string; error?: string }>

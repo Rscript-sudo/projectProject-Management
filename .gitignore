@@ -14,6 +14,8 @@ release/
 *.temp
 *.log
 test.txt
+test_output*.docx
+bug-清单-第*轮.md
 screenshot*.png
 screenshot*.jpg
 app_snapshot.txt

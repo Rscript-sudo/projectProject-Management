@@ -104,9 +104,7 @@ export default function GlobalSearch({ open, onClose, onOpenFile }: GlobalSearch
           // 索引为空，先建立索引
           setRebuilding(true)
           try {
-            await window.electronAPI.searchRebuild((current: number, total: number) => {
-              // 进度回调，暂不展示详细信息
-            })
+            await window.electronAPI.searchRebuild()
           } catch (e) {
             console.warn('[GlobalSearch] Index rebuild failed:', e)
           } finally {

@@ -25,8 +25,15 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          icons: ['@ant-design/icons'],
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('/@ant-design/icons/')) return 'icons'
+          if (/\/antd\/es\/(date-picker|time-picker|calendar|table|form|select|tree|transfer|cascader|mentions)\//.test(id)) return 'antd-data-entry'
+          if (id.includes('/antd/')) return 'antd'
+          if (id.includes('/@ant-design/')) return 'antd-runtime'
+          if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/react-router')) return 'react'
+          if (id.includes('/docx/') || id.includes('/mammoth/') || id.includes('/pizzip/') || id.includes('/docxtemplater/')) return 'documents'
+          return 'vendor'
         },
       },
     },

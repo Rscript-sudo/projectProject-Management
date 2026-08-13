@@ -6,6 +6,7 @@
 import path from 'path'
 import { safeCall } from './safe.mjs'
 import * as repo from '../db/repo.mjs'
+import { computeMonthlyComparison } from '../shared/progressAnalysis.mjs'
 
 export function register(ipcMain) {
   // 列表（含偏差字段计算）
@@ -58,35 +59,11 @@ export function register(ipcMain) {
   ipcMain.handle('progress:monthlyCompare', safeCall((_, { projectPath, yearMonth }) => {
     const projectName = path.basename(projectPath)
     const all = repo.listProgressNodes(projectName)
-    const ym = (yearMonth || new Date().toISOString().slice(0, 7)).replace('-', '')
-
-    // 本月计划节点（plan 跨越该月）
-    const planInMonth = all.filter(n => {
-      const ps = (n.plan_start || '').replace(/-/g, '').slice(0, 6)
-      const pe = (n.plan_end || '').replace(/-/g, '').slice(0, 6)
-      return ps <= ym && pe >= ym
-    })
-
-    // 本月实际完成节点
-    const actualDone = all.filter(n => {
-      const ae = (n.actual_end || '').replace(/-/g, '').slice(0, 6)
-      return ae === ym
-    })
-
-    return {
-      yearMonth,
-      plannedCount: planInMonth.length,
-      plannedNodes: planInMonth.map(n => n.name),
-      doneCount: actualDone.length,
-      doneNodes: actualDone.map(n => n.name),
-      overdueNodes: planInMonth.filter(n =>
-        (n.plan_end || '').replace(/-/g, '').slice(0, 6) < ym && n.progress_percent < 100
-      ).map(n => n.name),
-    }
+    return computeMonthlyComparison(all, yearMonth)
   }))
 
   // 偏差分析
-  ipcMain.handle('progress:deviation', safeCall((_, { projectPath }) => {
+  ipcMain.handle('progress:deviation', safeCall((_, projectPath) => {
     const projectName = path.basename(projectPath)
     const nodes = repo.listProgressNodes(projectName).map(enrichNode)
     return computeDeviation(nodes)

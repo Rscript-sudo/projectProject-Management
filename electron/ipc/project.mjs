@@ -9,6 +9,43 @@ import { normalizeProjectProfile } from '../../src/shared/projectProfile.mjs'
 import { normalizeDocumentRules } from '../../src/shared/documentRules.mjs'
 import { assertSafeProjectName } from '../db/repo.mjs'
 
+const PROJECT_LEDGER_FILES = new Set([
+  '合同台账.json',
+  '往来函件登记台账.json',
+  '隐患台账.json',
+  '会议纪要台账.json',
+  '施工方案台账.json',
+  '监理日志台账.json',
+])
+
+function normalizeAbsolutePath(targetPath) {
+  if (!targetPath || typeof targetPath !== 'string' || !path.isAbsolute(targetPath)) {
+    throw new Error('项目路径无效')
+  }
+  return path.resolve(targetPath)
+}
+
+function isPathInside(rootPath, targetPath) {
+  const relative = path.relative(rootPath, targetPath)
+  return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+}
+
+function assertIndexedProjectPath(projectPath, index) {
+  const normalizedPath = normalizeAbsolutePath(projectPath)
+  const indexedProject = index.projects.find(project => (
+    typeof project.path === 'string' && path.resolve(project.path) === normalizedPath
+  ))
+  if (!indexedProject) throw new Error('项目未在系统索引中注册')
+
+  const configuredRoot = normalizeAbsolutePath(getSettings().projectRoot || getDefaultRoot())
+  const realRoot = fs.realpathSync(configuredRoot)
+  const realProjectPath = fs.realpathSync(normalizedPath)
+  if (!isPathInside(realRoot, realProjectPath)) {
+    throw new Error('项目路径不在已配置的项目根目录内')
+  }
+  return { indexedProject, normalizedPath, realProjectPath }
+}
+
 function projectTemplateConfig(projectPath) {
   const dataDir = getProjectDataPath(path.basename(projectPath))
   const configPath = path.join(dataDir, 'project.config.json')
@@ -158,6 +195,9 @@ export function register(ipcMain) {
   })
 
   ipcMain.handle('fs:writeLedger', safeCall((_, projectPath, ledgerName, data) => {
+    if (!PROJECT_LEDGER_FILES.has(ledgerName)) {
+      return { success: false, error: '不允许写入未知台账文件' }
+    }
     const projectName = path.basename(projectPath)
     const ledgerPath = path.join(getProjectDataPath(projectName), ledgerName)
     fs.writeFileSync(ledgerPath, JSON.stringify(data, null, 2), 'utf8')
@@ -236,30 +276,26 @@ export function register(ipcMain) {
 
   ipcMain.handle('fs:deleteProject', safeCall(async (_, projectPath) => {
     const index = readProjectIndex()
-    index.projects = index.projects.filter(p => p.path !== projectPath)
-    writeProjectIndex(index)
-
+    const { normalizedPath } = assertIndexedProjectPath(projectPath, index)
     try {
-      await shell.trashItem(projectPath)
-      return { success: true }
+      await shell.trashItem(normalizedPath)
     } catch (e) {
-      try {
-        fs.rmSync(projectPath, { recursive: true, force: true })
-        return { success: true }
-      } catch (e2) {
-        return { success: false, error: e2.message }
-      }
+      return { success: false, error: `移入回收站失败：${e.message}` }
     }
+    index.projects = index.projects.filter(project => path.resolve(project.path) !== normalizedPath)
+    writeProjectIndex(index)
+    return { success: true }
   }))
 
   ipcMain.handle('fs:renameProject', safeCall((_, oldPath, newName) => {
-    const parentDir = path.dirname(oldPath)
+    assertSafeProjectName(newName)
+    const index = readProjectIndex()
+    const { normalizedPath } = assertIndexedProjectPath(oldPath, index)
+    const parentDir = path.dirname(normalizedPath)
     const newPath = path.join(parentDir, newName)
     if (fs.existsSync(newPath)) return { success: false, error: '目标名称已存在' }
-    if (!fs.existsSync(oldPath)) return { success: false, error: '原项目路径不存在' }
-    fs.renameSync(oldPath, newPath)
-    const index = readProjectIndex()
-    const proj = index.projects.find(p => p.path === oldPath)
+    fs.renameSync(normalizedPath, newPath)
+    const proj = index.projects.find(p => path.resolve(p.path) === normalizedPath)
     if (proj) {
       proj.path = newPath
       proj.name = newName

@@ -216,7 +216,7 @@ function guessDocType(relativePath) {
 }
 
 // 全量重建所有项目索引
-async function rebuildAllIndexes(progressCallback) {
+async function rebuildAllIndexes() {
   const index = loadIndex()
   const projectIndex = readProjectIndex()
 
@@ -233,7 +233,6 @@ async function rebuildAllIndexes(progressCallback) {
 
   const allDocs = []
   let processed = 0
-  const total = projectIndex.projects.length
 
   // v1.2.1 P2 修复：每处理完一个 project 用 setImmediate 让出主线程
   // 否则 1000+ 文件项目索引时主进程被报告为"未响应"
@@ -256,7 +255,6 @@ async function rebuildAllIndexes(progressCallback) {
       }
 
       processed++
-      if (progressCallback) progressCallback(processed, total, proj.name)
       // 每 5 个 project 让出一次事件循环（防主进程"未响应"）
       if (processed % 5 === 0) await yieldToLoop()
     } catch (e) {
@@ -273,8 +271,8 @@ async function rebuildAllIndexes(progressCallback) {
 
 export function register(ipcMain) {
   // 触发索引重建（后台）
-  ipcMain.handle('search:rebuild', safeCall(async (_, onProgress) => {
-    const result = await rebuildAllIndexes(onProgress)
+  ipcMain.handle('search:rebuild', safeCall(async () => {
+    const result = await rebuildAllIndexes()
     // 重建后更新缓存引擎
     if (result.docs.length > 0) {
       cachedFlexSearchEngine = await buildFlexSearchEngine(result.docs)

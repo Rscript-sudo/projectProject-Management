@@ -11,20 +11,22 @@
     "package:mac": "npm run build:renderer && electron-builder --mac",
     "preview": "electron-builder --dir && open ./dist/mac/项目文档管理系统.app",
     "test": "node --test test/*.test.mjs",
-    "test:e2e": "electron test/e2e.mjs"
+    "test:e2e:smoke": "electron test/e2e.mjs",
+    "test:e2e": "npm run test:e2e:smoke && electron test/project-security.e2e.mjs && electron test/project-template.e2e.mjs && electron test/template-priority.e2e.mjs && electron test/multi-project-template-generation.e2e.mjs && electron test/project-profile-delivery.e2e.mjs && electron test/document-rules.e2e.mjs && electron test/reporting-integrity.e2e.mjs && electron test/system-template-generation.e2e.mjs && electron test/civil-full-chain.e2e.mjs",
+    "test:e2e:real-ai": "electron test/civil-ai-expansion.real.e2e.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.6.0",
     "antd": "^5.24.0",
     "better-sqlite3": "^12.11.1",
-    "docx": "^8.5.0",
+    "docx": "^9.7.1",
     "docxtemplater": "^3.68.7",
     "flexsearch": "^0.8.212",
     "mammoth": "^1.12.0",
     "pizzip": "^3.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-router-dom": "^7.15.1",
+    "react-router-dom": "^7.18.2",
     "xlsx": "^0.18.5",
     "zustand": "^5.0.0"
   },
@@ -42,6 +44,11 @@
     "wait-on": "^8.0.3",
     "ws": "^8.20.1"
   },
+  "overrides": {
+    "docx": {
+      "nanoid": "^5.1.16"
+    }
+  },
   "build": {
     "appId": "com.supervision.project-management",
     "productName": "项目文档管理系统",
@@ -53,9 +60,9 @@
       "electron/**/*",
       "resources/**/*",
       "templates/**/*",
-    "src/shared/field-aliases.json",
-    "src/shared/projectProfile.mjs",
-    "src/shared/documentRules.mjs"
+      "src/shared/field-aliases.json",
+      "src/shared/projectProfile.mjs",
+      "src/shared/documentRules.mjs"
     ],
     "extraResources": [
       {
