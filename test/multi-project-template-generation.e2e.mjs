@@ -45,7 +45,7 @@ async function main() {
 
   const root = path.join(runtimeDir, 'projects')
   const docType = '监理周报'
-  const base = path.resolve('templates/02_监理周报/监理周报模版.docx')
+  const base = path.resolve('templates/通用/02_监理周报/监理周报模版.docx')
   const variants = [
     { name: '企业通用周报', scope: 'global', projectType: '通用', field: '通用重点事项', value: '通用项目周报内容已写入' },
     { name: '通信工程周报', scope: 'professional', projectType: '通信工程', field: '通信专业事项', value: '通信项目设备联调内容已写入' },

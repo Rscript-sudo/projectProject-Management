@@ -109,8 +109,8 @@ async function main() {
   assert.deepEqual(config.projectTags, profile.projectTags)
 
   // 实际进度表 → 本地解析 → 用户确认入账 → 实时数据源，覆盖周报/月报的可追溯链路。
-  const xlsxModule = await import('xlsx')
-  const XLSX = xlsxModule.default || xlsxModule
+  const { loadXlsx } = await import('../electron/xlsxRuntime.mjs')
+  const XLSX = await loadXlsx()
   const progressFile = path.join(runtimeDir, '八月施工进度表.xlsx')
   const progressBook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(progressBook, XLSX.utils.aoa_to_sheet([
@@ -159,5 +159,5 @@ async function main() {
 main().catch(error => { console.error(error.stack || error); process.exitCode = 1 }).finally(() => {
   if (process.env.KEEP_TEST_OUTPUT) console.log('KEPT TEST OUTPUT:', runtimeDir)
   else fs.rmSync(runtimeDir, { recursive: true, force: true })
-  app.exit(process.exitCode || 0)
+  process.exit(process.exitCode || 0)
 })

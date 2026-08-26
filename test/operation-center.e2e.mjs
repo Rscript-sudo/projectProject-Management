@@ -1,0 +1,92 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { app } from 'electron'
+
+const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-operation-center-'))
+app.setPath('userData', path.join(runtimeDir, 'user-data'))
+const handlers = new Map()
+const ipcMain = { handle: (channel, handler) => handlers.set(channel, handler) }
+const call = (channel, ...args) => handlers.get(channel)({}, ...args)
+
+async function main() {
+  await app.whenReady()
+  const projectRoot = path.join(runtimeDir, 'projects')
+  fs.mkdirSync(app.getPath('userData'), { recursive: true })
+  fs.writeFileSync(path.join(app.getPath('userData'), 'settings.json'), JSON.stringify({ projectRoot }), 'utf8')
+  const { registerAll } = await import('../electron/ipc/register.mjs')
+  registerAll(ipcMain, null)
+  const created = await call('fs:createProject', projectRoot, '诊断中心验收项目', '土建工程', {})
+  assert.equal(created.success, true)
+  fs.writeFileSync(path.join(created.path, '需要备份.txt'), 'backup me')
+
+  const operation = await call('operations:create', { type: 'document-generation', title: '生成整改通知书', projectPath: created.path })
+  assert.equal(operation.success, true)
+  await call('operations:update', operation.task.id, { status: 'running', stage: 'generating', progress: 50 })
+  await call('operations:diagnostic', { taskId: operation.task.id, level: 'info', stage: 'generating', message: '模型正在输出', detail: { apiKey: 'sk-sensitive-secret' } })
+  await call('operations:update', operation.task.id, { status: 'succeeded', stage: 'completed', progress: 100 })
+  const listed = await call('operations:list', { projectPath: created.path })
+  assert.equal(listed.tasks[0].status, 'succeeded')
+  assert.doesNotMatch(listed.events[0].detail, /sensitive-secret/)
+
+  const cancellable = await call('operations:create', { type: 'document-generation', title: '可取消任务', projectPath: created.path, maxAttempts: 2 })
+  await call('operations:update', cancellable.task.id, { status: 'running', stage: 'streaming', progress: 40, attempts: 1, retryable: true })
+  const cancelled = await call('operations:cancel', cancellable.task.id)
+  assert.equal(cancelled.task.status, 'cancelled')
+  const retried = await call('operations:retry', cancellable.task.id)
+  assert.equal(retried.task.status, 'queued')
+  assert.equal(retried.task.stage, 'retry_requested')
+
+  const interrupted = await call('operations:create', { type: 'document-generation', title: '异常退出任务', projectPath: created.path, timeoutMs: 1000 })
+  await call('operations:update', interrupted.task.id, { status: 'running', stage: 'generating', progress: 30, retryable: true })
+  const centerPath = path.join(app.getPath('userData'), 'operation-center.json')
+  const center = JSON.parse(fs.readFileSync(centerPath, 'utf8'))
+  center.tasks.find(task => task.id === interrupted.task.id).updatedAt = new Date(Date.now() - 120000).toISOString()
+  fs.writeFileSync(centerPath, JSON.stringify(center), 'utf8')
+  const recovered = await call('operations:list', { projectPath: created.path })
+  assert.equal(recovered.tasks.find(task => task.id === interrupted.task.id).status, 'interrupted')
+
+  const quality = await call('doc:scoreQuality', '整改通知书', '经检查发现一号楼作业人员未正确佩戴安全帽。要求施工单位立即整改，整改后报验并由监理复查闭环。')
+  assert.equal(quality.quality.passed, true)
+  const model = await call('ai:modelCapabilities', 'MiniMax-VL-01')
+  assert.equal(model.capabilities.vision, true)
+  const routed = await call('ai:routeModel', ['deepseek-chat', 'MiniMax-VL-01'], { vision: true, structuredOutput: true, streaming: true })
+  assert.equal(routed.route.selected.model, 'MiniMax-VL-01')
+  const rejectedRoute = await call('ai:routeModel', ['deepseek-chat'], { vision: true })
+  assert.equal(rejectedRoute.route.selected, null)
+  const audit = await call('template:audit', path.resolve('templates/通用/05_监理整改通知书/监理整改通知书模版.docx'))
+  assert.equal(audit.success, true)
+  assert.ok(audit.fields.length > 0)
+  const visual = await call('doc:visualAudit', path.resolve('templates/通用/05_监理整改通知书/监理整改通知书模版.docx'))
+  assert.equal(visual.audit.valid, true, visual.audit.issues?.join('；'))
+  assert.ok(visual.audit.inkRatio > 0.005)
+  const backup = await call('project:createBackup', created.path)
+  assert.equal(backup.success, true)
+  assert.equal(fs.readFileSync(path.join(backup.path, '需要备份.txt'), 'utf8'), 'backup me')
+  fs.writeFileSync(path.join(created.path, '需要备份.txt'), 'changed')
+  const restoredBackup = await call('project:restoreBackup', created.path, backup.path)
+  assert.equal(restoredBackup.success, true)
+  assert.equal(fs.readFileSync(path.join(created.path, '需要备份.txt'), 'utf8'), 'backup me')
+  assert.ok(fs.existsSync(restoredBackup.safetyBackup))
+
+  await call('fs:writeProjectChatHistory', created.path, [{ id: 'm1', role: 'user', content: '一号楼安全帽检查', imagePaths: ['/tmp/site.jpg'], timestamp: new Date().toISOString() }])
+  const initialHistory = await call('fs:readProjectChatHistory', created.path)
+  assert.equal(initialHistory.messages[0].imagePaths[0], '/tmp/site.jpg')
+  const second = await call('chat:createSession', created.path, '周报编写')
+  await call('fs:writeProjectChatHistory', created.path, [{ id: 'm2', role: 'user', content: '编写第34周周报', timestamp: new Date().toISOString() }])
+  const searched = await call('chat:listSessions', created.path, '安全帽')
+  assert.equal(searched.sessions.length, 1)
+  await call('chat:archiveSession', created.path, second.session.id, true)
+  const archived = await call('chat:listSessions', created.path, '')
+  assert.equal(archived.sessions.find(session => session.id === second.session.id).archived, true)
+  await call('chat:openSession', created.path, second.session.id)
+  const reopened = await call('fs:readProjectChatHistory', created.path)
+  assert.equal(reopened.messages[0].content, '编写第34周周报')
+  console.log('OPERATION CENTER E2E PASS: lifecycle / diagnostics / model / template / sessions / search / backup / restore')
+}
+
+main().catch(error => { console.error(error.stack || error); process.exitCode = 1 }).finally(() => {
+  fs.rmSync(runtimeDir, { recursive: true, force: true })
+  app.exit(process.exitCode || 0)
+})

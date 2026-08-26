@@ -7,9 +7,9 @@
 
 import path from 'path'
 import fs from 'fs'
-import { findForbiddenTerms } from '../src/shared/projectProfile.mjs'
 import { fileURLToPath } from 'url'
 import { getKnownAliases, EXPECTED_PLACEHOLDER_RE } from './placeholderScan.mjs'
+import { PAGE, FONTS, getFormatProfile, detectParagraphRole, formatAuditFromXml } from './documentFormatEngine.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -53,26 +53,28 @@ function expandAliases(canonical) {
 }
 
 // 文档类型 → 模板目录名 映射
+// v1.x：内置模板物理重组为 templates/通用/{dir}，值为「通用/目录名」；
+// findTemplate 找不到新路径时回退扁平旧路径（兼容迁移前的目录布局）。
 const DOC_TYPE_DIR_MAP = {
-  '整改通知书': '05_监理整改通知书',
-  '安全通知书': '07_节假日安全通知',
-  '工程联系单': '06_监理联系单',
-  '停工令': '15_停工令',
-  '会议纪要': '04_会议纪要',
-  '监理周报': '02_监理周报',
-  '监理月报': '03_监理月报',
-  '监理日志': '01_监理日志',
-  '开工通知': '13_开工通知',
-  '竣工通知': '14_竣工通知',
-  '工程变更单': '12_工程变更单',
-  '工程款支付证书': '16_工程款支付证书',
-  '进度分析报告': '17_进度分析报告',
-  '开工条件检查表': '08_开工条件检查表',
-  '承建资格报审表': '09_承建资格报审表',
-  '施工组织设计报审表': '10_施工组织设计报审表',
-  '总监理工程师任命书': '11_总监理工程师任命书',
-  '监理规划': '21_监理规划',
-  '监理细则': '21_监理规划',
+  '整改通知书': '通用/05_监理整改通知书',
+  '安全通知书': '通用/07_节假日安全通知',
+  '工程联系单': '通用/06_监理联系单',
+  '停工令': '通用/15_停工令',
+  '会议纪要': '通用/04_会议纪要',
+  '监理周报': '通用/02_监理周报',
+  '监理月报': '通用/03_监理月报',
+  '监理日志': '通用/01_监理日志',
+  '开工通知': '通用/13_开工通知',
+  '竣工通知': '通用/14_竣工通知',
+  '工程变更单': '通用/12_工程变更单',
+  '工程款支付证书': '通用/16_工程款支付证书',
+  '进度分析报告': '通用/17_进度分析报告',
+  '开工条件检查表': '通用/08_开工条件检查表',
+  '承建资格报审表': '通用/09_承建资格报审表',
+  '施工组织设计报审表': '通用/10_施工组织设计报审表',
+  '总监理工程师任命书': '通用/11_总监理工程师任命书',
+  '监理规划': '通用/21_监理规划',
+  '监理细则': '通用/21_监理规划',
   // B3 新增 8 类 — 大部分走 fallback 生成（无独立模板）
   '方案审核意见': null,
   '索赔报告': null,
@@ -81,6 +83,23 @@ const DOC_TYPE_DIR_MAP = {
   '质量评估报告': null,
   '付款审核意见': null,
   '通用文档': null,
+}
+
+/**
+ * 解析 docType 的模板目录绝对路径。
+ * 优先新路径（含子目录，如 通用/01_监理日志）；若不存在则回退扁平旧路径
+ * （如 templates/通用/01_监理日志），兼容物理重组前的目录布局，防止迁移中途打挂整机。
+ */
+function resolveTemplateDir(templatesDir, dirName) {
+  if (!dirName) return null
+  const newPath = path.join(templatesDir, dirName)
+  if (fs.existsSync(newPath)) return newPath
+  // 回退：取最后一段目录名，尝试根目录下的扁平路径
+  if (dirName.includes('/')) {
+    const legacy = path.join(templatesDir, dirName.split('/').pop())
+    if (fs.existsSync(legacy)) return legacy
+  }
+  return newPath
 }
 
 // 同一目录内存在多个相近文种时，不能依赖文件系统遍历顺序。
@@ -104,8 +123,8 @@ export async function listSystemTemplates(templatesDir) {
   const entries = []
   for (const [docType, dirName] of Object.entries(DOC_TYPE_DIR_MAP)) {
     if (!dirName) continue
-    const dirPath = path.join(templatesDir, dirName)
-    if (!fs.existsSync(dirPath)) continue
+    const dirPath = resolveTemplateDir(templatesDir, dirName)
+    if (!dirPath || !fs.existsSync(dirPath)) continue
     let config = {}
     const configPath = path.join(dirPath, 'config.json')
     if (fs.existsSync(configPath)) {
@@ -138,7 +157,7 @@ export async function listSystemTemplates(templatesDir) {
  */
 export function findTemplate(templatesDir, docType, options = {}) {
   const dirName = DOC_TYPE_DIR_MAP[docType]
-  const dirPath = dirName ? path.join(templatesDir, dirName) : null
+  const dirPath = resolveTemplateDir(templatesDir, dirName)
 
   // 读取 config.json
   const configPath = dirPath ? path.join(dirPath, 'config.json') : null
@@ -212,9 +231,7 @@ function sanitizeBodyContent(value, projectType) {
   v = v.replace(/([一二三四五六七八九十]+[、.][^\n]*)\n(?![\n])/g, '$1\n\n')
   v = v.replace(/([（(][一二三四五六七八九十][）)][^\n]*)\n(?![\n])/g, '$1\n\n')
   v = v.replace(/(\d+[.)、][^\n]*)\n(?![\n])/g, '$1\n\n')
-  // 3. v1.2.5 兜底：项目类型禁用术语替换
-  v = sanitizeForbiddenTerms(v, projectType)
-  // 4. v1.2.7 兜底：信件语体清理（"尊敬的..."/"此致敬礼"）
+  // 3. v1.2.7 兜底：信件语体清理（"尊敬的..."/"此致敬礼"）
   //   与 src/services/aiService.ts 的 sanitizeLetterStyle 词表双向同步
   //   非前端入口（直接 IPC 调用 saveDoc/exportPDF）会绕过 aiService parse-time 防线
   v = sanitizeLetterStyle(v)
@@ -282,29 +299,11 @@ export function sanitizeFieldValue(value) {
  *   这里做兜底：按 projectType 把禁用术语替换为 {{待替换：...}} 占位提示
  *   让老板在预览里一眼看到需要改的位置
  */
-const PROJECT_TYPE_FORBIDDEN_TERMS = {
-  信息化: ['塔吊', '升降机', '电焊机', '木工', '扬尘', '木工棚', '木工加工', '混凝土', '钢筋', '砌体', '脚手架', '深基坑', '高支模', '桩号', '围挡围栏'],
-  园林: ['塔吊', '升降机', '电焊机', '木工', '混凝土', '钢筋', '砌体', '脚手架', '深基坑', '高支模'],
-  装饰: ['塔吊', '升降机', '混凝土', '钢筋', '砌体', '深基坑', '高支模', '苗木'],
-  钢结构: ['木工', '砌体', '苗木', '机房', 'UPS', '精密空调'],
-}
-
-export function sanitizeForbiddenTerms(value, projectType) {
-  // 保留预览层醒目提示；正式件在 doc.mjs 中先硬拦截原文，因此该占位符不会落盘。
-  if (!value || typeof value !== 'string') return value
-  let result = value
-  for (const term of findForbiddenTerms(value, projectType)) {
-    result = result.replace(new RegExp(term, 'g'), `{{待替换：${term}（${projectType}项目禁用）}}`)
-  }
-  return result
-}
-
-export function validateDeliverableContent(value, projectType) {
+export function validateDeliverableContent(value) {
   const text = String(value || '')
   const invalidMarkers = ['undefined', 'null', '{{待替换', '{{待补充', '{{待清理', '数据待核对', '签发前请核对', '项目类型校准声明', '📋', '━━━━━━━━']
   const markers = invalidMarkers.filter(marker => text.includes(marker))
-  const forbiddenTerms = findForbiddenTerms(text, projectType)
-  return { valid: markers.length === 0 && forbiddenTerms.length === 0, markers, forbiddenTerms }
+  return { valid: markers.length === 0, markers }
 }
 
 /**
@@ -542,8 +541,22 @@ const STRUCTURED_SYSTEM_DOC_TYPES = new Set([
   '监理日志', '监理周报', '监理月报', '整改通知书', '安全通知书', '工程联系单', '进度分析报告',
 ])
 
+// v1.x：自定义文种 inStructuredWhitelist=true 的项注入白名单
+const customStructuredDocTypes = new Set()
+
+export function setCustomStructuredDocTypes(list) {
+  customStructuredDocTypes.clear()
+  if (!Array.isArray(list)) return
+  for (const item of list) {
+    if (item && item.inStructuredWhitelist && (item.label || item.code)) {
+      customStructuredDocTypes.add(item.label)
+      if (item.code) customStructuredDocTypes.add(item.code)
+    }
+  }
+}
+
 export function supportsStructuredSystemLayout(docType) {
-  return STRUCTURED_SYSTEM_DOC_TYPES.has(docType)
+  return STRUCTURED_SYSTEM_DOC_TYPES.has(docType) || customStructuredDocTypes.has(docType)
 }
 
 // 系统正式件不允许把关键段落默认为“—”后继续出厂。
@@ -576,38 +589,46 @@ function splitDocumentParagraphs(value) {
 export async function renderStructuredSystemDocument(docType, data) {
   const docx = await import('docx')
   const { Document, Packer, Paragraph, TextRun, AlignmentType, PageNumber } = docx
-  const page = { top: 1985, bottom: 1701, left: 1587, right: 1474 }
-  // 使用 LibreOffice 与 macOS Word 均可解析的 Unicode 中文字体；
-  // Songti SC 在部分无桌面字体缓存的渲染环境会退化成方框，不能作为交付默认。
-  const font = 'Arial Unicode MS'
-  const titleFont = 'Arial Unicode MS'
+  const profile = getFormatProfile(docType)
+  const styles = profile.styles
+  const font = FONTS.body
+  const titleFont = FONTS.title
+  const alignment = (value) => ({ center: AlignmentType.CENTER, right: AlignmentType.RIGHT, left: AlignmentType.LEFT, justify: AlignmentType.JUSTIFIED }[value] || AlignmentType.LEFT)
   const value = (key) => String(data[key] ?? '').trim()
-  const body = (text) => splitDocumentParagraphs(text).map(item => new Paragraph({
-    children: [new TextRun({ text: item, font, size: 24 })],
-    alignment: AlignmentType.JUSTIFIED,
-    indent: { firstLine: 480 },
-    spacing: { line: 360, after: 120 },
-  }))
+  const body = (text) => splitDocumentParagraphs(text).map(item => {
+    const role = detectParagraphRole(item)
+    const style = styles[role] || styles.body
+    return new Paragraph({
+      children: [new TextRun({ text: item, font: style.font, size: style.size, bold: style.bold })],
+      alignment: alignment(style.align),
+      indent: { firstLine: Math.max(0, style.firstLine || 0), left: Math.max(0, style.left || 0), hanging: Math.max(0, style.hanging || 0) },
+      spacing: { line: style.line || styles.body.line, lineRule: 'exact', before: style.before || 0, after: style.after || 0 },
+      keepNext: Boolean(style.keepNext),
+      widowControl: true,
+    })
+  })
   const heading = (text, level = 1) => new Paragraph({
-    children: [new TextRun({ text, font: level === 1 ? titleFont : font, size: level === 1 ? 28 : 24, bold: level === 1 })],
-    spacing: { before: level === 1 ? 260 : 160, after: 120 },
+    children: [new TextRun({ text, font: styles.h1.font, size: styles.h1.size, bold: styles.h1.bold })],
+    spacing: { before: styles.h1.before, after: styles.h1.after, line: styles.body.line, lineRule: 'exact' },
     keepNext: true,
   })
   const title = (text) => new Paragraph({
-    children: [new TextRun({ text, font: titleFont, size: 36, bold: true })],
+    children: [new TextRun({ text, font: titleFont, size: styles.title.size, bold: styles.title.bold })],
     alignment: AlignmentType.CENTER,
-    spacing: { after: 280 },
+    spacing: { before: styles.title.before, after: styles.title.after },
+    keepNext: true,
   })
   // 正式件头部采用字段行而非固定高度表格。旧模板的窄列在 Word/Quick Look/WPS
   // 间解释不一致，长项目名会竖排并挤压正文；字段行可自然换行，跨办公软件稳定。
   const meta = (pairs) => pairs.map(row => new Paragraph({
     children: [
-      new TextRun({ text: `${row[0]}：`, font, size: 21, bold: true }),
-      new TextRun({ text: row[1] || '—', font, size: 21 }),
-      new TextRun({ text: `    ${row[2]}：`, font, size: 21, bold: true }),
-      new TextRun({ text: row[3] || '—', font, size: 21 }),
+      new TextRun({ text: `${row[0]}：`, font: styles.meta.font, size: styles.meta.size, bold: true }),
+      new TextRun({ text: row[1] || '—', font: styles.meta.font, size: styles.meta.size }),
+      new TextRun({ text: `    ${row[2]}：`, font: styles.meta.font, size: styles.meta.size, bold: true }),
+      new TextRun({ text: row[3] || '—', font: styles.meta.font, size: styles.meta.size }),
     ],
-    spacing: { after: 70 },
+    spacing: { after: styles.meta.after, line: styles.meta.line, lineRule: 'exact' },
+    widowControl: true,
   }))
   const children = []
   const appendSections = (sections) => {
@@ -639,15 +660,15 @@ export async function renderStructuredSystemDocument(docType, data) {
     children.push(title(documentTitle))
     children.push(...meta([['项目名称', value('项目名称'), '文件编号', value('文件编号')], ['致单位', value('致单位'), '日期', value('日期')], ['事由', value('事由') || value('主题'), '监理单位', value('监理单位')]]))
     children.push(...body(value('正文内容') || value('内容') || value('正文')))
-    children.push(new Paragraph({ children: [new TextRun({ text: value('监理单位') || '监理机构', font, size: 24 })], alignment: AlignmentType.RIGHT, spacing: { before: 260 } }))
-    children.push(new Paragraph({ children: [new TextRun({ text: value('日期'), font, size: 24 })], alignment: AlignmentType.RIGHT }))
+    children.push(new Paragraph({ children: [new TextRun({ text: value('监理单位') || '监理机构', font: styles.closing.font, size: styles.closing.size })], alignment: alignment(styles.closing.align), spacing: { before: styles.closing.before, line: styles.closing.line, lineRule: 'exact' } }))
+    children.push(new Paragraph({ children: [new TextRun({ text: value('日期'), font: styles.closing.font, size: styles.closing.size })], alignment: alignment(styles.closing.align), spacing: { line: styles.closing.line, lineRule: 'exact' } }))
   }
 
   const document = new Document({
-    styles: { default: { document: { run: { font, size: 24 } } } },
+    styles: { default: { document: { run: { font, size: styles.body.size }, paragraph: { spacing: { line: styles.body.line, lineRule: 'exact' } } } } },
     sections: [{
-      properties: { page: { margin: page } },
-      footers: { default: new docx.Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: '第 ', font, size: 18 }), new TextRun({ children: [PageNumber.CURRENT], font, size: 18 }), new TextRun({ text: ' 页', font, size: 18 })] })] }) },
+      properties: { page: { size: { width: PAGE.width, height: PAGE.height }, margin: PAGE.margin } },
+      footers: { default: new docx.Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: '— ', font: FONTS.pageNumber, size: 28 }), new TextRun({ children: [PageNumber.CURRENT], font: FONTS.pageNumber, size: 28 }), new TextRun({ text: ' —', font: FONTS.pageNumber, size: 28 })] })] }) },
       children,
     }],
   })
@@ -660,8 +681,8 @@ export async function renderStructuredSystemDocument(docType, data) {
  * 目前主要供 监理日志 使用
  */
 export async function renderXlsxTemplate(templatePath, data, cellMappings) {
-  const xlsxModule = await import('xlsx')
-  const XLSX = xlsxModule.default || xlsxModule
+  const { loadXlsx } = await import('./xlsxRuntime.mjs')
+  const XLSX = await loadXlsx()
 
   // 读取模板
   const wb = XLSX.readFile(templatePath)
@@ -741,7 +762,8 @@ function detectType(text) {
  */
 function buildRPrXml(style) {
   const boldXml = style.bold ? '<w:b/><w:bCs/>' : ''
-  return `<w:rPr><w:rFonts w:ascii="${style.font}" w:hAnsi="${style.font}" w:eastAsia="${style.font}"/><w:sz w:val="${style.sz}"/><w:szCs w:val="${style.sz}"/>${boldXml}</w:rPr>`
+  const size = style.sz ?? style.size ?? 28
+  return `<w:rPr><w:rFonts w:ascii="${style.font}" w:hAnsi="${style.font}" w:eastAsia="${style.font}"/><w:sz w:val="${size}"/><w:szCs w:val="${size}"/>${boldXml}</w:rPr>`
 }
 
 /**
@@ -778,16 +800,28 @@ function applyPPrFormatting(pPr, defaultAlign, firstLine) {
  * 格式化含 <w:br/> 的段落：只修正行距/对齐/缩进，不改变字体
  * 字体由模板本身的设计决定
  */
-function formatBrParagraph(pBlock) {
+function formatBrParagraph(pBlock, docType = '') {
+  const profile = getFormatProfile(docType)
   let result = pBlock
 
-  // 段落级 pPr：行距 28pt + 两端对齐 + 首行缩进 2 字符
+  // 单个模板占位段内含多行内容：段落级保持两端对齐，具体字体和字重按每行角色处理。
   result = result.replace(/<w:pPr[\s\S]*?<\/w:pPr>/, (pPr) => {
-    return applyPPrFormatting(pPr, 'justify', 640)
+    return applyPPrFormatting(pPr, 'justify', 0)
   })
   if (!result.includes('<w:pPr')) {
-    result = result.replace('<w:p>', '<w:p><w:pPr><w:spacing w:line="560" w:lineRule="exact"/><w:jc w:val="both"/><w:ind w:firstLine="640"/></w:pPr>')
+    result = result.replace('<w:p>', `<w:p><w:pPr><w:spacing w:line="${profile.styles.body.line}" w:lineRule="exact"/><w:jc w:val="both"/></w:pPr>`)
   }
+
+  // 清除占位符从模板继承的整段加粗；只让一级标题使用黑体/加粗，正文使用仿宋常规字重。
+  result = result.replace(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g, (runXml) => {
+    const text = runXml.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/)?.[1]?.replace(/&quot;|&amp;|&lt;|&gt;/g, '') || ''
+    if (!text.trim()) return runXml
+    const role = detectParagraphRole(text)
+    const style = profile.styles[role] || profile.styles.body
+    const rPr = buildRPrXml(style)
+    if (/<w:rPr>[\s\S]*?<\/w:rPr>/.test(runXml)) return runXml.replace(/<w:rPr>[\s\S]*?<\/w:rPr>/, rPr)
+    return runXml.replace(/(<w:r\b[^>]*>)/, `$1${rPr}`)
+  })
 
   return result
 }
@@ -828,7 +862,7 @@ function applyStyleToParagraph(pBlock) {
  * 纯 JS 实现（操作 docx ZIP 中 word/document.xml），无 Python 依赖
  * templateUsed: 是否使用了模板（true=轻量模式, false=全量模式）
  */
-export async function formatDocx(docxPath, templateUsed = true) {
+export async function formatDocx(docxPath, templateUsed = true, docType = '', preserveTemplateLayout = templateUsed) {
   const { default: PizZip } = await import('pizzip')
   if (!fs.existsSync(docxPath)) {
     console.warn('[formatDocx] docx not found at', docxPath)
@@ -843,13 +877,30 @@ export async function formatDocx(docxPath, templateUsed = true) {
     const normalizeFonts = (partXml) => partXml
       .replaceAll('仿宋_GB2312', 'Songti SC')
       .replaceAll('方正小标宋简体', 'Songti SC')
-      .replaceAll('黑体', 'Heiti SC')
       .replaceAll('楷体_GB2312', 'Kaiti SC')
+      .replaceAll('Microsoft YaHei', 'Songti SC')
+      .replaceAll('微软雅黑', 'Songti SC')
+      .replaceAll('SimSun', 'Songti SC')
+      .replaceAll('w:eastAsia="宋体"', 'w:eastAsia="Songti SC"')
+      .replaceAll('黑体', 'Heiti SC')
+      .replace(/<w:rFonts\b([^>]*?)\/>/g, (tag, attrs) => {
+        const cleaned = attrs.replace(/\s+w:eastAsia="[^"]*"/g, '')
+        return `<w:rFonts${cleaned} w:eastAsia="${FONTS.body}"/>`
+      })
 
     for (const fileName of Object.keys(zip.files)) {
       if (!/^word\/(?:document|styles|header\d+|footer\d+|theme\/theme\d+)\.xml$/.test(fileName)) continue
+      if (preserveTemplateLayout) continue
       const part = zip.file(fileName)
-      if (part) zip.file(fileName, normalizeFonts(part.asText()))
+      if (part) {
+        let partXml = normalizeFonts(part.asText())
+        if (fileName === 'word/styles.xml') {
+          const defaults = `<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="${FONTS.body}" w:hAnsi="${FONTS.body}" w:eastAsia="${FONTS.body}"/><w:sz w:val="32"/><w:szCs w:val="32"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:line="560" w:lineRule="exact"/></w:pPr></w:pPrDefault></w:docDefaults>`
+          if (/<w:docDefaults\b/.test(partXml)) partXml = partXml.replace(/<w:docDefaults\b[^>]*>[\s\S]*?<\/w:docDefaults>/, defaults)
+          else partXml = partXml.replace(/(<w:styles\b[^>]*>)/, `$1${defaults}`)
+        }
+        zip.file(fileName, partXml)
+      }
     }
 
     const docFile = zip.file('word/document.xml')
@@ -862,7 +913,7 @@ export async function formatDocx(docxPath, templateUsed = true) {
 
     // 将系统模板中只在 Windows Office 上可用的旧字体，统一替换为本机可用字体。
     // 保留字号、加粗、对齐和版式，仅做字体兼容性处理。
-    xml = normalizeFonts(xml)
+    if (!preserveTemplateLayout) xml = normalizeFonts(xml)
 
     // === 1. 模板路径：只格式化含 <w:br/> 的段落（即 {{正文内容}} 产物）===
     //     有 <w:br/> → 分段检测（按 <w:br/> 分组，每行独立识别标题/正文）
@@ -871,22 +922,38 @@ export async function formatDocx(docxPath, templateUsed = true) {
       if (templateUsed && !/<w:br\/>/.test(pBlock)) return pBlock
       if (!/<w:t[^>]*>/.test(pBlock)) return pBlock
       if (/<w:br\/>/.test(pBlock)) {
-        return formatBrParagraph(pBlock)
+        return formatBrParagraph(pBlock, docType)
       }
       return applyStyleToParagraph(pBlock)
     })
 
-    // === 2. 行距兜底（28pt 固定）===
-    xml = xml.replace(/(<w:pPr[\s\S]*?)(?:<\/w:pPr>)/g, (match, pPrContent) => {
-      if (/<w:spacing\b/.test(pPrContent)) return match
-      return pPrContent + '<w:spacing w:line="560" w:lineRule="exact"/></w:pPr>'
-    })
+    // 企业通知模板常用“项目名称 + 大段空格 + 编号”的单行表头。
+    // 项目编码加入正式编号后长度增加，统一将该元数据行收紧到五号字，避免编号折到下一行破坏表头。
+    if (preserveTemplateLayout) {
+      xml = xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (pBlock) => {
+        const plainText = [...pBlock.matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)].map(match => match[1]).join('')
+        if (!plainText.includes('项目名称') || !plainText.includes('编号')) return pBlock
+        return pBlock
+          .replace(/<w:sz\b[^>]*\/>/g, '<w:sz w:val="21"/>')
+          .replace(/<w:szCs\b[^>]*\/>/g, '<w:szCs w:val="21"/>')
+      })
+    }
 
-    // === 3. 页边距（GB/T 9704-2012 A4标准）===
-    if (/<w:pgMar\b/.test(xml)) {
-      xml = xml.replace(/<w:pgMar\s[^/]*\/>/g, GB_PAGE_MARGINS)
-    } else {
-      xml = xml.replace(/<w:sectPr>/g, '<w:sectPr>' + GB_PAGE_MARGINS)
+    // === 2. 行距兜底（28pt 固定）===
+    if (!preserveTemplateLayout) {
+      xml = xml.replace(/(<w:pPr[\s\S]*?)(?:<\/w:pPr>)/g, (match, pPrContent) => {
+        if (/<w:spacing\b/.test(pPrContent)) return match
+        return pPrContent + '<w:spacing w:line="560" w:lineRule="exact"/></w:pPr>'
+      })
+    }
+
+    // === 3. A4 纸张与页边距（统一排版引擎）===
+    if (!preserveTemplateLayout) {
+      const pageSize = `<w:pgSz w:w="${PAGE.width}" w:h="${PAGE.height}"/>`
+      if (/<w:pgSz\b/.test(xml)) xml = xml.replace(/<w:pgSz\s[^/]*\/>/g, pageSize)
+      else xml = xml.replace(/<w:sectPr>/g, '<w:sectPr>' + pageSize)
+      if (/<w:pgMar\b/.test(xml)) xml = xml.replace(/<w:pgMar\s[^/]*\/>/g, GB_PAGE_MARGINS)
+      else xml = xml.replace(/<w:sectPr>/g, '<w:sectPr>' + GB_PAGE_MARGINS)
     }
 
     // === 4. 降级路径 run 字体兜底 ===
@@ -910,6 +977,19 @@ export async function formatDocx(docxPath, templateUsed = true) {
   }
 }
 
+/** 保存前的格式质量门禁。 */
+export async function validateDocxFormatting(docxPath, docType = '', preserveTemplateLayout = false) {
+  const { default: PizZip } = await import('pizzip')
+  try {
+    const zip = new PizZip(fs.readFileSync(docxPath))
+    const documentXml = zip.file('word/document.xml')?.asText() || ''
+    const stylesXml = zip.file('word/styles.xml')?.asText() || ''
+    return formatAuditFromXml(documentXml, stylesXml, docType, { preserveTemplateLayout })
+  } catch (error) {
+    return { valid: false, issues: [`DOCX 结构损坏：${error.message}`], layer: getFormatProfile(docType).layer }
+  }
+}
+
 // 去掉目录/文件名的编号前缀（如 "18_通信工程" → "通信工程"）
 function stripNumberPrefix(name) {
   return name.replace(/^\d+_/, '')
@@ -927,7 +1007,9 @@ function cleanTemplateName(name) {
 }
 
 // 递归扫描模板目录，返回子节点列表
-function buildTemplateTree(dirPath) {
+// keepEmpty=true 时，空目录也返回 category（children:[]），用于专业空态展示
+function buildTemplateTree(dirPath, options = {}) {
+  const keepEmpty = !!options.keepEmpty
   if (!fs.existsSync(dirPath)) return []
 
   const EXCLUDED = new Set(['format-spec', 'logo.png', '.DS_Store'])
@@ -946,14 +1028,21 @@ function buildTemplateTree(dirPath) {
     const entryPath = path.join(dirPath, entry.name)
 
     if (entry.isDirectory()) {
-      const children = buildTemplateTree(entryPath)
-      if (children.length === 0) continue
+      const children = buildTemplateTree(entryPath, { keepEmpty })
+      if (children.length === 0 && !keepEmpty) continue
+      // 读取 config.json 以便上层判断 is_professional 标记（旧布局回退用）
+      let config = {}
+      const configPath = path.join(entryPath, 'config.json')
+      if (fs.existsSync(configPath)) {
+        try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')) } catch {}
+      }
       items.push({
         name: entry.name,
         path: entryPath,
         type: 'category',
         displayName: stripNumberPrefix(entry.name),
         children,
+        config,
         docxCount: countDocx(children),
       })
     } else if (entry.name.toLowerCase().endsWith('.docx')) {
@@ -972,17 +1061,52 @@ function buildTemplateTree(dirPath) {
 
 /**
  * 构建模板资源目录 — 扫描 templates/ 返回结构化树
- * 01-17 号通用模板归入"通用类型模板"父目录
- * 18-22 号专业模板作为独立分类
- * 排除 format-spec/ 目录和非模板文件
+ *
+ * v1.x 物理重组后结构：
+ *   templates/通用/{docType 目录}   → 归入根分类「通用类型模板」
+ *   templates/专业/{专业}/{表式}    → 归入根分类「专业」，子目录即各专业（含空专业）
+ *
+ * 兼容旧扁平布局：若 templates/通用 或 templates/专业 不存在（旧装机），
+ * 回退到扫描根目录、用 SPECIALTY 式启发区分（含 is_professional 标记的专业表式独立展示）。
+ * 排除 format-spec/ 目录和非模板文件。
  */
 export function buildTemplateCatalog(templatesDir) {
   if (!fs.existsSync(templatesDir)) return []
 
-  const SPECIALTY = new Set(['18_通信工程', '19_信息化工程', '20_电力工程', '21_监理规划'])
   const items = []
-  const generalItems = []
+  const generalDir = path.join(templatesDir, '通用')
+  const specialtyDir = path.join(templatesDir, '专业')
 
+  // ---- 新结构：通用/ + 专业/ ----
+  if (fs.existsSync(generalDir) || fs.existsSync(specialtyDir)) {
+    const generalItems = buildTemplateTree(generalDir, { keepEmpty: false })
+    if (generalItems.length > 0) {
+      items.push({
+        name: '00_通用类型模板',
+        path: generalDir,
+        type: 'category',
+        displayName: '通用类型模板',
+        children: generalItems,
+        docxCount: countDocx(generalItems),
+      })
+    }
+    // 专业根：子目录即各专业（keepEmpty 保留空专业，展示「暂无模板」）
+    const specialtyChildren = buildTemplateTree(specialtyDir, { keepEmpty: true })
+    if (specialtyChildren.length > 0) {
+      items.push({
+        name: '01_专业模板',
+        path: specialtyDir,
+        type: 'category',
+        displayName: '专业模板',
+        children: specialtyChildren,
+        docxCount: countDocx(specialtyChildren),
+      })
+    }
+    return items
+  }
+
+  // ---- 旧扁平布局回退 ----
+  const generalItems = []
   const entries = fs.readdirSync(templatesDir, { withFileTypes: true })
     .filter(e => !e.name.startsWith('.') && e.isDirectory() && e.name !== 'format-spec')
     .sort((a, b) => {
@@ -996,7 +1120,6 @@ export function buildTemplateCatalog(templatesDir) {
     const entryPath = path.join(templatesDir, entry.name)
     const children = buildTemplateTree(entryPath)
     if (children.length === 0) continue
-
     const node = {
       name: entry.name,
       path: entryPath,
@@ -1005,17 +1128,13 @@ export function buildTemplateCatalog(templatesDir) {
       children,
       docxCount: countDocx(children),
     }
-
-    if (SPECIALTY.has(entry.name)) {
-      // 专业模板 — 独立展示
-      items.push(node)
-    } else {
-      // 通用模板 — 归入父目录
-      generalItems.push(node)
-    }
+    // 旧扁平布局下，含 is_professional 标记的专业表式独立展示，其余归通用
+    const hasProfessionalMarker = children.some(c => c.config?.is_professional) ||
+      entryPath.includes('_') && /(工程|专业)/.test(entry.name)
+    if (hasProfessionalMarker) items.push(node)
+    else generalItems.push(node)
   }
 
-  // 通用类型模板作为根分类
   if (generalItems.length > 0) {
     items.unshift({
       name: '00_通用类型模板',
@@ -1026,7 +1145,6 @@ export function buildTemplateCatalog(templatesDir) {
       docxCount: countDocx(generalItems),
     })
   }
-
   return items
 }
 

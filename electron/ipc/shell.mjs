@@ -1,4 +1,4 @@
-import { shell, dialog, app } from 'electron'
+import { shell, dialog, app, net } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
@@ -6,6 +6,7 @@ import { safeCall } from './safe.mjs'
 import { getSettings } from './shared.mjs'
 import { DATA_TOOLS } from '../dataTools.mjs'
 import { parseMaterial } from './material.mjs'
+import { registerTaskCancellation, updateTask, appendDiagnostic } from '../operationCenter.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -13,6 +14,32 @@ const __dirname = path.dirname(__filename)
 // 文件内容读取 — 支持的文件类型
 const TEXT_EXTS = new Set(['.txt', '.md', '.csv', '.json', '.xml', '.js', '.ts', '.jsx', '.tsx', '.html', '.css', '.scss', '.less', '.yaml', '.yml', '.ini', '.cfg', '.conf', '.log', '.env', '.sh', '.bat', '.py', '.java', '.cpp', '.c', '.h', '.sql', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.vue', '.svelte', '.astro'])
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.heic', '.heif'])
+
+const PROVIDER_BASE_URLS = {
+  deepseek: 'https://api.deepseek.com',
+  minimax: 'https://api.minimaxi.com/v1',
+  glm: 'https://open.bigmodel.cn/api/paas/v4',
+  kimi: 'https://api.moonshot.cn/v1',
+  qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+}
+
+// Electron 主进程优先使用 Chromium 网络栈；它对系统代理、证书和局域网服务的
+// 行为比 Node 全局 fetch 更稳定，也避免新版本 Electron 中请求无法及时中止。
+const requestFetch = (...args) => net.fetch(...args)
+
+function normalizeAIBaseUrl(provider, baseUrl) {
+  let base = String(baseUrl || PROVIDER_BASE_URLS[provider] || '').replace(/\/+$/, '')
+  // MiniMax 旧域名仍可能响应，但官方 OpenAI 兼容接口已迁移到 minimaxi.com。
+  if (provider === 'minimax' && /api\.minimax\.chat/i.test(base)) base = 'https://api.minimaxi.com/v1'
+  return base
+}
+
+function resolveAIUrl(options, settings) {
+  const provider = options.provider || settings.aiProvider || 'deepseek'
+  const base = normalizeAIBaseUrl(provider, options.baseUrl || settings.baseUrl)
+  if (!base) throw new Error('API 地址未配置')
+  return `${base}/chat/completions`
+}
 
 function getTemplatesDir() {
   if (app.isPackaged) {
@@ -45,6 +72,13 @@ export function register(ipcMain, mainWindow) {
     const { clipboard } = await import('electron')
     clipboard.writeText(targetPath || '')
     return { success: true }
+  }))
+
+  // 从系统剪贴板读取文本。用于密钥等 Password 输入框的明确“粘贴”操作，
+  // 避免 macOS 打包应用中右键菜单或快捷键不可用时无法录入。
+  ipcMain.handle('shell:readClipboardText', safeCall(async () => {
+    const { clipboard } = await import('electron')
+    return { success: true, text: clipboard.readText() }
   }))
 
   ipcMain.handle('dialog:selectDir', async () => {
@@ -87,13 +121,16 @@ export function register(ipcMain, mainWindow) {
 
     // Word 文档
     if (ext === '.docx') {
-      const { extractRawText } = await import('mammoth')
+      const mammoth = await import('mammoth')
       const buffer = fs.readFileSync(filePath)
-      const result = await extractRawText({ buffer })
-      let content = result.value || ''
+      const [textResult, htmlResult] = await Promise.all([
+        mammoth.extractRawText({ buffer }),
+        mammoth.convertToHtml({ buffer }),
+      ])
+      let content = textResult.value || ''
       const truncated = content.length > MAX_SIZE
       if (truncated) content = content.slice(0, MAX_SIZE) + '\n\n... [内容已截断，仅显示前50KB]'
-      return { success: true, fileName, ext, type: 'text', content, size: stat.size, truncated }
+      return { success: true, fileName, ext, type: 'text', content, html: htmlResult.value || '', size: stat.size, truncated }
     }
 
     // Excel、PDF：统一本地解析。PDF 有文字层时可直接用于 AI；扫描件明确提示需 OCR。
@@ -267,18 +304,20 @@ ${dataContext}
   // 流式 AI 调用 — 通过 webContents.send 推送每个 chunk
   // 新增参数：mode / projectName / dataToolIds — 用于数据预取后注入 prompt
   // 安全：apiKey 不再从 IPC 参数传入，主进程从加密存储读取
-  ipcMain.handle('ai:stream', async (event, { url, model, messages, mode, projectName, dataToolIds, reportPeriod }) => {
+  ipcMain.handle('ai:stream', async (event, options) => {
     const sender = event.sender
-    const requestId = `ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const requestId = options.requestId || `ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     const controller = new AbortController()
-    // 流式响应超时放宽到 120 秒（流式场景下首字节到达时间不可控）
-    const timeout = setTimeout(() => controller.abort(), 120000)
+    const operationId = String(options.operationId || '')
+    const unregisterCancellation = operationId ? registerTaskCancellation(operationId, () => controller.abort('cancelled')) : () => {}
+    if (operationId) {
+      try { updateTask(operationId, { status: 'running', stage: 'requesting', progress: 30, attempts: Number(options.attempt || 1), requestId }) } catch {}
+    }
 
     // 监听渲染进程主动中断
     const abortChannel = `ai:abort:${requestId}`
     ipcMain.once(abortChannel, () => controller.abort())
 
-    // 主进程持有 apiKey，不再从 IPC 接收
     const settings = getSettings()
     const apiKey = settings.apiKey
     if (!apiKey) {
@@ -288,103 +327,95 @@ ${dataContext}
       const errMsg = settings._apiKeyDecryptError
         ? `已配置的 API Key 无法解密（可能换了电脑/系统重装）。请到【设置】页重新输入 API Key。原因：${settings._apiKeyDecryptError}`
         : '未配置 API Key，请在【设置】页填写'
-      sender.send('ai:stream:chunk', { requestId, type: 'error', error: errMsg })
-      sender.send('ai:stream:end', { requestId })
       return { success: false, error: settings._apiKeyDecryptError ? 'API Key 配置异常' : 'API Key 未配置', requestId }
     }
 
-    // ===== 数据预取：在调 LLM 前把项目实时数据注入 prompt =====
-    let finalMessages = buildDataInjectedMessages(messages, mode, projectName, dataToolIds, reportPeriod)
-
-    // ===== 上下文截断：防止超限报错 =====
-    finalMessages = trimContext(finalMessages, model)
-
+    let url
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({ model, messages: finalMessages, stream: true, temperature: 0.7, max_tokens: 4096 }),
-      })
-      clearTimeout(timeout)
+      url = resolveAIUrl(options, settings)
+    } catch (error) {
+      return { success: false, error: error.message, requestId }
+    }
 
-      if (!response.ok || !response.body) {
-        let errorMsg = `API 请求失败 (${response.status})`
-        try {
-          const errData = await response.json()
-          errorMsg = errData.error?.message || errData.error || errorMsg
-        } catch {}
-        sender.send('ai:stream:chunk', { requestId, type: 'error', error: errorMsg })
-        sender.send('ai:stream:end', { requestId })
-        return { success: false, error: errorMsg }
+    // IPC 立即返回 requestId；渲染端已在发起请求前注册好监听器。
+    setImmediate(async () => {
+      const timeout = setTimeout(() => controller.abort(), 180000)
+      let finalMessages = buildDataInjectedMessages(options.messages, options.mode, options.projectName, options.dataToolIds, options.reportPeriod)
+      finalMessages = trimContext(finalMessages, options.model)
+      const send = (channel, payload) => {
+        if (!sender.isDestroyed()) sender.send(channel, payload)
       }
-
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        // 渲染进程已销毁（用户切页面/关闭窗口）→ 立即取消读取，释放连接
-        if (sender.isDestroyed()) {
-          try { await reader.cancel() } catch {}
-          console.log(`[ai:stream] sender 已销毁，主动中断流 (${requestId})`)
-          return { success: false, error: '渲染端已断开', requestId }
+      const sendEnd = () => send('ai:stream:end', { requestId })
+      try {
+        let response
+        let lastFetchError
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          try {
+            response = await requestFetch(url, {
+              method: 'POST', signal: controller.signal,
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+              body: JSON.stringify({ model: options.model, messages: finalMessages, stream: true, temperature: 0.4, max_tokens: 8192 }),
+            })
+            if (response.ok || ![429, 500, 502, 503, 504].includes(response.status) || attempt === 2) break
+            if (operationId) appendDiagnostic({ taskId: operationId, level: 'warn', stage: 'transport_retry', message: `模型服务返回 ${response.status}，正在自动重试` })
+          } catch (error) {
+            lastFetchError = error
+            if (error.name === 'AbortError' || attempt === 2) throw error
+            if (operationId) appendDiagnostic({ taskId: operationId, level: 'warn', stage: 'transport_retry', message: '网络请求失败，正在自动重试', detail: error.message })
+          }
+          await new Promise(resolve => setTimeout(resolve, 800 * attempt))
+        }
+        if (!response && lastFetchError) throw lastFetchError
+        if (!response.ok || !response.body) {
+          let errorMsg = `API 请求失败 (${response.status})`
+          try { const data = await response.json(); errorMsg = data.error?.message || data.error || errorMsg } catch {}
+          send('ai:stream:chunk', { requestId, type: 'error', error: errorMsg })
+          sendEnd()
+          return
         }
 
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-
-        // SSE 格式按 \n\n 分割事件
-        const events = buffer.split('\n\n')
-        buffer = events.pop() || ''
-
-        for (const evt of events) {
-          const lines = evt.split('\n')
-          for (const line of lines) {
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        const consumeEvent = (evt) => {
+          for (const line of evt.split('\n')) {
             const trimmed = line.trim()
-            if (!trimmed || !trimmed.startsWith('data:')) continue
+            if (!trimmed.startsWith('data:')) continue
             const data = trimmed.slice(5).trim()
-            if (data === '[DONE]') continue
+            if (!data || data === '[DONE]') continue
             try {
               const json = JSON.parse(data)
               const content = json.choices?.[0]?.delta?.content || json.choices?.[0]?.message?.content || ''
-              if (content) {
-                // 二次守卫：发之前再检查一次
-                if (sender.isDestroyed()) {
-                  try { await reader.cancel() } catch {}
-                  return { success: false, error: '渲染端已断开', requestId }
-                }
-                sender.send('ai:stream:chunk', { requestId, type: 'content', content })
-              }
-            } catch {
-              // 忽略非 JSON 行（部分 API 会发注释行）
-            }
+              if (content) send('ai:stream:chunk', { requestId, type: 'content', content })
+            } catch {}
           }
         }
-      }
-
-      // 正常结束：再检查一次 sender 再发 end（避免最后一条 end 丢到死信通道）
-      if (!sender.isDestroyed()) {
-        sender.send('ai:stream:end', { requestId })
-      }
-      return { success: true, requestId }
-    } catch (e) {
-      clearTimeout(timeout)
-      // sender 可能已销毁，静默吞掉发送错误
-      if (!sender.isDestroyed()) {
-        if (e.name === 'AbortError') {
-          sender.send('ai:stream:chunk', { requestId, type: 'error', error: 'AI 请求超时（120秒）' })
-        } else {
-          sender.send('ai:stream:chunk', { requestId, type: 'error', error: e.message })
+        while (true) {
+          if (sender.isDestroyed()) { try { await reader.cancel() } catch {}; return }
+          const { done, value } = await reader.read()
+          if (done) break
+          if (operationId) { try { updateTask(operationId, { status: 'running', stage: 'streaming', progress: 65 }) } catch {} }
+          buffer += decoder.decode(value, { stream: true })
+          const events = buffer.split(/\r?\n\r?\n/)
+          buffer = events.pop() || ''
+          events.forEach(consumeEvent)
         }
-        sender.send('ai:stream:end', { requestId })
+        buffer += decoder.decode()
+        if (buffer.trim()) consumeEvent(buffer)
+        sendEnd()
+      } catch (error) {
+        const cancelled = controller.signal.reason === 'cancelled'
+        const errorMsg = error.name === 'AbortError' ? (cancelled ? 'AI 请求已取消' : 'AI 请求超时（180秒）') : error.message
+        send('ai:stream:chunk', { requestId, type: 'error', error: errorMsg })
+        sendEnd()
+      } finally {
+        clearTimeout(timeout)
+        unregisterCancellation()
+        ipcMain.removeAllListeners?.(abortChannel)
       }
-      return { success: false, error: e.message, requestId }
-    }
+    })
+
+    return { success: true, requestId }
   })
 
   // 前端拉取项目实时数据（供右侧面板展示）
@@ -404,25 +435,27 @@ ${dataContext}
     return results
   }))
 
-  ipcMain.handle('ai:call', safeCall(async (_, { url, model, messages, mode, projectName, dataToolIds, reportPeriod }) => {
+  ipcMain.handle('ai:call', safeCall(async (_, options) => {
     // 主进程持有 apiKey，不再从 IPC 接收
-    const apiKey = getSettings().apiKey
+    const settings = getSettings()
+    const apiKey = settings.apiKey
     if (!apiKey) {
       return { success: false, error: 'API Key 未配置，请在设置中填写' }
     }
-    let finalMessages = buildDataInjectedMessages(messages, mode, projectName, dataToolIds, reportPeriod)
-    finalMessages = trimContext(finalMessages, model)
+    const url = resolveAIUrl(options, settings)
+    let finalMessages = buildDataInjectedMessages(options.messages, options.mode, options.projectName, options.dataToolIds, options.reportPeriod)
+    finalMessages = trimContext(finalMessages, options.model)
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 60000)
     try {
-      const response = await fetch(url, {
+      const response = await requestFetch(url, {
         method: 'POST',
         signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({ model, messages: finalMessages, stream: false, temperature: 0.7, max_tokens: 4096 }),
+        body: JSON.stringify({ model: options.model, messages: finalMessages, stream: false, temperature: 0.4, max_tokens: 8192 }),
       })
       clearTimeout(timeout)
 
@@ -455,7 +488,9 @@ ${dataContext}
 
   // 获取 AI 模型列表（调用各服务商的 /models 接口）
   ipcMain.handle('ai:listModels', safeCall(async (_, { baseUrl, apiKey }) => {
-    if (!apiKey) return { success: false, error: 'API Key 未填写' }
+    const savedApiKey = getSettings().apiKey
+    const effectiveApiKey = apiKey || (typeof savedApiKey === 'string' ? savedApiKey : '')
+    if (!effectiveApiKey) return { success: false, error: 'API Key 未配置' }
     if (!baseUrl) return { success: false, error: 'API 地址未填写' }
 
     // 构造 /models 请求地址
@@ -470,10 +505,10 @@ ${dataContext}
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 15000)
     try {
-      const response = await fetch(modelUrl, {
+      const response = await requestFetch(modelUrl, {
         signal: controller.signal,
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${effectiveApiKey}`,
           'Accept': 'application/json',
         },
       })
@@ -502,6 +537,39 @@ ${dataContext}
         return { success: false, error: '请求超时，请检查 API 地址是否正确' }
       }
       return { success: false, error: e.message || '网络请求失败' }
+    }
+  }))
+
+  ipcMain.handle('ai:health', safeCall(async (_, options = {}) => {
+    const settings = getSettings()
+    const apiKey = settings.apiKey
+    if (!apiKey || typeof apiKey !== 'string') return { success: false, error: 'API Key 未配置或无法解密' }
+    const provider = options.provider || settings.aiProvider
+    const baseUrl = normalizeAIBaseUrl(provider, options.baseUrl || settings.baseUrl)
+    const model = options.model || settings.model
+    if (!baseUrl) return { success: false, error: 'API 地址未配置' }
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    try {
+      const response = await requestFetch(`${baseUrl}/models`, {
+        signal: controller.signal,
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Accept': 'application/json' },
+      })
+      if (response.status === 404 || response.status === 405) {
+        return { success: true, provider, baseUrl, model, models: [], warning: '服务商不支持模型列表检查' }
+      }
+      if (!response.ok) return { success: false, error: `AI 服务检查失败 (${response.status})` }
+      const data = await response.json()
+      const models = Array.isArray(data.data) ? data.data.map(item => item.id).filter(Boolean) : []
+      if (models.length && model && !models.includes(model)) {
+        return { success: false, error: `当前模型“${model}”不在服务商可用列表中`, models }
+      }
+      return { success: true, provider, baseUrl, model, models }
+    } catch (error) {
+      return { success: false, error: error.name === 'AbortError' ? 'AI 服务健康检查超时' : (error.message || 'AI 服务无法连接') }
+    } finally {
+      clearTimeout(timeout)
     }
   }))
 }

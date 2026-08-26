@@ -67,6 +67,37 @@ git push origin v1.0.2
 
 ---
 
+## 📦 产物说明
+
+下载产物（GitHub Release 或 Actions Artifacts）解压得到：
+
+```
+项目文档管理系统 Setup X.Y.Z.exe   # NSIS 安装包（推荐用户用这个）
+项目文档管理系统 X.Y.Z.exe          # Portable 绿色版（双击即用）
+latest.yml                         # 自动升级用，暂未启用
+```
+
+### Windows 安装验收清单
+
+把 EXE 拷到 Windows 机器检查：
+
+| 检查项 | 通过标准 |
+|--------|---------|
+| 双击安装包 | 弹出 NSIS 安装向导 |
+| 安装到默认路径 | `C:\Users\<用户>\AppData\Local\Programs\项目文档管理系统\` |
+| 启动应用 | 主窗口正常打开 |
+| better-sqlite3 加载 | 创建/打开项目文件夹，数据库读写无报错 |
+| 卸载 | 控制面板能找到并正常卸载 |
+
+### 常见问题
+
+- **CI 跑 `electron-rebuild` 失败**：Windows runner 默认装好 Python + VS Build Tools 2022，通常无问题。失败看 Actions 日志。
+- **安装时提示"Windows 已保护你的电脑"**：未签名 EXE 被 SmartScreen 拦截，点"更多信息 → 仍要运行"。长期方案是申请代码签名证书（EV 证书最佳）。
+- **想出 macOS / Linux 包**：在 `.github/workflows/build-windows.yml` 基础上加 `macos-latest` / `ubuntu-latest` runner。
+- **想启用自动升级**：把 `--publish never` 改成 `--publish always`，配 `generic` provider，客户端启动时检测 `latest.yml`。
+
+---
+
 ## ⚠️ 推错了怎么办
 
 | 场景 | 救法 |

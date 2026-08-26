@@ -26,7 +26,7 @@ async function main() {
   assert.equal(created.success, true)
 
   const replacement = path.join(runtimeDir, '项目周报模板.docx')
-  fs.copyFileSync(path.resolve('templates/02_监理周报/监理周报模版.docx'), replacement)
+  fs.copyFileSync(path.resolve('templates/通用/02_监理周报/监理周报模版.docx'), replacement)
   const assigned = await call('fs:assignProjectTemplate', created.path, '监理周报', replacement)
   assert.equal(assigned.success, true, assigned.error)
   assert.ok(fs.existsSync(assigned.path))

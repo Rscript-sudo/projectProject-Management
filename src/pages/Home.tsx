@@ -11,7 +11,8 @@ import {
   LinkOutlined,
   EditOutlined,
   FileSearchOutlined,
-  BookOutlined,
+  DatabaseOutlined,
+  InboxOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
@@ -22,6 +23,7 @@ import DataBoard from '../components/DataBoard'
 import type { DirNode, ScanCompletenessResult } from '../vite-env'
 import { useElectronAPI } from '../hooks/useElectronAPI'
 import { PROJECT_TYPE_OPTIONS, getProjectTypeProfile, normalizeTags } from '../shared/projectProfile.mjs'
+import { useSettingsStore } from '../stores/useSettingsStore'
 
 const { Text, Title } = Typography
 
@@ -29,6 +31,12 @@ export default function Home() {
   const navigate = useNavigate()
   const { projects, loadProjects, setCurrentProject, projectRoot, createProject } = useAppStore()
   const { modal, message } = App.useApp()
+  // v1.x：自定义专业 + 内置 = 下拉数据源
+  const customProjectTypes = useSettingsStore(s => s.customProjectTypes)
+  const allProjectTypeOptions = [
+    ...PROJECT_TYPE_OPTIONS.filter(item => item.code !== 'unclassified'),
+    ...customProjectTypes,
+  ]
 
   // 3-panel layout
   const [treeWidth, setTreeWidth] = useState(260)
@@ -432,13 +440,6 @@ export default function Home() {
               刷新
             </Button>
             <Button
-              size="small"
-              icon={<BookOutlined />}
-              onClick={() => document.querySelector<HTMLButtonElement>('[title="模板中心"]')?.click()}
-            >
-              模板中心
-            </Button>
-            <Button
               type="primary"
               size="small"
               icon={<PlusOutlined />}
@@ -641,7 +642,7 @@ export default function Home() {
                       <Select
                         size="small"
                         style={{ width: '100%' }}
-                        options={PROJECT_TYPE_OPTIONS.map(item => ({ value: item.label, label: item.label }))}
+                        options={allProjectTypeOptions.map(item => ({ value: item.label, label: item.label }))}
                       />
                     </Form.Item>
                     <Form.Item name="projectTags" label="专业标签" style={{ marginBottom: 8 }}>
@@ -667,6 +668,8 @@ export default function Home() {
                     <Space size={2}>
                       <Button type="text" size="small" icon={<FolderOpenOutlined />} onClick={() => window.electronAPI?.openPath(selectedProject.path)} title="打开文件夹" style={{ fontSize: 11 }} />
                       <Button type="text" size="small" icon={<FileSearchOutlined />} onClick={handleScanCompleteness} loading={scanning} title="资料检查" style={{ fontSize: 11 }} />
+                      <Button type="text" size="small" icon={<DatabaseOutlined />} onClick={() => navigate(`/project/${encodeURIComponent(selectedProject.name)}/archive`)} title="项目档案" style={{ fontSize: 11 }} />
+                      <Button type="text" size="small" icon={<InboxOutlined />} onClick={() => navigate(`/project/${encodeURIComponent(selectedProject.name)}/delivery`)} title="导入与交付" style={{ fontSize: 11 }} />
                       <Button type="text" size="small" icon={<EditOutlined />} onClick={() => { configForm.setFieldsValue(projectConfig); setEditMode(true) }} style={{ fontSize: 11 }} />
                     </Space>
                   </div>
@@ -733,7 +736,7 @@ export default function Home() {
               style={{ width: '100%' }}
               size="small"
               placeholder="请选择项目类型"
-              options={PROJECT_TYPE_OPTIONS.filter(item => item.code !== 'unclassified').map(item => ({ value: item.label, label: item.label }))}
+              options={allProjectTypeOptions.map(item => ({ value: item.label, label: item.label }))}
             />
           </div>
           <div style={{ marginBottom: 12 }}>

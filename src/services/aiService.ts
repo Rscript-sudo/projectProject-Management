@@ -9,8 +9,9 @@
 // AI 生成前必须先识别项目类型，加载对应 SOP，禁止通用模板硬套
 // ============================================================
 
-import { getProjectTypeProfile, normalizeProjectType } from '../shared/projectProfile.mjs'
+import { getProjectTypeProfile, normalizeProjectType, getCustomProjectTypes, getAllProjectTypes } from '../shared/projectProfile.mjs'
 import { buildDocumentRulesInjection, normalizeDocumentRules } from '../shared/documentRules.mjs'
+import { resolveDocTypePromptForAny } from '../shared/docTypePrompts'
 
 type ProjectTypeKey = '土建' | '市政' | '房建' | '信息化' | '通信' | '电力' | '园林' | '钢结构' | '装饰' | '未分类'
 
@@ -106,8 +107,22 @@ function resolveProjectType(configuredType: string | undefined | null): ProjectT
   return route[normalizeProjectType(configuredType)] || '未分类'
 }
 
-function loadProjectTypeSOP(projectType: ProjectTypeKey): ProjectTypeSOP {
-  return PROJECT_TYPE_ROUTER[projectType] as ProjectTypeSOP
+function loadProjectTypeSOP(projectType: ProjectTypeKey | string): ProjectTypeSOP {
+  // 内置专业走硬编码表
+  const builtin = PROJECT_TYPE_ROUTER[projectType] as ProjectTypeSOP | undefined
+  if (builtin) return builtin
+
+  // 自定义专业走通用兜底 SOP（用 projectProfile.mjs 的 aliases）
+  const profile = getProjectTypeProfile(projectType)
+  const label = (profile && profile.label) || String(projectType)
+  return {
+    displayName: label,
+    sopFile: '',  // 自定义专业没有内置 sopFile，运行时走 userData/customSop/
+    keyWords: profile?.aliases || [],
+    enabledSections: [],
+    disabledSections: [],
+    minWordsByDocType: {},  // 自定义专业走 sopData.minWords 兜底（sop.mjs 注入）
+  }
 }
 
 function buildSOPInjection(projectType: ProjectTypeKey, docType: string): string {
@@ -603,8 +618,8 @@ export const providerConfigs: Record<AIProvider, { baseUrl: string; defaultModel
     name: 'DeepSeek',
   },
   minimax: {
-    baseUrl: 'https://api.minimax.chat/v1',
-    defaultModel: 'abab6.5s-chat',
+    baseUrl: 'https://api.minimaxi.com/v1',
+    defaultModel: 'MiniMax-M2.7',
     name: 'MiniMax',
   },
   glm: {
@@ -651,10 +666,73 @@ export async function callAI(
   return await window.electronAPI.callAI({
     url,
     apiKey,
+    provider,
+    baseUrl,
     model: model || config2.defaultModel,
     messages,
     ...extra,
   })
+}
+
+/**
+ * v1.x：AI 生成一个文种的专属扩写规则提示词。
+ * 用户粘贴一份示例文档全文，模型分析其段落结构/字段/篇幅，产出：
+ *   { systemTemplate, userTemplate, minWords }
+ * 复用 callAI 最简调用（非流式）。config 由调用方从 settings 构建（参考 ProjectView:705）。
+ */
+export interface GeneratedDocTypePrompt {
+  systemTemplate: string
+  userTemplate: string
+  minWords: number
+}
+
+export async function generateDocTypePrompt(
+  config: AIConfig,
+  docType: string,
+  exampleText: string,
+  fields?: string[],
+): Promise<{ success: boolean; prompt?: GeneratedDocTypePrompt; error?: string }> {
+  const fieldBlock = fields && fields.length
+    ? `模板已识别的字段（占位符）：${fields.join('、')}\n请确保 systemTemplate 里覆盖这些字段（【字段名】与占位符一一对应）。`
+    : ''
+  const exampleBlock = exampleText && exampleText.trim()
+    ? `以下是示例文档全文，供分析文档结构/段落/篇幅：\n\n${exampleText.slice(0, 8000)}`
+    : ''
+
+  const systemMsg = `你是一名专业的工程监理文档提示词工程师。用户会给你一个「${docType}」文种的模板（含已识别的字段清单），并可能附一份真实示例文档。
+你的任务：分析模板字段与文档结构，产出一套可供 AI 扩写引擎使用的「专属提示词」，让 AI 能照着同样结构/字段生成同类文档。
+
+请严格输出一个 JSON 对象（不要 markdown、不要额外解释），格式：
+{
+  "systemTemplate": "给 AI 的系统侧提示词。要包含：①本文种的用途与身份定位 ②必须输出的结构化字段（【字段名】列表）与各字段说明（覆盖所有已识别字段） ③文档结构/段落组织要求（几段、顺序）④篇幅要求 ⑤专业书面用语要求。用第二人称“你”写给 AI。不要写具体的项目名称/时间/人名（这些由扩写时的项目画像填充）。",
+  "userTemplate": "给用户的用户侧要求模板，包含【任务】和【需求】两段，把用户输入作为需求传入。",
+  "minWords": 字数下限（整数，根据模板/示例篇幅估一个合理值，如 500/800/1000）
+}
+要求：
+- systemTemplate 里禁止编造具体时间/场景/人员/法规条款号（用 {{待补充：...}} 占位符保留位置，符合反编造铁律）
+- 字段名要能对上监理文档常见字段（事由/正文内容/依据/施工单位/监理意见 等），且必须覆盖输入里给出的全部字段
+- minWords 参考实际篇幅，不要过小`
+
+  const messages = [
+    { role: 'system', content: systemMsg },
+    { role: 'user', content: `文种：${docType}\n\n${fieldBlock}${fieldBlock && exampleBlock ? '\n\n' : ''}${exampleBlock}` },
+  ]
+
+  const result = await callAI(config, messages)
+  if (!result.success) return { success: false, error: result.error || 'AI 生成失败' }
+  const content = result.content || ''
+  try {
+    const json = JSON.parse(content.match(/\{[\s\S]*\}/)?.[0] || '{}')
+    const prompt: GeneratedDocTypePrompt = {
+      systemTemplate: String(json.systemTemplate || '').trim(),
+      userTemplate: String(json.userTemplate || '').trim(),
+      minWords: Number(json.minWords) || 600,
+    }
+    if (!prompt.systemTemplate) return { success: false, error: 'AI 未返回有效的 systemTemplate' }
+    return { success: true, prompt }
+  } catch (e) {
+    return { success: false, error: 'AI 返回无法解析的 JSON：' + String(e) }
+  }
 }
 
 // 从用户输入识别文档类型
@@ -1285,6 +1363,173 @@ function getProcedureMapText(projectType?: string): string {
   ).join('\n') : '  - 未设置专业工序映射：仅依据项目标签、项目特点和用户提供的事实撰写。'
 }
 
+// ============================================================
+// v1.x 自定义文种支持（2026-08-19）
+// ============================================================
+// 用户在 Settings → 文种类型加的 docType 走通用骨架（不进入 27 个内置 case）。
+// 反编造 7 层防线仍全额生效（composeSystem 会拼进去）。
+//
+// 数据契约：settings.json.customDocTypes = Array<{code, label, fileCode, projectType, minWords, inStructuredWhitelist}>
+// - docType 可以是中文 label（如"监理月报附表"）或英文 code（如"monthly_report_appendix"）
+// - 匹配顺序：内置 27 个 label → customDocTypes.label → customDocTypes.code
+
+interface CustomDocType {
+  code: string
+  label: string
+  fileCode: string
+  projectType: string | null
+  minWords: number
+  inStructuredWhitelist: boolean
+  hasCustomSop: boolean
+}
+
+/**
+ * 从 settings.json 注入的自定义文种缓存
+ * 主进程 settings 变更后会调 setCustomDocTypes() 更新
+ */
+let customDocTypesCache: CustomDocType[] = []
+
+export function setCustomDocTypes(list: CustomDocType[] | null | undefined) {
+  if (!Array.isArray(list)) {
+    customDocTypesCache = []
+    return
+  }
+  customDocTypesCache = list.filter(item =>
+    item && typeof item === 'object' && item.code && item.label && item.fileCode
+  )
+}
+
+export function getCustomDocTypes(): CustomDocType[] {
+  return customDocTypesCache
+}
+
+/** 匹配自定义文种（按 label 或 code）；不匹配返回 null */
+function matchCustomDocType(docType: string): CustomDocType | null {
+  if (!docType || customDocTypesCache.length === 0) return null
+  const found = customDocTypesCache.find(item =>
+    item.label === docType || item.code === docType
+  )
+  return found || null
+}
+
+/**
+ * v1.x：docType 扩写规则的用户覆盖缓存（来自 settings.json）
+ * 用户可在「设置 → 扩写规则」里改内置 prompt / 关掉全局规则 / 新增自定义文种扩写。
+ * 主进程 settings 变更后通过 useSettingsStore 调 setDocTypePromptsOverrides() 注入。
+ */
+type DocTypeOverride = Record<string, Partial<any>>
+let docTypePromptsOverridesCache: DocTypeOverride | null = null
+let globalRulesOverridesCache: Record<string, Partial<any>> | null = null
+
+export function setDocTypePromptsOverrides(
+  docTypeOverrides?: DocTypeOverride | null,
+  globalOverrides?: Record<string, Partial<any>> | null,
+) {
+  docTypePromptsOverridesCache = docTypeOverrides || null
+  globalRulesOverridesCache = globalOverrides || null
+}
+
+function getDocTypePromptOverrides(): { docTypes: DocTypeOverride | null; globalRules: Record<string, Partial<any>> | null } {
+  return {
+    docTypes: docTypePromptsOverridesCache,
+    globalRules: globalRulesOverridesCache,
+  }
+}
+
+/**
+ * v1.x：返回一个文种在覆盖缓存里的稳定 key。
+ * 内置文种 → 中文 label；自定义文种 → 其 code（覆盖层统一以 code 为 key 存储）。
+ */
+function resolvePromptKey(docType: string): string {
+  const custom = matchCustomDocType(docType)
+  return custom ? custom.code : docType
+}
+
+/**
+ * v1.x：该文种是否已有用户配置的专属提示词（内置或自定义）。
+ * 有则优先走专属提示词，自定义文种不再回退到通用骨架。
+ */
+function hasDocTypePromptOverride(docType: string): boolean {
+  const overrides = getDocTypePromptOverrides().docTypes
+  if (!overrides) return false
+  const key = resolvePromptKey(docType)
+  if (overrides[key]) return true
+  return !!overrides[docType]
+}
+
+/**
+ * 自定义文种的通用扩写 prompt（弱化版 — 不走任何 case 专属规则）
+ * 走通用骨架：项目事实合同 + 反编造 9 节铁律 + 三段划分 + 共享扩写 + 段落格式 + typeRules
+ * + SOP 注入（如果用户上传了）+ 字段契约
+ */
+function buildGenericDocPrompt(
+  customDoc: CustomDocType,
+  docType: string,
+  userInput: string,
+  projectInfo?: any,
+  sopData?: any,
+  templateFields: string[] = [],
+  extractedSubject?: string
+): { system: string; user: string } {
+  const profile = getProjectTypeProfile(projectInfo?.projectTypeCode || projectInfo?.projectType)
+  const minWords = customDoc.minWords || 600
+
+  const projectContext = projectInfo ? `
+【项目画像（唯一事实边界）】
+- 项目名称：${projectInfo.projectName}
+- 项目类型：${profile.label}（编码：${profile.code}）
+- 专业标签：${projectInfo.projectTags?.length ? projectInfo.projectTags.join('、') : '未填写'}
+- 项目特点/建设范围：${projectInfo.projectFeatures || '未填写'}
+- 当前阶段：${projectInfo.projectPhase || '未填写'}
+- 建设单位：${projectInfo.ownerUnit || '未配置（文书中留空）'}
+- 施工单位：${projectInfo.contractor || '未配置（文书中留空）'}
+- 监理单位：${projectInfo.supervisorUnit || '未配置（文书中留空）'}
+- 总监理工程师：${projectInfo.chiefEngineer || '未配置（文书中留空）'}
+` : ''
+
+  const sopInjection = sopData
+    ? buildSOPMaterialization(resolveProjectType(projectInfo?.projectTypeCode || projectInfo?.projectType), docType, sopData)
+    : ''
+
+  const templateContract = templateFields.length > 0
+    ? `【模板字段契约】本项目当前${docType}模板要求以下字段：${templateFields.map(f => `【${f}】`).join('、')}。
+必须逐项输出；字段无已核验数据时仅输出字段名并留空（例如【建设单位】），不得写"数据待核对"、undefined、模板符号，也不得自行补造事实。除这些字段外，不要新增会被模板忽略的结构化字段。`
+    : ''
+
+  const system = [
+    `【项目事实合同】只能把"项目画像、用户输入、已归档资料"当作事实来源。专业标签和项目特点未填写时，写"数据待核对"或提示补充；不得以其他专业的常识补造事实。只允许使用与项目类型、标签和建设范围相符的术语。`,
+    ANTI_FABRICATION_RULES,
+    THREE_SEGMENT_RULES,
+    COMMON_EXPANSION_RULES,
+    PARAGRAPH_FORMAT_RULES,
+    sopInjection,
+    `【自定义文种 — v1.x】
+文种名称：${customDoc.label}（编码：${customDoc.code}）
+文件编码：${customDoc.fileCode}
+字数下限：${minWords} 字（必须达到）
+${customDoc.projectType ? `关联专业：${customDoc.projectType}` : '通用文种（不绑定专业）'}
+
+【扩写要求】
+- 输出格式：先以【key】value 格式输出各字段，再在【正文内容】中输出完整正文。
+- 字段最少 2 个：①事由/标题 ②正文内容
+- 正文三个一级标题（"一、二、三、"），每标题下 2-3 条具体要求
+- 扩写三步法：拆分细化 → 场景化补充（不编造） → 专业表述
+- 禁止：直接复制用户口语输入、空话、整段一句话、信件语体`,
+    templateContract,
+  ].filter(Boolean).join('\n\n')
+
+  const user = `${projectContext}
+
+【任务】根据以下要点生成"${customDoc.label}"。
+
+【用户要点】
+${userInput}
+
+请以【key】value 格式输出各字段，并在【正文内容】中输出扩写后的正文（不少于 ${minWords} 字、三个一级标题完整扩写）。`
+
+  return { system, user }
+}
+
 // ===== 构建 AI 生成提示词（严格遵循监理业务技能规范） =====
 
 export function buildDocPrompt(docType: string, userInput: string, projectInfo?: {
@@ -1306,6 +1551,18 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
   globalForbiddenTerms: string[]
   minWords: number
 }, templateFields: string[] = []): { system: string; user: string } {
+
+  // ============================================================
+  // v1.x 自定义文种短路（2026-08-19）
+  // 用户在 Settings → 文种类型 加的 docType 走 genericPrompt()，
+  // 不进入下面 27 个内置 case。反编造 7 层防线仍生效（composeSystem 会拼进去）。
+  // ============================================================
+  const customDocTypeMatch = matchCustomDocType(docType)
+  // v1.x：自定义文种若已配专属提示词 → 走统一查表（下方 resolveDocTypePromptForAny 会命中）；
+  // 未配专属提示词才回退到通用骨架。
+  if (customDocTypeMatch && !hasDocTypePromptOverride(docType)) {
+    return buildGenericDocPrompt(customDocTypeMatch, docType, userInput, projectInfo, sopData, templateFields, extractedSubject)
+  }
 
   // 事由字段格式要求 — AI 应归纳总结，不得照抄原始输入
   // v1.2.2（2026-06-28）：明示禁止带"事由："等前缀，模板渲染时会自带"事由："字样
@@ -1374,13 +1631,19 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
       proofExample?: keyof typeof PROOF_EXAMPLES  // 合格扩写示例（节假日/整改/联系单）
       regulationHints?: boolean // 法规关键词提示（整改通知书）
     },
+    runtimeGlobalRules?: Record<string, { enabled: boolean; content: string }>,
   ): string => {
+    const globalRuleContent = (key: string, fallback: string) => {
+      const rule = runtimeGlobalRules?.[key]
+      if (!rule) return fallback
+      return rule.enabled === false ? '' : rule.content
+    }
     const parts: string[] = [
-      `【项目事实合同】只能把“项目画像、用户输入、已归档资料”当作事实来源。专业标签和项目特点未填写时，写“数据待核对”或提示补充；不得以土建、通信、电力等其他专业的常识补造事实。只允许使用与项目类型、标签和建设范围相符的术语。${profile.forbiddenTerms.length ? `严禁出现：${profile.forbiddenTerms.join('、')}。` : ''}`,
-      ANTI_FABRICATION_RULES,
-      THREE_SEGMENT_RULES,  // v1.2.0 新增：三段划分硬约束（模式 B 全员适用）
-      COMMON_EXPANSION_RULES,
-      PARAGRAPH_FORMAT_RULES,
+      `【项目事实合同】只能把“项目画像、用户输入、已归档资料”当作事实来源。专业标签和项目特点未填写时，写“数据待核对”或提示补充；不得以土建、通信、电力等其他专业的常识补造事实。只允许使用与项目类型、标签和建设范围相符的术语。`,
+      globalRuleContent('ANTI_FABRICATION_RULES', ANTI_FABRICATION_RULES),
+      globalRuleContent('THREE_SEGMENT_RULES', THREE_SEGMENT_RULES),
+      globalRuleContent('COMMON_EXPANSION_RULES', COMMON_EXPANSION_RULES),
+      globalRuleContent('PARAGRAPH_FORMAT_RULES', PARAGRAPH_FORMAT_RULES),
       documentRulesInjection,
       sopInjection,  // v1.2.0 新增：项目类型 SOP 强制注入
       clarificationPrompt,  // v1.2.0 新增：用户输入反问机制
@@ -1397,6 +1660,44 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
     return parts.filter(Boolean).join('\n\n')
   }
 
+  // v1.x：先尝试从配置查表（运行时可被用户覆盖的扩写规则）
+  // 用 resolveDocTypePromptForAny：内置文种（默认+覆盖）与自定义文种（仅覆盖）统一命中。
+  const overrides = getDocTypePromptOverrides()
+  const now = new Date()
+  const day = now.getDay() || 7
+  const weekStart = new Date(now); weekStart.setDate(now.getDate() - day + 1)
+  const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6)
+  const yearStart = new Date(now.getFullYear(), 0, 1)
+  const fmtDate = (date: Date) => date.toISOString().slice(0, 10)
+  const runtimePromptVars = {
+    projectContext,
+    userInput,
+    dateRange: `${fmtDate(weekStart)} 至 ${fmtDate(weekEnd)}`,
+    weekNum: String(Math.ceil(((now.getTime() - yearStart.getTime()) / 86400000 + yearStart.getDay() + 1) / 7)),
+    projectTypeName: profile.label,
+    procMapText: getProcedureMapText(projectInfo?.projectTypeCode || projectInfo?.projectType),
+    typeName: docType,
+  }
+  const resolved = resolveDocTypePromptForAny(
+    resolvePromptKey(docType),
+    overrides.docTypes || undefined,
+    overrides.globalRules || undefined,
+    runtimePromptVars,
+  )
+  if (resolved.prompt) {
+    const cfg = resolved.prompt
+    const extras = cfg.extras || {}
+    return {
+      system: composeSystem(cfg.systemTemplate, {
+        decisionTree: extras.decisionTree,
+        proofExample: extras.proofExample as any,
+        regulationHints: extras.regulationHints,
+      }, resolved.globalRules),
+      user: cfg.userTemplate,
+    }
+  }
+  // 配置里没有 → 走老 switch case（兜底）
+  // eslint-disable-next-line no-fallthrough
   switch (docType) {
     // ====================================================================
     // 模式A — 监理日志
@@ -1961,7 +2262,7 @@ ${userInput}
 
     // ====================================================================
     // 模式B — 监理规划/细则编制
-    // 复用 templates/21_监理规划/ 5 个模板
+    // 复用 templates/通用/21_监理规划/ 5 个模板
     // ====================================================================
     case '监理规划': {
       const isDetailed = userInput.includes('细则')

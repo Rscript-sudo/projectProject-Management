@@ -162,7 +162,7 @@ export interface ApprovalAction {
   action?: 'reject' | 'approve'
 }
 
-export type PaymentForm = Pick<PaymentRequest, 'period' | 'amount' | 'amount_upper' | 'description' | 'related_nodes' | 'status'>
+export type PaymentForm = Pick<PaymentRequest, 'period' | 'amount' | 'amount_upper' | 'description' | 'related_nodes' | 'status'> & { contract_id?: number }
 
 export interface PaymentSummary {
   contractAmount: number

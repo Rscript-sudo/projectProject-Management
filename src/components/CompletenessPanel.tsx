@@ -1,4 +1,4 @@
-import { Button, Collapse, Badge, Tooltip, Progress, Typography, Alert } from 'antd'
+import { Button, Collapse, Badge, Tooltip, Progress, Typography, Alert, List, Space, Tag, App } from 'antd'
 import {
   CheckCircleFilled,
   WarningFilled,
@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons'
 import React, { useState, useEffect, useMemo } from 'react'
 import type { ScanCompletenessResult, PhaseGroup, DocTypeStatus } from '../vite-env'
+import { useNavigate } from 'react-router-dom'
 
 const { Text } = Typography
 
@@ -95,7 +96,9 @@ interface CompletenessPanelProps {
 }
 
 export default function CompletenessPanel({ result, onCreateDoc }: CompletenessPanelProps) {
-  const { phases = [], totalTypes = 0, completeTypes = 0, totalFiles = 0 } = result
+  const navigate = useNavigate()
+  const { message } = App.useApp()
+  const { phases = [], totalTypes = 0, completeTypes = 0, totalFiles = 0, issues = [], issueSummary } = result
   const pct = totalTypes > 0 ? Math.round((completeTypes / totalTypes) * 100) : 0
 
   // 默认展开所有阶段
@@ -147,6 +150,35 @@ export default function CompletenessPanel({ result, onCreateDoc }: CompletenessP
     return tips
   }, [phases])
 
+  const openIssue = (item: any) => {
+    if (item.entityType === 'document') { onCreateDoc(item.detail?.docType || '通用文档'); return }
+    const route = ['hazard', 'correspondence', 'inspection'].includes(item.entityType) ? 'inspection'
+      : ['contract', 'change_order', 'claim'].includes(item.entityType) ? 'contract'
+        : item.entityType === 'payment_request' ? 'payment'
+          : item.entityType === 'progress_node' ? 'progress' : ''
+    if (route) navigate(`/project/${encodeURIComponent(result.projectName)}/${route}?focus=${encodeURIComponent(item.entityId || '')}`)
+  }
+  const issueGroups = issues.reduce((groups: Record<string, any[]>, item: any) => {
+    if (!groups[item.category]) groups[item.category] = []
+    groups[item.category].push(item)
+    return groups
+  }, {})
+  const issueItems = Object.entries(issueGroups).map(([category, rows]) => ({
+    key: category,
+    label: <Space><Text strong>{category}</Text><Badge count={rows.length} /></Space>,
+    children: <List size="small" dataSource={rows} renderItem={(item: any) => (
+      <List.Item actions={[<Button key="open" size="small" type="link" onClick={() => openIssue(item)}>处理</Button>]}>
+        <Space><Tag color={item.severity === 'error' ? 'red' : 'orange'}>{item.severity === 'error' ? '错误' : '提醒'}</Tag><Text style={{ fontSize: 12 }}>{item.message}</Text></Space>
+      </List.Item>
+    )} />,
+  }))
+  const exportReport = async (mode: 'project' | 'delivery' | 'monthly') => {
+    const exported = await window.electronAPI.exportCompletenessReport(result.projectPath, mode)
+    if (!exported.success || !exported.path) { message.error(exported.error || '导出失败'); return }
+    message.success(`已生成报告，共 ${exported.count || 0} 项`)
+    await window.electronAPI.openFile(exported.path)
+  }
+
   return (
     <div style={{ marginTop: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -168,6 +200,19 @@ export default function CompletenessPanel({ result, onCreateDoc }: CompletenessP
       <div style={{ fontSize: 11, color: '#999', marginBottom: 10 }}>
         共 {totalFiles} 个文件，{completeTypes}/{totalTypes} 种资料已完善
       </div>
+
+      {issues.length > 0 && <Alert
+        type={issueSummary?.error ? 'error' : 'warning'}
+        showIcon
+        message={`业务检查：${issueSummary?.error || 0} 项错误，${issueSummary?.warning || 0} 项提醒`}
+        description={<Collapse ghost size="small" items={issueItems} />}
+        style={{ marginBottom: 12 }}
+      />}
+      <Space wrap size={4} style={{ marginBottom: 12 }}>
+        <Button size="small" onClick={() => exportReport('project')}>项目问题清单</Button>
+        <Button size="small" onClick={() => exportReport('delivery')}>竣工缺件清单</Button>
+        <Button size="small" onClick={() => exportReport('monthly')}>月报生成前校验</Button>
+      </Space>
 
       {/* 智能建议 */}
       {suggestions.length > 0 && (

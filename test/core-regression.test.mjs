@@ -9,8 +9,9 @@ import { resolveAvailableFileName } from '../electron/shared/fileNameCollision.m
 import { getDocsFingerprint } from '../electron/shared/searchCache.mjs'
 import { countEffectiveWords, getMinWordCount } from '../electron/ipc/docValidation.mjs'
 import { postProcessFabricationGuard, postProcessTimeFields } from '../electron/shared/postProcess.mjs'
-import { buildPlaceholderData, sanitizeFieldValue, sanitizeForbiddenTerms, sanitizeLetterStyle } from '../electron/templateService.mjs'
+import { buildPlaceholderData, sanitizeFieldValue, sanitizeLetterStyle } from '../electron/templateService.mjs'
 import { computeMonthlyComparison } from '../electron/shared/progressAnalysis.mjs'
+import { stripThinkingContent } from '../src/shared/aiOutput.mjs'
 
 const tempDirs = []
 function makeTempDir() {
@@ -20,6 +21,12 @@ function makeTempDir() {
 }
 afterEach(() => {
   while (tempDirs.length) fs.rmSync(tempDirs.pop(), { recursive: true, force: true })
+})
+
+test('AI 助手隐藏完整和流式未完成的思考内容', () => {
+  assert.equal(stripThinkingContent('<think>内部推理</think>最终回答'), '最终回答')
+  assert.equal(stripThinkingContent('<analysis>正在分析'), '')
+  assert.equal(stripThinkingContent('结论先行\n<think>后续内部推理'), '结论先行\n')
 })
 
 test('路径校验允许临时目录中的新文件', () => {
@@ -120,9 +127,7 @@ test('字段清洗移除重复前缀和冒号', () => {
   assert.equal(sanitizeFieldValue('事由：：关于机房整改'), '关于机房整改')
 })
 
-test('信息化项目术语守门员标记土建词', () => {
-  assert.match(sanitizeForbiddenTerms('现场塔吊作业', '信息化'), /\{\{待替换：塔吊（信息化项目禁用）\}\}/)
-})
+// v1.x：禁用术语机制已移除，不再有"信息化项目术语守门员"测试
 
 test('信件语体被标记为待清理', () => {
   assert.match(sanitizeLetterStyle('尊敬的建设单位：\n请处理。\n此致敬礼'), /\{\{待清理：信件语体/)

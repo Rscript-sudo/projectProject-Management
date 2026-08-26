@@ -1,9 +1,11 @@
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 const api = {
   getRoot: () => ipcRenderer.invoke('fs:getRoot'),
   selectDir: () => ipcRenderer.invoke('dialog:selectDir'),
   selectFiles: () => ipcRenderer.invoke('dialog:selectFiles'),
+  getPathForFile: (file) => webUtils.getPathForFile(file),
+  readClipboardText: () => ipcRenderer.invoke('shell:readClipboardText'),
   readFileContent: (filePath) => ipcRenderer.invoke('fs:readFileContent', filePath),
   getProjects: (rootPath) => ipcRenderer.invoke('fs:getProjects', rootPath),
   createProject: (rootPath, name, projectType, projectProfile) => ipcRenderer.invoke('fs:createProject', rootPath, name, projectType, projectProfile),
@@ -15,46 +17,66 @@ const api = {
   unbindProject: (projectPath) => ipcRenderer.invoke('fs:unbindProject', projectPath),
   saveDoc: (options) => ipcRenderer.invoke('fs:saveDoc', options),
   callAI: (options) => ipcRenderer.invoke('ai:call', options),
+  recognizeImages: (options) => ipcRenderer.invoke('photo:recognizeImages', options),
   listModels: (options) => ipcRenderer.invoke('ai:listModels', options),
+  checkAIHealth: (options) => ipcRenderer.invoke('ai:health', options),
+  getModelCapabilities: (model) => ipcRenderer.invoke('ai:modelCapabilities', model),
+  routeModel: (candidates, requirements) => ipcRenderer.invoke('ai:routeModel', candidates, requirements),
+  createOperation: (input) => ipcRenderer.invoke('operations:create', input),
+  updateOperation: (id, patch) => ipcRenderer.invoke('operations:update', id, patch),
+  cancelOperation: (id) => ipcRenderer.invoke('operations:cancel', id),
+  retryOperation: (id) => ipcRenderer.invoke('operations:retry', id),
+  appendDiagnostic: (input) => ipcRenderer.invoke('operations:diagnostic', input),
+  listOperations: (filters) => ipcRenderer.invoke('operations:list', filters),
+  clearFinishedOperations: () => ipcRenderer.invoke('operations:clearFinished'),
+  scoreDocumentQuality: (docType, content) => ipcRenderer.invoke('doc:scoreQuality', docType, content),
+  auditDocumentVisual: (filePath) => ipcRenderer.invoke('doc:visualAudit', filePath),
+  auditTemplate: (filePath) => ipcRenderer.invoke('template:audit', filePath),
+  createProjectBackup: (projectPath) => ipcRenderer.invoke('project:createBackup', projectPath),
+  listProjectBackups: (projectPath) => ipcRenderer.invoke('project:listBackups', projectPath),
+  restoreProjectBackup: (projectPath, backupPath) => ipcRenderer.invoke('project:restoreBackup', projectPath, backupPath),
   callAIStream: (options) => ipcRenderer.invoke('ai:stream', options),
   abortAIStream: (requestId) => ipcRenderer.send(`ai:abort:${requestId}`),
   // v1.2.1 P0 修复：流式 listener Set 去重（防 HMR 重复添加）
   // channel 名仍用全局 ai:stream:chunk（带 requestId 字段），callback 内部用 requestId 过滤
   // 旧实现：每次组件挂载 addListener 不去重 → 同一个 chunk 被 N 个 callback 处理
-  _streamListeners: new Set(),
+  _streamChunkListeners: new Map(),
+  _streamEndListeners: new Map(),
   onAIStreamChunk: (callback) => {
-    const listener = (_event, data) => callback(data)
-    if (api._streamListeners.has(listener)) {
-      // 已注册过同一个函数引用 → 跳过（防 HMR 重复添加）
-      return () => api._streamListeners.delete(listener)
+    const existing = api._streamChunkListeners.get(callback)
+    if (existing) return () => {
+      ipcRenderer.removeListener('ai:stream:chunk', existing)
+      api._streamChunkListeners.delete(callback)
     }
-    api._streamListeners.add(listener)
+    const listener = (_event, data) => callback(data)
+    api._streamChunkListeners.set(callback, listener)
     ipcRenderer.on('ai:stream:chunk', listener)
     return () => {
-      api._streamListeners.delete(listener)
+      api._streamChunkListeners.delete(callback)
       ipcRenderer.removeListener('ai:stream:chunk', listener)
     }
   },
   onAIStreamEnd: (callback) => {
-    const listener = (_event, data) => callback(data)
-    if (api._streamListeners.has(listener)) {
-      return () => api._streamListeners.delete(listener)
+    const existing = api._streamEndListeners.get(callback)
+    if (existing) return () => {
+      ipcRenderer.removeListener('ai:stream:end', existing)
+      api._streamEndListeners.delete(callback)
     }
-    api._streamListeners.add(listener)
+    const listener = (_event, data) => callback(data)
+    api._streamEndListeners.set(callback, listener)
     ipcRenderer.on('ai:stream:end', listener)
     return () => {
-      api._streamListeners.delete(listener)
+      api._streamEndListeners.delete(callback)
       ipcRenderer.removeListener('ai:stream:end', listener)
     }
   },
   // v1.2.1 P0 修复：HMR 卸载 / 页面关闭时清空所有 stream listener
   // 防主进程 callback 引用泄漏 + 重复触发
   _removeAllStreamListeners: () => {
-    for (const l of api._streamListeners) {
-      ipcRenderer.removeListener('ai:stream:chunk', l)
-      ipcRenderer.removeListener('ai:stream:end', l)
-    }
-    api._streamListeners.clear()
+    for (const listener of api._streamChunkListeners.values()) ipcRenderer.removeListener('ai:stream:chunk', listener)
+    for (const listener of api._streamEndListeners.values()) ipcRenderer.removeListener('ai:stream:end', listener)
+    api._streamChunkListeners.clear()
+    api._streamEndListeners.clear()
   },
   inspectionSave: (options) => ipcRenderer.invoke('inspection:save', options),
   inspectionList: (options) => ipcRenderer.invoke('inspection:list', options),
@@ -72,6 +94,14 @@ const api = {
   progressDeviation: (projectPath) => ipcRenderer.invoke('progress:deviation', projectPath),
   parseMaterial: (options) => ipcRenderer.invoke('material:parse', options),
   importProgressMaterial: (options) => ipcRenderer.invoke('material:importProgress', options),
+  previewUnifiedImport: (options) => ipcRenderer.invoke('material:previewUnifiedImport', options),
+  commitUnifiedImport: (options) => ipcRenderer.invoke('material:commitUnifiedImport', options),
+  undoUnifiedImport: (options) => ipcRenderer.invoke('material:undoUnifiedImport', options),
+  batchGenerateDocuments: (options) => ipcRenderer.invoke('delivery:batchGenerate', options),
+  createDeliveryPackage: (options) => ipcRenderer.invoke('delivery:createPackage', options),
+  getPortfolioDashboard: () => ipcRenderer.invoke('dashboard:portfolio'),
+  releasePreflight: () => ipcRenderer.invoke('release:preflight'),
+  prepareUpdate: (options) => ipcRenderer.invoke('release:prepareUpdate', options),
 
   // 投资控制（B5）
   paymentList: (projectPath) => ipcRenderer.invoke('payment:list', projectPath),
@@ -100,6 +130,22 @@ const api = {
   photoAiArchive: (options) => ipcRenderer.invoke('photo:aiArchive', options),
 
   // 数据库 API
+  dbListMasterData: (projectName, entityType, options) => ipcRenderer.invoke('db:listMasterData', projectName, entityType, options),
+  dbSaveMasterData: (projectName, entityType, data, replacingId) => ipcRenderer.invoke('db:saveMasterData', projectName, entityType, data, replacingId),
+  dbRetireMasterData: (projectName, entityType, id) => ipcRenderer.invoke('db:retireMasterData', projectName, entityType, id),
+  dbSetProjectPhase: (projectName, phase, note, effectiveFrom) => ipcRenderer.invoke('db:setProjectPhase', projectName, phase, note, effectiveFrom),
+  dbGetProjectPhaseHistory: (projectName) => ipcRenderer.invoke('db:getProjectPhaseHistory', projectName),
+  dbListMasterChanges: (projectName, limit) => ipcRenderer.invoke('db:listMasterChanges', projectName, limit),
+  dbGetCurrentMasterSnapshot: (projectName) => ipcRenderer.invoke('db:getCurrentMasterSnapshot', projectName),
+  dbGetDocumentMasterSnapshot: (filePath) => ipcRenderer.invoke('db:getDocumentMasterSnapshot', filePath),
+  dbCreateBusinessRelation: (relation) => ipcRenderer.invoke('db:createBusinessRelation', relation),
+  dbListBusinessRelations: (projectName, entityType, entityId) => ipcRenderer.invoke('db:listBusinessRelations', projectName, entityType, entityId),
+  dbDeleteBusinessRelation: (projectName, relationId) => ipcRenderer.invoke('db:deleteBusinessRelation', projectName, relationId),
+  dbCountBusinessRelations: (projectName, entityType, entityId) => ipcRenderer.invoke('db:countBusinessRelations', projectName, entityType, entityId),
+  dbCreateEvidenceItem: (item) => ipcRenderer.invoke('db:createEvidenceItem', item),
+  dbListEvidenceItems: (projectName, options) => ipcRenderer.invoke('db:listEvidenceItems', projectName, options),
+  dbUpdateEvidenceStatus: (projectName, id, status, confirmedBy) => ipcRenderer.invoke('db:updateEvidenceStatus', projectName, id, status, confirmedBy),
+  dbValidateDocumentEvidence: (projectName, evidenceIds) => ipcRenderer.invoke('db:validateDocumentEvidence', projectName, evidenceIds),
   dbGetProjectMeta: (name) => ipcRenderer.invoke('db:getProjectMeta', name),
   dbUpsertProjectMeta: (meta) => ipcRenderer.invoke('db:upsertProjectMeta', meta),
   dbListProjects: () => ipcRenderer.invoke('db:listProjects'),
@@ -133,7 +179,6 @@ const api = {
   dbInsertSimpleLedger: (name, type, item) => ipcRenderer.invoke('db:insertSimpleLedger', name, type, item),
   dbLogAudit: (projectName, action, entityType, entityId, detail) => ipcRenderer.invoke('db:logAudit', projectName, action, entityType, entityId, detail),
   dbExport: () => ipcRenderer.invoke('db:export'),
-  readLedger: (projectPath, ledgerName) => ipcRenderer.invoke('fs:readLedger', projectPath, ledgerName),
   writeLedger: (projectPath, ledgerName, data) => ipcRenderer.invoke('fs:writeLedger', projectPath, ledgerName, data),
   openFile: (filePath) => ipcRenderer.invoke('shell:openFile', filePath),
   openPath: (dirPath) => ipcRenderer.invoke('shell:openPath', dirPath),
@@ -146,6 +191,12 @@ const api = {
   getProjectDataPath: (projectPath) => ipcRenderer.invoke('fs:getProjectDataPath', projectPath),
   readProjectConfig: (projectPath) => ipcRenderer.invoke('fs:readProjectConfig', projectPath),
   writeProjectConfig: (projectPath, config) => ipcRenderer.invoke('fs:writeProjectConfig', projectPath, config),
+  readProjectChatHistory: (projectPath) => ipcRenderer.invoke('fs:readProjectChatHistory', projectPath),
+  writeProjectChatHistory: (projectPath, messages) => ipcRenderer.invoke('fs:writeProjectChatHistory', projectPath, messages),
+  listChatSessions: (projectPath, query) => ipcRenderer.invoke('chat:listSessions', projectPath, query),
+  createChatSession: (projectPath, title) => ipcRenderer.invoke('chat:createSession', projectPath, title),
+  openChatSession: (projectPath, sessionId) => ipcRenderer.invoke('chat:openSession', projectPath, sessionId),
+  archiveChatSession: (projectPath, sessionId, archived) => ipcRenderer.invoke('chat:archiveSession', projectPath, sessionId, archived),
   getRuleCatalog: () => ipcRenderer.invoke('fs:getRuleCatalog'),
   saveProjectDocumentRules: (projectPath, documentRules) => ipcRenderer.invoke('fs:saveProjectDocumentRules', projectPath, documentRules),
   assignProjectTemplate: (projectPath, docType, sourcePath) => ipcRenderer.invoke('fs:assignProjectTemplate', projectPath, docType, sourcePath),
@@ -163,6 +214,7 @@ const api = {
   moveFile: (filePath, targetDir) => ipcRenderer.invoke('fs:moveFile', filePath, targetDir),
   copyPath: (path) => ipcRenderer.invoke('shell:copyPath', path),
   scanProjectCompleteness: (projectPath) => ipcRenderer.invoke('fs:scanProjectCompleteness', projectPath),
+  exportCompletenessReport: (projectPath, mode) => ipcRenderer.invoke('fs:exportCompletenessReport', projectPath, mode),
   scanAllProjectsCompleteness: (rootPath) => ipcRenderer.invoke('fs:scanAllProjectsCompleteness', rootPath),
   exportPDF: (options) => ipcRenderer.invoke('fs:exportPDF', options),
   previewNumber: (docType, projectName) => ipcRenderer.invoke('numbering:preview', docType, projectName),
@@ -179,6 +231,21 @@ const api = {
   searchRebuild: () => ipcRenderer.invoke('search:rebuild'),
   searchStatus: () => ipcRenderer.invoke('search:status'),
   readSop: (params) => ipcRenderer.invoke('sop:read', params),
+  uploadCustomSop: (params) => ipcRenderer.invoke('sop:uploadCustom', params),
+  removeCustomSop: (params) => ipcRenderer.invoke('sop:removeCustom', params),
+  listTemplatesByProjectType: (params) => ipcRenderer.invoke('template:listByProjectType', params),
+  getTemplateFields: (filePath) => ipcRenderer.invoke('template:getFields', { path: filePath }),
+  deleteLibraryTemplate: (id) => ipcRenderer.invoke('template:deleteLibrary', { id }),
+  updateLibraryTemplate: (payload) => ipcRenderer.invoke('template:updateLibrary', payload),
+  listCustomProjectTypes: () => ipcRenderer.invoke('settings:listCustomProjectTypes'),
+  listCustomDocTypes: () => ipcRenderer.invoke('settings:listCustomDocTypes'),
+  listDocTypePromptOverrides: () => ipcRenderer.invoke('settings:listDocTypePromptOverrides'),
+  // v1.x：settings 变更后主进程主动推送，自定义专业/文种注入 aiService 缓存
+  onCustomTypesChanged: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('settings:customTypesChanged', listener)
+    return () => ipcRenderer.removeListener('settings:customTypesChanged', listener)
+  },
   appInfo: () => ipcRenderer.invoke('app:getInfo'),
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
   downloadUpdate: (downloadUrl) => ipcRenderer.invoke('update:download', downloadUrl),

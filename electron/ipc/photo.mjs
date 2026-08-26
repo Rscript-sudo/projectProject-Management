@@ -9,6 +9,7 @@ import fs from 'fs'
 import { safeCall } from './safe.mjs'
 import { getSettings } from './shared.mjs'
 import * as repo from '../db/repo.mjs'
+import { getDb } from '../db/database.mjs'
 import { isPathSafe } from '../shared/pathSafety.mjs'
 import { resolveAvailableFileName } from '../shared/fileNameCollision.mjs'
 
@@ -66,12 +67,25 @@ function inferLocationFromPath(filePath, projectPath) {
 }
 
 /** 标准化文件名：YYYYMMDD_部位_描述_NNN.jpg */
-function generateStandardName(date, location, description, index) {
+function generateStandardName(date, location, description, index, extension = '.jpg') {
   const dateStr = date.replace(/-/g, '')
   const loc = location.replace(/[\/\\:*?"<>|]/g, '_').slice(0, 20)
   const desc = (description || '').replace(/[\/\\:*?"<>|]/g, '_').slice(0, 30)
   const idx = String(index).padStart(3, '0')
-  return `${dateStr}_${loc}_${desc}_${idx}.jpg`
+  const ext = IMAGE_EXTS.has(String(extension).toLowerCase()) ? String(extension).toLowerCase() : '.jpg'
+  return `${dateStr}_${loc}_${desc}_${idx}${ext}`
+}
+
+/** OpenAI 兼容图文接口使用的 data URL；过大或不兼容格式仅使用文件线索。 */
+function imageDataUrl(filePath) {
+  const ext = path.extname(filePath).toLowerCase()
+  const mime = ext === '.png' ? 'image/png'
+    : ext === '.webp' ? 'image/webp'
+      : ext === '.gif' ? 'image/gif'
+        : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+          : null
+  if (!mime || fs.statSync(filePath).size > 12 * 1024 * 1024) return null
+  return `data:${mime};base64,${fs.readFileSync(filePath).toString('base64')}`
 }
 
 export function register(ipcMain) {
@@ -106,9 +120,11 @@ export function register(ipcMain) {
 
   // 删除
   ipcMain.handle('photo:delete', safeCall((_, { id }) => {
-    const db = repo.getDb()
+    const db = getDb()
     const row = db.prepare('SELECT * FROM photo WHERE id = ?').get(id)
     if (!row) return { success: false }
+    const relationCount = repo.countBusinessRelations(row.project_name, 'photo', id)
+    if (relationCount > 0) return { success: false, error: `该照片存在 ${relationCount} 条业务关联，请先解除关联后再删除` }
     // v1.2.1 P0 修复：删前 isPathSafe 校验，防 photo:update 改 file_path 绕过
     if (row.file_path) {
       if (!isPathSafe(row.file_path)) {
@@ -124,7 +140,7 @@ export function register(ipcMain) {
 
   // 更新元数据
   ipcMain.handle('photo:update', safeCall((_, { id, updates }) => {
-    const db = repo.getDb()
+    const db = getDb()
     const allowed = ['location', 'tags', 'description', 'linked_hazard_id', 'linked_node_id']
     const fields = []
     const params = []
@@ -137,6 +153,15 @@ export function register(ipcMain) {
     if (!fields.length) return { success: false, error: '无可更新字段' }
     params.push(id)
     db.prepare(`UPDATE photo SET ${fields.join(', ')} WHERE id = ?`).run(...params)
+    const row = db.prepare('SELECT * FROM photo WHERE id = ?').get(id)
+    if (row && updates.linked_hazard_id) repo.createBusinessRelation({
+      project_name: row.project_name, source_type: 'photo', source_id: id,
+      target_type: 'hazard', target_id: updates.linked_hazard_id, relation_type: 'hazard_evidence',
+    })
+    if (row && updates.linked_node_id) repo.createBusinessRelation({
+      project_name: row.project_name, source_type: 'photo', source_id: id,
+      target_type: 'progress_node', target_id: updates.linked_node_id, relation_type: 'progress_evidence',
+    })
     return { success: true }
   }))
 
@@ -195,18 +220,16 @@ export function register(ipcMain) {
       }
     })
 
-    // 3. AI 批量分析（分批，每批最多 50 张）
-    const BATCH_SIZE = 50
+    // 3. AI 批量分析：文本和图片共用当前 API / 模型配置。
+    const settings = getSettings()
+    const selectedModel = aiConfig?.model || settings.model || ''
+    const BATCH_SIZE = 6
     const results = []
 
     for (let i = 0; i < fileInfos.length; i += BATCH_SIZE) {
       const batch = fileInfos.slice(i, i + BATCH_SIZE)
-      const namesText = batch.map((f, idx) =>
-        `  ${i + idx + 1}. 文件名="${f.name}"  路径线索="${f.locationHint}"  日期=${f.shootDate}`
-      ).join('\n')
-
       // 如果没有配置 AI（前端 hasApiKey=false 或显式禁用），用路径推断（降级方案）
-      const apiKey = aiConfig?.apiKey || getSettings().apiKey
+      const apiKey = aiConfig?.apiKey || settings.apiKey
       if (!apiKey) {
         for (const f of batch) {
           results.push({
@@ -220,11 +243,20 @@ export function register(ipcMain) {
         continue
       }
 
-      // 有 AI 配置：调用 LLM 分析文件名
+      // 有 AI 配置：使用当前模型识别真实图片内容。
       try {
-        const url = aiConfig.baseUrl
-          ? `${aiConfig.baseUrl}/chat/completions`
+        const baseUrl = aiConfig?.baseUrl || settings.baseUrl
+        const url = baseUrl
+          ? `${String(baseUrl).replace(/\/$/, '')}/chat/completions`
           : 'https://api.deepseek.com/chat/completions'
+        const userContent = [
+              { type: 'text', text: `请逐张识别以下 ${batch.length} 张工程现场图片，按图片前的序号返回结果。` },
+              ...batch.flatMap((f, idx) => {
+                const dataUrl = imageDataUrl(f.path)
+                const label = { type: 'text', text: `\n${idx + 1}. 文件名="${f.name}" 路径线索="${f.locationHint}" 日期=${f.shootDate}` }
+                return dataUrl ? [label, { type: 'image_url', image_url: { url: dataUrl, detail: 'low' } }] : [label]
+              }),
+            ]
 
         const resp = await fetch(url, {
           method: 'POST',
@@ -233,11 +265,11 @@ export function register(ipcMain) {
             'Authorization': `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
-            model: aiConfig.model || 'deepseek-chat',
+            model: selectedModel || 'deepseek-chat',
             messages: [
               {
                 role: 'system',
-                content: `你是工程现场照片管理助手。根据文件名和路径线索，推断每张照片的拍摄部位、描述和标签。
+                content: `你是工程现场图片识别与归档助手。有图片时必须以图像内容为主，结合文件名和路径线索，识别工程部位、工序或设备、现场状态、简短描述和标签。
 
 返回 JSON 数组，每个元素格式：
 {
@@ -248,11 +280,11 @@ export function register(ipcMain) {
 }
 
 要求：
-- 部位名称要有工程现场感，不要编造
-- 描述基于文件名中的线索合理推测
+- 不得凭空编造项目名、楼层、轴线、设备编号和隐患结论
+- 描述要包含图片中可见的主体和状态
 - 不确定的标注"待确认"`,
               },
-              { role: 'user', content: `请分析以下 ${batch.length} 张现场照片：\n${namesText}` },
+              { role: 'user', content: userContent },
             ],
             temperature: 0.3,
             max_tokens: 2000,
@@ -348,7 +380,7 @@ export function register(ipcMain) {
 
         group.forEach((file, idx) => {
           const ext = path.extname(file.srcPath) || '.jpg'
-          const newName = generateStandardName(file.shootDate, file.location, file.description, idx + 1)
+          const newName = generateStandardName(file.shootDate, file.location, file.description, idx + 1, ext)
           // v1.2.2 P0 修复：同名检测，每次基于"已占用全集"挑下一个空位
           //   v1.2.1 算法有 bug——子 agent 端到端测试发现第 3 次产 a-1-2.jpg
           //   根因：循环只检测 finalName，不看已尝试过的"a-1"族
@@ -388,6 +420,57 @@ export function register(ipcMain) {
       archived,
       months: Object.keys(byMonth),
       summary: `发现 ${allFiles.length} 张图片，已归档 ${archived} 张到 ${Object.keys(byMonth).length} 个月份目录`,
+      recognitionMode: '当前模型图片识别',
     }
+  }))
+
+  // AI 助手图片识别：只读取并分析，不移动、不重命名原文件。
+  ipcMain.handle('photo:recognizeImages', safeCall(async (_, { paths = [] } = {}) => {
+    const imagePaths = Array.from(new Set(paths))
+      .filter(fp => typeof fp === 'string' && fs.existsSync(fp) && IMAGE_EXTS.has(path.extname(fp).toLowerCase()))
+      .slice(0, 6)
+    if (imagePaths.length === 0) return { success: false, error: '没有可识别的图片文件' }
+
+    const settings = getSettings()
+    const apiKey = typeof settings.apiKey === 'string' ? settings.apiKey : ''
+    if (!apiKey) return { success: false, error: '请先在 AI 配置中设置 API Key' }
+    const recognitionModel = String(settings.model || '').trim()
+    if (!recognitionModel) return { success: false, error: '请先在 AI 配置中选择模型' }
+    const baseUrl = settings.baseUrl
+    if (!baseUrl) return { success: false, error: '图片模型 API 地址未配置' }
+
+    const content = [
+      { type: 'text', text: `请识别以下 ${imagePaths.length} 张工程现场图片。只描述图片中可见事实，不推测未显示的信息。` },
+      ...imagePaths.flatMap((fp, index) => {
+        const dataUrl = imageDataUrl(fp)
+        const label = { type: 'text', text: `\n图片${index + 1}：${path.basename(fp)}` }
+        return dataUrl ? [label, { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } }] : [label]
+      }),
+    ]
+    const response = await fetch(`${String(baseUrl).replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: recognitionModel,
+        messages: [
+          { role: 'system', content: `你是工程监理现场图片识别助手。逐张输出：可见部位或对象、施工或设备状态、可见问题、判断依据、需要用户补充的信息。严禁仅凭图片断定质量合格或违规，严禁编造时间、项目、楼层、人员、尺寸和规范条款。最后汇总可用于文档写作的客观事实。不要输出思考过程。` },
+          { role: 'user', content },
+        ],
+        temperature: 0.2,
+        max_tokens: 1800,
+      }),
+    })
+    if (!response.ok) {
+      let error = `图片识别失败 (${response.status})`
+      try { const data = await response.json(); error = data.error?.message || data.error || error } catch {}
+      return { success: false, error: `当前模型「${recognitionModel}」未能识别图片：${error}。请确认所选模型支持图片输入。` }
+    }
+    const data = await response.json()
+    const recognized = data.choices?.[0]?.message?.content || ''
+    if (!recognized) return { success: false, error: '图文模型未返回识别结果' }
+    if (/(未检测到|无法(?:查看|读取|识别)|不能(?:看到|访问)|仅收到).{0,18}(图片|图像|文件名)/i.test(recognized)) {
+      return { success: false, error: `图文模型「${recognitionModel}」没有实际读取图片。请检查模型是否支持 OpenAI 兼容的 image_url 输入。` }
+    }
+    return { success: true, content: recognized, model: recognitionModel }
   }))
 }

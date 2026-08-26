@@ -74,7 +74,9 @@ export function register(ipcMain) {
         existing = { records: [] }
       }
     }
-    existing.records.push(record)
+    const inspectionId = record.id || `inspection_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const storedRecord = { ...record, id: inspectionId, createdAt: record.createdAt || new Date().toISOString() }
+    existing.records.push(storedRecord)
     fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8')
 
     // 联动写入隐患表（B1 之后统一走 SQLite）
@@ -91,9 +93,16 @@ export function register(ipcMain) {
         description: issue.description || issue.label,
         severity: issue.severity || '一般',
         status: '待整改',
-        source: '巡检',
+        source: '巡检', source_ref: inspectionId,
       })
       hazardIds.push(hid)
+      repo.createBusinessRelation({
+        project_name: projectName,
+        source_type: 'inspection', source_id: inspectionId,
+        target_type: 'hazard', target_id: hid,
+        relation_type: 'inspection_finding',
+        metadata: { recordPath: filePath, date },
+      })
     }
 
     // 审计日志
@@ -101,7 +110,7 @@ export function register(ipcMain) {
       date: record.date, foundCount: hazardIds.length,
     })
 
-    return { success: true, recordPath: filePath, hazardIds, hazardCount: hazardIds.length }
+    return { success: true, inspectionId, recordPath: filePath, hazardIds, hazardCount: hazardIds.length }
   }))
 
   // 状态流转：标记整改中（生成整改通知后调用）

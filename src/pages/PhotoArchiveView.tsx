@@ -18,11 +18,13 @@ import {
   ArrowLeftOutlined, CameraOutlined, InboxOutlined, FolderOutlined,
   EnvironmentOutlined, TagsOutlined, LinkOutlined, DeleteOutlined,
   EditOutlined, EyeOutlined,
+  RobotOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useAppStore } from '../stores/useProjectStore'
 import { useElectronAPI } from '../hooks/useElectronAPI'
 import type { PhotoMeta, PhotoForm } from '../types'
+import BusinessRelationsPanel from '../components/BusinessRelationsPanel'
 
 const { Text, Title } = Typography
 const { Dragger } = Upload
@@ -43,6 +45,7 @@ export default function PhotoArchiveView() {
   const [activeLocation, setActiveLocation] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [aiOrganizing, setAiOrganizing] = useState(false)
   const [editing, setEditing] = useState<PhotoMeta | null>(null)
   const [editForm, setEditForm] = useState<PhotoForm>({ location: '', tags: '', description: '', shoot_date: '' })
   const [preview, setPreview] = useState<PhotoMeta | null>(null)
@@ -150,6 +153,22 @@ export default function PhotoArchiveView() {
     input.click()
   }
 
+  const handleAiOrganize = async () => {
+    const scanDir = await window.electronAPI.selectDir()
+    if (!scanDir) return
+    setAiOrganizing(true)
+    try {
+      const result = await window.electronAPI.photoAiArchive({ projectPath, scanDir })
+      if (!result.success) { message.error(result.error || '图片整理失败'); return }
+      message.success(`${result.recognitionMode || '智能识别'}：已整理 ${result.archived || 0}/${result.total || 0} 张图片`)
+      refresh()
+    } catch (error: any) {
+      message.error(error?.message || '图片整理失败')
+    } finally {
+      setAiOrganizing(false)
+    }
+  }
+
   const handleEdit = (photo: any) => {
     setEditing(photo)
     setEditForm({
@@ -181,7 +200,11 @@ export default function PhotoArchiveView() {
       content: `文件"${photo.file_name}"将从归档目录和数据库中删除。`,
       okType: 'danger',
       onOk: async () => {
-        await window.electronAPI.photoDelete({ id: photo.id })
+        const result = await window.electronAPI.photoDelete({ id: photo.id })
+        if (!result.success) {
+          message.error(result.error || '删除失败')
+          return Promise.reject(new Error(result.error || '删除失败'))
+        }
         message.success('已删除')
         refresh()
       },
@@ -199,6 +222,9 @@ export default function PhotoArchiveView() {
           </Title>
         </Space>
         <Space>
+          <Button icon={<RobotOutlined />} onClick={handleAiOrganize} loading={aiOrganizing}>
+            AI 识别整理
+          </Button>
           <Button type="primary" icon={<InboxOutlined />} onClick={handleUploadClick} loading={uploading}>
             上传照片
           </Button>
@@ -389,6 +415,9 @@ export default function PhotoArchiveView() {
               <div><strong>标签：</strong>{preview.tags || '-'}</div>
               <div><strong>描述：</strong>{preview.description || '-'}</div>
               <div><strong>路径：</strong>{preview.file_path}</div>
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <BusinessRelationsPanel projectName={projectName} entityType="photo" entityId={preview.id} />
             </div>
           </div>
         )}

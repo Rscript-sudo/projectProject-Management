@@ -1,0 +1,13 @@
+[
+  { "code": "DOC_MISSING", "category": "资料缺失", "severity": "warning", "scope": "document" },
+  { "code": "DATE_RANGE_INVALID", "category": "时间矛盾", "severity": "error", "scope": "record" },
+  { "code": "REVIEW_BEFORE_ISSUE", "category": "时间矛盾", "severity": "error", "scope": "correspondence" },
+  { "code": "NUMBER_DUPLICATE", "category": "编号异常", "severity": "error", "scope": "correspondence" },
+  { "code": "NUMBER_GAP", "category": "编号异常", "severity": "warning", "scope": "correspondence" },
+  { "code": "HAZARD_OVERDUE", "category": "业务逾期", "severity": "error", "scope": "hazard" },
+  { "code": "CORRESPONDENCE_OVERDUE", "category": "业务逾期", "severity": "error", "scope": "correspondence" },
+  { "code": "CONTRACT_EXPIRING", "category": "业务逾期", "severity": "warning", "scope": "contract" },
+  { "code": "PAYMENT_EXCEEDS_CONTRACT", "category": "金额异常", "severity": "error", "scope": "contract" },
+  { "code": "PAYMENT_CUMULATIVE_MISMATCH", "category": "金额异常", "severity": "error", "scope": "payment" },
+  { "code": "REPORT_SOURCE_MISSING", "category": "报告一致性", "severity": "warning", "scope": "report" }
+]

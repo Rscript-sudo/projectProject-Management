@@ -4,10 +4,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { parseMaterial } from '../electron/materialParser.mjs'
+import { loadXlsx } from '../electron/xlsxRuntime.mjs'
 
 test('Excel 进度表解析为可确认的进度节点并保留来源位置', async () => {
-  const xlsxModule = await import('xlsx')
-  const XLSX = xlsxModule.default || xlsxModule
+  const XLSX = await loadXlsx()
   const workbook = XLSX.utils.book_new()
   const sheet = XLSX.utils.aoa_to_sheet([
     ['任务名称', '计划开始', '计划结束', '实际开始', '实际结束', '完成率', '权重'],

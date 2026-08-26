@@ -2,6 +2,8 @@ import path from 'path'
 import fs from 'fs'
 import { safeCall } from './safe.mjs'
 import { readProjectIndex } from './shared.mjs'
+import { getDb } from '../db/database.mjs'
+import { evaluateBusinessCompleteness, summarizeIssues } from '../completenessEngine.mjs'
 
 const PHASE_NAMES = {
   '01_项目前期': '项目前期',
@@ -84,8 +86,7 @@ function scanDirForFiles(dirPath, maxDepth = 20) {
   }
 }
 
-export function register(ipcMain) {
-  ipcMain.handle('fs:scanProjectCompleteness', safeCall((_, projectPath) => {
+export function scanProjectCompleteness(projectPath) {
     const projectName = path.basename(projectPath)
     const phases = {}
 
@@ -126,8 +127,48 @@ export function register(ipcMain) {
     const totalTypes = phaseList.reduce((sum, p) => sum + p.totalCount, 0)
     const completeTypes = phaseList.reduce((sum, p) => sum + p.completeCount, 0)
 
-    return { projectPath, projectName, phases: phaseList, totalFiles, totalTypes, completeTypes }
-  }))
+    const documentIssues = phaseList.flatMap(group => group.items.filter(item => item.status !== 'complete').map(item => ({
+      code: 'DOC_MISSING', category: '资料缺失', severity: 'warning', scope: 'document',
+      message: `${item.phaseName}缺少${item.docType}`, entityType: 'document', entityId: item.directory,
+      detail: { directory: item.directory, docType: item.docType, status: item.status },
+    })))
+    const issues = [...documentIssues, ...evaluateBusinessCompleteness(getDb(), projectName)]
+    return { projectPath, projectName, phases: phaseList, totalFiles, totalTypes, completeTypes, issues, issueSummary: summarizeIssues(issues) }
+}
+
+function exportCompletenessReport(projectPath, mode = 'project') {
+  const result = scanProjectCompleteness(projectPath)
+  const now = new Date().toISOString()
+  const selected = mode === 'delivery'
+    ? result.issues.filter(item => item.category === '资料缺失')
+    : mode === 'monthly'
+      ? result.issues.filter(item => ['报告一致性', '金额异常', '业务逾期', '时间矛盾'].includes(item.category))
+      : result.issues
+  const titles = { project: '项目完整性问题清单', delivery: '竣工资料缺件清单', monthly: '月报生成前校验报告' }
+  const title = titles[mode] || titles.project
+  const lines = [
+    `# ${title}`,
+    '',
+    `- 项目：${result.projectName}`,
+    `- 检查时间：${now}`,
+    `- 错误：${selected.filter(item => item.severity === 'error').length}`,
+    `- 提醒：${selected.filter(item => item.severity === 'warning').length}`,
+    '',
+    '| 序号 | 类别 | 级别 | 问题 | 对象 |',
+    '|---:|---|---|---|---|',
+    ...selected.map((item, index) => `| ${index + 1} | ${item.category} | ${item.severity === 'error' ? '错误' : '提醒'} | ${String(item.message).replace(/\|/g, '｜')} | ${item.entityType}#${item.entityId || '-'} |`),
+  ]
+  const outputDir = path.join(projectPath, '项目数据', '完整性检查')
+  fs.mkdirSync(outputDir, { recursive: true })
+  const stamp = now.replace(/[-:T.Z]/g, '').slice(0, 14)
+  const outputPath = path.join(outputDir, `${title}_${stamp}.md`)
+  fs.writeFileSync(outputPath, lines.join('\n'), 'utf8')
+  return { success: true, path: outputPath, count: selected.length, mode }
+}
+
+export function register(ipcMain) {
+  ipcMain.handle('fs:scanProjectCompleteness', safeCall((_, projectPath) => scanProjectCompleteness(projectPath)))
+  ipcMain.handle('fs:exportCompletenessReport', safeCall((_, projectPath, mode) => exportCompletenessReport(projectPath, mode)))
 
   ipcMain.handle('fs:scanAllProjectsCompleteness', safeCall((_, rootPath) => {
     const index = readProjectIndex()
@@ -184,6 +225,11 @@ export function register(ipcMain) {
       const totalTypes = phaseList.reduce((sum, p) => sum + p.totalCount, 0)
       const completeTypes = phaseList.reduce((sum, p) => sum + p.completeCount, 0)
 
+      const documentIssues = phaseList.flatMap(group => group.items.filter(item => item.status !== 'complete').map(item => ({
+        code: 'DOC_MISSING', category: '资料缺失', severity: 'warning', scope: 'document', message: `${item.phaseName}缺少${item.docType}`,
+        entityType: 'document', entityId: item.directory, detail: { directory: item.directory, docType: item.docType, status: item.status },
+      })))
+      const issues = [...documentIssues, ...evaluateBusinessCompleteness(getDb(), projectName)]
       results.push({
         projectPath: proj.path,
         projectName,
@@ -192,6 +238,8 @@ export function register(ipcMain) {
         totalTypes,
         completeTypes,
         lastActivity: projectLatestMtime ? projectLatestMtime.toISOString() : null,
+        issues,
+        issueSummary: summarizeIssues(issues),
       })
     }
 

@@ -7,7 +7,7 @@ export const RULE_PACKS = [
   { id: 'no_empty_phrases', group: '通用底线', label: '拒绝套话', description: '不得只写“加强管理、做好工作”；每项要求应说明对象、动作和验收点。', default: true },
   { id: 'project_scope', group: '通用底线', label: '严格按项目专业', description: '只写项目类型、标签和建设范围内的工序、风险及控制点。', default: true },
 
-  { id: 'log_complete', group: '监理日志', label: '四段完整日志', description: '施工部位、当日监理、发现及处理、明日计划四段均有实质内容。', default: true, docTypes: ['监理日志'], minWords: 250 },
+  { id: 'log_complete', group: '监理日志', label: '四段完整日志', description: '施工部位、当日监理、发现及处理、明日计划四段均有实质内容。', default: true, docTypes: ['监理日志'], minWords: 200 },
   { id: 'log_quality_controls', group: '监理日志', label: '质量控制写具体', description: '至少写 2 项已实施的检查/旁站/复核点及其处理结果。', default: true, docTypes: ['监理日志'] },
   { id: 'log_safety_controls', group: '监理日志', label: '安全巡视有范围', description: '写明当日适用的作业区域、风险点和检查结果；无依据不虚构隐患。', default: true, docTypes: ['监理日志'] },
   { id: 'log_next_day', group: '监理日志', label: '次日计划可执行', description: '计划应对应下一道工序或待复核事项，不写泛泛“继续跟进”。', default: true, docTypes: ['监理日志'] },

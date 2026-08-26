@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { app } from 'electron'
-import { normalizeProjectProfile, findForbiddenTerms } from '../src/shared/projectProfile.mjs'
+import { normalizeProjectProfile } from '../src/shared/projectProfile.mjs'
 
 const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-profile-delivery-'))
 app.setPath('userData', path.join(runtimeDir, 'user-data'))
@@ -15,7 +15,8 @@ async function main() {
   const profile = normalizeProjectProfile({ projectType: '信息化工程', projectTags: ['机房', '网络'], projectFeatures: '数据中心机房改造，含核心交换和视频监控。' })
   assert.equal(profile.projectTypeCode, 'information')
   assert.deepEqual(profile.projectTags, ['机房', '网络'])
-  assert.deepEqual(findForbiddenTerms('机房塔吊作业', profile.projectTypeCode), ['塔吊'])
+  // v1.x：禁用术语机制已移除，内置专业 forbiddenTerms 恒为空
+  assert.equal((profile.forbiddenTerms || []).length, 0)
 
   await app.whenReady()
   const { registerAll } = await import('../electron/ipc/register.mjs')
@@ -39,12 +40,12 @@ async function main() {
   assert.equal(sop.found, true)
   assert.equal(sop.projectTypeCode, 'information')
 
-  const rejected = await call('fs:saveDoc', {
-    projectPath: created.path, projectName, docType: '监理日志', userInput: '测试', customSummary: '术语拦截',
+  // v1.x：禁用术语不再拦截 —— 含“塔吊”等土建术语的内容应能正常保存
+  const saved = await call('fs:saveDoc', {
+    projectPath: created.path, projectName, docType: '监理日志', userInput: '测试', customSummary: '术语不再拦截',
     content: '【施工部位】机房\n【参与人员】监理1名\n【今日内容】现场塔吊作业。\n【核心工作落实】已核查。\n【协调解决情况】无。\n【其他事项】无。',
   })
-  assert.equal(rejected.success, false)
-  assert.match(rejected.error, /塔吊/)
+  assert.equal(saved.success, true, saved.error)
 
   closeDb()
   console.log('PROJECT PROFILE DELIVERY E2E PASS')

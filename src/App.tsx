@@ -1,16 +1,22 @@
+import { lazy, Suspense } from 'react'
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { App as AntApp, ConfigProvider, Spin } from 'antd'
 import AppLayout from './components/AppLayout'
-import Home from './pages/Home'
-import ProjectView from './pages/ProjectView'
-import InspectionView from './pages/InspectionView'
-import ProgressView from './pages/ProgressView'
-import PaymentView from './pages/PaymentView'
-import ContractView from './pages/ContractView'
-import PhotoArchiveView from './pages/PhotoArchiveView'
-import Settings from './pages/Settings'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useElectronAPI } from './hooks/useElectronAPI'
+
+const Home = lazy(() => import('./pages/Home'))
+const ProjectView = lazy(() => import('./pages/ProjectView'))
+const InspectionView = lazy(() => import('./pages/InspectionView'))
+const ProgressView = lazy(() => import('./pages/ProgressView'))
+const PaymentView = lazy(() => import('./pages/PaymentView'))
+const ContractView = lazy(() => import('./pages/ContractView'))
+const PhotoArchiveView = lazy(() => import('./pages/PhotoArchiveView'))
+const Settings = lazy(() => import('./pages/Settings'))
+const TemplateCenter = lazy(() => import('./pages/TemplateCenter'))
+const ProjectArchiveView = lazy(() => import('./pages/ProjectArchiveView'))
+const DeliveryCenterView = lazy(() => import('./pages/DeliveryCenterView'))
+const PortfolioDashboardView = lazy(() => import('./pages/PortfolioDashboardView'))
 
 export default function App() {
   const apiReady = useElectronAPI()
@@ -39,7 +45,7 @@ export default function App() {
       <AntApp>
         <HashRouter>
           <ErrorBoundary>
-            <Routes>
+            <Suspense fallback={<div style={{ height: '100%', display: 'grid', placeItems: 'center' }}><Spin tip="正在加载模块…" /></div>}><Routes>
               <Route path="/" element={<AppLayout />}>
                 <Route index element={<Home />} />
                 <Route path="project/:projectName" element={<ProjectView />} />
@@ -48,10 +54,15 @@ export default function App() {
                 <Route path="project/:projectName/payment" element={<PaymentView />} />
                 <Route path="project/:projectName/contract" element={<ContractView />} />
                 <Route path="project/:projectName/photo" element={<PhotoArchiveView />} />
+                <Route path="project/:projectName/archive" element={<ProjectArchiveView />} />
+                <Route path="project/:projectName/delivery" element={<DeliveryCenterView />} />
                 <Route path="settings" element={<Settings />} />
+                <Route path="expansion-hub" element={<Navigate to="/template-center" replace />} />
+                <Route path="template-center" element={<TemplateCenter />} />
+                <Route path="portfolio" element={<PortfolioDashboardView />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+            </Routes></Suspense>
           </ErrorBoundary>
         </HashRouter>
       </AntApp>

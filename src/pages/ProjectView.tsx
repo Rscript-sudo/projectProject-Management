@@ -1,23 +1,23 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Typography, Input, Button, Space, Spin, Tag, App, Dropdown, Tooltip, Checkbox, Popover, DatePicker, Select } from 'antd'
-import { SendOutlined, RobotOutlined, FileTextOutlined, SaveOutlined, ReloadOutlined, FilePdfOutlined, FolderOpenOutlined, HomeOutlined, EditOutlined, CloseOutlined, SearchOutlined, BookOutlined, EyeOutlined, ControlOutlined, DownOutlined } from '@ant-design/icons'
+import { Typography, Input, Button, Space, Spin, Tag, App, Dropdown, Tooltip, DatePicker, Select, Tree, Modal, List } from 'antd'
+import { SendOutlined, RobotOutlined, FileTextOutlined, SaveOutlined, ReloadOutlined, FilePdfOutlined, FolderOpenOutlined, HomeOutlined, EditOutlined, CloseOutlined, SearchOutlined, BookOutlined, EyeOutlined, PictureOutlined, InboxOutlined, HistoryOutlined, PlusOutlined } from '@ant-design/icons'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
-import { identifyDocType, identifyMode, buildChatPrompt, inferDataTools, postProcessTimeFields, postProcessFabricationGuard, sanitizeUnsupportedLogParticipants, generateFileName, getDocSavePath, providerConfigs, buildDocPrompt, callAI, extractSubject, stripCalibrationStatement, sanitizeFieldValue, sanitizeLetterStyle } from '../services/aiService'
+import { identifyDocType, identifyMode, buildChatPrompt, inferDataTools, postProcessTimeFields, postProcessFabricationGuard, sanitizeUnsupportedLogParticipants, generateFileName, getDocSavePath, providerConfigs, buildDocPrompt, callAI, extractSubject, stripCalibrationStatement, sanitizeFieldValue, sanitizeLetterStyle, parseStructuredContent } from '../services/aiService'
 import { normalizeProjectType, normalizeTags } from '../shared/projectProfile.mjs'
 import { countEffectiveWords, getMinWordCount } from '../shared/docTypeMinWords'
-import { getApplicableRulePacks, getDocumentRuleMinWords, normalizeDocumentRules, RULE_PACKS } from '../shared/documentRules.mjs'
+import { getDocumentRuleMinWords } from '../shared/documentRules.mjs'
+import { stripThinkingContent } from '../shared/aiOutput.mjs'
+import { normalizeStructuredDocument, validateStructuredDocument } from '../shared/structuredGeneration'
 import type { SessionMode } from '../services/aiService'
 import DirTree from '../components/DirTree'
 import type { DirNode, TemplateItem } from '../vite-env'
 import { useElectronAPI } from '../hooks/useElectronAPI'
-import ProjectTemplateCenterModal from '../components/ProjectTemplateCenterModal'
 import dayjs from 'dayjs'
+import './ProjectView.css'
 
 const { Text } = Typography
 const { TextArea } = Input
-
-const WRITING_DOCUMENT_TYPES = ['监理日志', '监理周报', '监理月报', '整改通知书', '工程联系单']
 
 interface ChatMessage {
   id: string
@@ -27,6 +27,120 @@ interface ChatMessage {
   rawData?: Record<string, any>
   wordCount?: number  // v1.0.0：AI 扩写字数实时统计
   timestamp: Date
+  actions?: Array<{ key: 'correction' | 'other'; label: string }>
+  imageContext?: string
+  imagePaths?: string[]
+}
+
+interface GenerationTemplate {
+  id: string
+  name: string
+  docType: string
+  scope: 'global' | 'professional' | 'other' | 'system'
+  projectType?: string
+  projectTypeLabel?: string
+  path: string
+  fields?: string[]
+  readOnly?: boolean
+}
+
+function createMessageId(role: 'user' | 'assistant') {
+  return `${role}_${Date.now()}_${crypto.randomUUID()}`
+}
+
+const IMAGE_FILE_RE = /\.(jpe?g|png|gif|bmp|webp|heic|heif)$/i
+
+function isImagePath(filePath: string) {
+  return IMAGE_FILE_RE.test(filePath)
+}
+
+function localImageUrl(filePath: string) {
+  const normalized = filePath.replace(/\\/g, '/')
+  return encodeURI(normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`)
+}
+
+async function collectAIStream(
+  options: Parameters<typeof window.electronAPI.callAIStream>[0],
+  onContent?: (content: string) => void,
+  timeoutMs = 190000,
+): Promise<{ success: boolean; content: string; error?: string }> {
+  const requestId = `renderer_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  let content = ''
+  let streamError = ''
+  let pendingVisibleContent = ''
+
+  return await new Promise(resolve => {
+    let settled = false
+    let offChunk = () => {}
+    let offEnd = () => {}
+    let paintTimer: number | undefined
+    const paint = () => {
+      paintTimer = undefined
+      if (!pendingVisibleContent) return
+      const visibleContent = pendingVisibleContent
+      pendingVisibleContent = ''
+      onContent?.(visibleContent)
+    }
+    const schedulePaint = () => {
+      if (paintTimer !== undefined) return
+      // AI providers often emit only one or two characters per event. Updating the
+      // whole React/Markdown tree for every event makes the text and scrollbar
+      // visibly stutter. A 30 fps presentation cadence keeps latency imperceptible
+      // while coalescing the bursty transport chunks into stable visual frames.
+      paintTimer = window.setTimeout(paint, 34)
+    }
+    const finish = (success: boolean, error?: string) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timer)
+      if (paintTimer !== undefined) window.clearTimeout(paintTimer)
+      paint()
+      offChunk()
+      offEnd()
+      resolve({ success, content, error })
+    }
+    offChunk = window.electronAPI.onAIStreamChunk(data => {
+      if (data.requestId !== requestId) return
+      if (data.type === 'content' && data.content) {
+        content += data.content
+        pendingVisibleContent = content
+        schedulePaint()
+      } else if (data.type === 'error') {
+        streamError = data.error || 'AI 流式错误'
+      }
+    })
+    offEnd = window.electronAPI.onAIStreamEnd(data => {
+      if (data.requestId !== requestId) return
+      finish(!streamError && !!stripThinkingContent(content).trim(), streamError || (!stripThinkingContent(content).trim() ? 'AI 未返回有效内容' : undefined))
+    })
+    const timer = window.setTimeout(() => {
+      window.electronAPI.abortAIStream(requestId)
+      finish(false, `AI 生成超时（${Math.round(timeoutMs / 1000)}秒）`)
+    }, timeoutMs)
+
+    window.electronAPI.callAIStream({ ...options, requestId }).then(started => {
+      if (!started.success) finish(false, started.error || 'AI 流式请求启动失败')
+    }).catch(error => finish(false, error?.message || 'AI 流式请求启动失败'))
+  })
+}
+
+const AUTO_FILLED_TEMPLATE_FIELDS = new Set([
+  '项目名称', '工程名称', '文件编号', '编号', '文号', '日期', '报告日期', '签章日期',
+  '致单位', '致送单位', '建设单位', '业主单位', '业主', '甲方', '甲方单位',
+  '施工单位', '承建单位', '乙方', '乙方单位', '监理单位', '监理公司', '监理机构',
+  '总监理工程师', '总监姓名', '总监理', '编制人', '审核人', '批准人',
+])
+
+function validateGeneratedOutput(docType: string, content: string, templateFields: string[]) {
+  const cleaned = stripThinkingContent(content).trim()
+  if (!cleaned) return { valid: false, error: 'AI 未返回正文' }
+  if (!templateFields.length) return { valid: true, envelope: normalizeStructuredDocument(docType, cleaned) }
+  const envelope = normalizeStructuredDocument(docType, cleaned)
+  const parsed = envelope.fields
+  const required = templateFields.filter(field => !AUTO_FILLED_TEMPLATE_FIELDS.has(field))
+  const validation = validateStructuredDocument(envelope, required)
+  if (!validation.valid) return { valid: false, error: `${docType}${validation.errors.join('；')}`, envelope }
+  return { valid: true, envelope }
 }
 
 export default function ProjectView() {
@@ -56,58 +170,33 @@ export default function ProjectView() {
   })
   const [editMode, setEditMode] = useState(false)
   const [editableContent, setEditableContent] = useState('')
-  const [rightPanelTab, setRightPanelTab] = useState<'preview' | 'templates' | 'rules'>('preview')
+  const [rightPanelTab, setRightPanelTab] = useState<'preview' | 'templates'>('preview')
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false)
   const [activeDocumentType, setActiveDocumentType] = useState<string>()
   const [templateCatalog, setTemplateCatalog] = useState<TemplateItem[]>([])
+  const [generationTemplates, setGenerationTemplates] = useState<GenerationTemplate[]>([])
+  const [selectedGenerationTemplateId, setSelectedGenerationTemplateId] = useState<string>()
   const [templateLoading, setTemplateLoading] = useState(false)
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [templateSearch, setTemplateSearch] = useState('')
-  const [projectTemplateCenterOpen, setProjectTemplateCenterOpen] = useState(false)
   const [treeWidth, setTreeWidth] = useState(260)
   const [previewWidth, setPreviewWidth] = useState(380)
   const [attachedItems, setAttachedItems] = useState<Array<{ type: 'folder' | 'file'; path: string }>>([])
-  const [writingSetupOpen, setWritingSetupOpen] = useState(false)
   const [reportPeriod, setReportPeriod] = useState<{ start: string; end: string } | null>(null)
+  const [imageDragging, setImageDragging] = useState(false)
+  const [recognizingImages, setRecognizingImages] = useState(false)
+  const [sessionModalOpen, setSessionModalOpen] = useState(false)
+  const [chatSessions, setChatSessions] = useState<Array<{ id: string; title: string; archived: boolean; messageCount: number; preview: string; updatedAt: string }>>([])
+  const [sessionQuery, setSessionQuery] = useState('')
+  const [activeSessionId, setActiveSessionId] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
+  const outputScrollRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const dragCleanupRef = useRef<(() => void) | null>(null)
-
-  const selectWritingDocument = (docType: string) => {
-    setActiveDocumentType(docType)
-    // 选文种后仍展示文档预览；扩写规则仅在用户主动打开“扩写规则”或点击“调整”时显示。
-    setRightPanelTab('preview')
-    setWritingSetupOpen(false)
-    if ((docType === '监理周报' || docType === '监理月报') && !reportPeriod) {
-      const now = dayjs()
-      setReportPeriod(docType === '监理周报'
-        ? { start: now.startOf('week').add(1, 'day').format('YYYY-MM-DD'), end: now.endOf('week').add(1, 'day').format('YYYY-MM-DD') }
-        : { start: now.startOf('month').format('YYYY-MM-DD'), end: now.endOf('month').format('YYYY-MM-DD') })
-    }
-    setInput(previous => {
-      const prefix = `写${docType}：`
-      return previous.startsWith('写') && previous.includes('：') ? prefix : previous || prefix
-    })
-    setTimeout(() => document.querySelector<HTMLTextAreaElement>('textarea')?.focus(), 0)
-  }
-
-  const activeRulePacks = activeDocumentType
-    ? getApplicableRulePacks(activeDocumentType, projectConfig.documentRules)
-    : []
-
-  const updateRulePack = async (ruleId: string, enabled: boolean) => {
-    if (!currentProject) return
-    const current = normalizeDocumentRules(projectConfig.documentRules)
-    const rulePackIds = enabled
-      ? [...new Set([...current.rulePackIds, ruleId])]
-      : current.rulePackIds.filter(id => id !== ruleId)
-    const next = normalizeDocumentRules({ ...current, rulePackIds })
-    const result = await window.electronAPI.saveProjectDocumentRules(currentProject.path, next)
-    if (!result.success) {
-      message.error(result.error || '规则保存失败')
-      return
-    }
-    setProjectConfig(prev => ({ ...prev, documentRules: result.documentRules }))
-  }
+  const messagesRef = useRef<ChatMessage[]>([])
+  const historyLoadedProjectRef = useRef<string | null>(null)
+  const aiHealthRef = useRef<{ key: string; checkedAt: number } | null>(null)
+  const autoFollowOutputRef = useRef(true)
 
   // 拖拽调整面板宽度（使用 ref 避免闭包问题）
   const dragStateRef = useRef<{ panel: 'tree' | 'preview'; startX: number; startWidth: number } | null>(null)
@@ -123,6 +212,10 @@ export default function ProjectView() {
       aiStreamCleanupRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
 
   useEffect(() => {
     const onMouseMove = (ev: MouseEvent) => {
@@ -160,6 +253,21 @@ export default function ProjectView() {
     dragStateRef.current = { panel, startX, startWidth }
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
+  }
+
+  const stopStreaming = () => {
+    aiStreamCleanupRef.current?.()
+    aiStreamCleanupRef.current = null
+    setLoading(false)
+    setProgressStage('')
+    message.info('已停止接收本次生成内容')
+  }
+
+  const copyLatestAssistant = async () => {
+    const content = [...messages].reverse().find(item => item.role === 'assistant' && item.content)?.content
+    if (!content) { message.warning('暂无可复制的 AI 输出'); return }
+    await navigator.clipboard.writeText(content)
+    message.success('AI 输出已复制')
   }
 
   // --- 函数定义（useCallback 必须在消费它们的 useEffect 之前声明，避免 TDZ）---
@@ -205,6 +313,77 @@ export default function ProjectView() {
     }
   }, [currentProject, loadProjectConfig])
 
+  // 每个项目独立保存 AI 对话；切换项目时先恢复对应历史。
+  useEffect(() => {
+    const projectPath = currentProject?.path
+    historyLoadedProjectRef.current = null
+    setMessages([])
+    setPreviewContent(null)
+    setSavedPath('')
+    if (!projectPath || !apiReady) return
+
+    let cancelled = false
+    window.electronAPI.readProjectChatHistory(projectPath).then(result => {
+      if (cancelled) return
+      const restored = result.success && Array.isArray(result.messages)
+        ? result.messages
+          .filter((item, index, all) => !(
+            item.role === 'user'
+            && String(item.content || '').startsWith('生成失败：')
+            && all.some((other, otherIndex) => otherIndex !== index && other.id === item.id && other.role === 'assistant' && other.content === item.content)
+          ))
+          .map(item => ({ ...item, timestamp: new Date(item.timestamp || Date.now()) })) as ChatMessage[]
+        : []
+      messagesRef.current = restored
+      setMessages(restored)
+      setActiveSessionId(result.sessionId || '')
+      historyLoadedProjectRef.current = projectPath
+      if (!result.success) message.warning(`聊天记录恢复失败：${result.error || '未知错误'}`)
+    })
+
+    return () => {
+      cancelled = true
+      if (historyLoadedProjectRef.current === projectPath) {
+        void window.electronAPI.writeProjectChatHistory(projectPath, messagesRef.current)
+      }
+    }
+  }, [currentProject?.path, apiReady, message])
+
+  useEffect(() => {
+    const projectPath = currentProject?.path
+    if (!projectPath || historyLoadedProjectRef.current !== projectPath) return
+    const timer = window.setTimeout(() => {
+      void window.electronAPI.writeProjectChatHistory(projectPath, messages).then(result => {
+        if (!result.success) console.error('[ProjectView] 聊天记录保存失败:', result.error)
+      })
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [messages, currentProject?.path])
+
+  const loadChatSessions = useCallback(async (query = sessionQuery) => {
+    if (!currentProject) return
+    const result = await window.electronAPI.listChatSessions(currentProject.path, query)
+    if (result.success) { setChatSessions(result.sessions || []); setActiveSessionId(result.activeSessionId || '') }
+    else message.error(result.error || '会话列表读取失败')
+  }, [currentProject, message, sessionQuery])
+
+  const openSession = async (sessionId: string) => {
+    if (!currentProject) return
+    await window.electronAPI.writeProjectChatHistory(currentProject.path, messagesRef.current)
+    const result = await window.electronAPI.openChatSession(currentProject.path, sessionId)
+    if (!result.success) return message.error(result.error || '打开会话失败')
+    const restored = (result.session?.messages || []).map((item: any) => ({ ...item, timestamp: new Date(item.timestamp || Date.now()) })) as ChatMessage[]
+    messagesRef.current = restored; setMessages(restored); setActiveSessionId(sessionId); setPreviewContent(null); setSessionModalOpen(false)
+  }
+
+  const createSession = async () => {
+    if (!currentProject) return
+    await window.electronAPI.writeProjectChatHistory(currentProject.path, messagesRef.current)
+    const result = await window.electronAPI.createChatSession(currentProject.path)
+    if (!result.success) return message.error(result.error || '创建会话失败')
+    messagesRef.current = []; setMessages([]); setActiveSessionId(result.session.id); setPreviewContent(null); setSessionModalOpen(false)
+  }
+
   // 加载模板资源目录
   useEffect(() => {
     if (!apiReady) return
@@ -238,12 +417,42 @@ export default function ProjectView() {
     if (!window.electronAPI) return
     setTemplateLoading(true)
     try {
-      const catalog = await window.electronAPI.getTemplateCatalog()
+      const [catalog, library, system] = await Promise.all([
+        window.electronAPI.getTemplateCatalog(),
+        window.electronAPI.listTemplateLibrary(),
+        window.electronAPI.listSystemTemplates(),
+      ])
       setTemplateCatalog(catalog || [])
+      const libraryDocTypes = new Set((library || []).map(item => item.docType))
+      setGenerationTemplates([
+        ...(library || []),
+        ...(system || []).filter(item => !libraryDocTypes.has(item.docType)),
+      ] as GenerationTemplate[])
     } catch (e) {
       console.error('[ProjectView] Failed to load template catalog:', e)
     }
     setTemplateLoading(false)
+  }
+
+  const selectGenerationTemplate = async (template: GenerationTemplate) => {
+    if (!currentProject) return
+    const templateId = template.scope === 'system' ? null : template.id
+    const result = await window.electronAPI.selectProjectTemplate(currentProject.path, template.docType, templateId)
+    if (!result?.success) { message.error(result?.error || '模板选择失败'); return }
+    setProjectConfig(prev => ({
+      ...prev,
+      templateSelections: { ...(prev.templateSelections || {}), [template.docType]: templateId },
+    }))
+    setActiveDocumentType(template.docType)
+    if ((template.docType === '监理周报' || template.docType === '监理月报') && !reportPeriod) {
+      const now = dayjs()
+      setReportPeriod(template.docType === '监理周报'
+        ? { start: now.startOf('week').add(1, 'day').format('YYYY-MM-DD'), end: now.endOf('week').add(1, 'day').format('YYYY-MM-DD') }
+        : { start: now.startOf('month').format('YYYY-MM-DD'), end: now.endOf('month').format('YYYY-MM-DD') })
+    }
+    setSelectedGenerationTemplateId(template.id)
+    setInput(previous => previous.trim() || `请使用“${template.name || template.docType}”模板生成一份${template.docType}：`)
+    message.success(`已选择“${template.name || template.docType}”，请补充要求后发送`)
   }
 
   const handleAttachFolder = async () => {
@@ -258,6 +467,73 @@ export default function ProjectView() {
     if (files?.length) setAttachedItems(prev => [...prev, ...files.map(f => ({ type: 'file' as const, path: f }))])
   }
 
+  const recognizeDroppedImages = async (paths: string[]) => {
+    if (!paths.length || recognizingImages) return
+    const currentSettings = useAppStore.getState().settings
+    if (!currentSettings.hasApiKey) { message.error('请先在 AI 配置中设置 API Key'); return }
+    autoFollowOutputRef.current = true
+    setMessages(prev => [...prev, {
+      id: `image-user-${Date.now()}`,
+      role: 'user',
+      content: paths.length === 1 ? '现场图片' : `现场图片（${paths.length} 张）`,
+      imagePaths: paths,
+      timestamp: new Date(),
+    }])
+    setRecognizingImages(true)
+    setLoading(true)
+    setProgressStage('analyzing')
+    try {
+      const result = await window.electronAPI.recognizeImages({ paths })
+      if (!result.success || !result.content) throw new Error(result.error || '图片识别失败')
+      const cleanContent = stripThinkingContent(result.content)
+      setMessages(prev => [...prev, {
+        id: `image-ai-${Date.now()}`,
+        role: 'assistant',
+        content: `**图片识别结果**\n\n${cleanContent}\n\n是否根据以上事实撰写文档？`,
+        imageContext: cleanContent,
+        actions: [
+          { key: 'correction', label: '撰写监理整改通知单' },
+          { key: 'other', label: '选择其他文档类型' },
+        ],
+        timestamp: new Date(),
+      }])
+    } catch (error: any) {
+      message.error(error?.message || '图片识别失败')
+      setMessages(prev => [...prev, { id: `image-error-${Date.now()}`, role: 'assistant', content: `图片识别失败：${error?.message || '请检查当前模型是否支持图片输入'}`, timestamp: new Date() }])
+    } finally {
+      setRecognizingImages(false)
+      setLoading(false)
+      setProgressStage('')
+    }
+  }
+
+  const handleImageDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setImageDragging(false)
+    const paths = Array.from(event.dataTransfer.files)
+      .map(file => window.electronAPI.getPathForFile(file))
+      .filter(isImagePath)
+    if (!paths.length) { message.warning('请拖入 JPG、PNG、WEBP、HEIC 等图片文件'); return }
+    await recognizeDroppedImages(paths)
+  }
+
+  const handleImageDocumentAction = async (msg: ChatMessage, action: 'correction' | 'other') => {
+    const facts = msg.imageContext || ''
+    if (action === 'correction') {
+      const docType = '整改通知书'
+      const template = generationTemplates.find(item => item.docType === docType)
+      if (template) await selectGenerationTemplate(template)
+      setActiveDocumentType(docType)
+      setInput(`请根据以下图片识别事实撰写${docType}，不得增加图片中无法确认的信息：\n\n${facts}`)
+      setRightPanelTab('preview')
+      message.success('已准备整改通知单，请补充项目事实后发送')
+    } else {
+      setInput(`请根据以下图片识别事实撰写文档，不得增加图片中无法确认的信息：\n\n${facts}`)
+      setRightPanelTab('templates')
+      message.info('请在右侧模板资源中选择文档类型')
+    }
+  }
+
   // 发送消息 — 支持 CHAT / DATA_QUERY / DOC / HYBRID 四模式
   const handleSend = useCallback(async () => {
     if (!apiReady) {
@@ -267,6 +543,7 @@ export default function ProjectView() {
 
     const trimmedInput = input.trim()
     if (!trimmedInput || loading) return
+    autoFollowOutputRef.current = true
 
     const currentSettings = useAppStore.getState().settings
     // 注意：settings 是脱敏版（主进程持有真实 apiKey），前端用 hasApiKey 判断
@@ -280,11 +557,27 @@ export default function ProjectView() {
       return
     }
 
+    const healthKey = `${currentSettings.aiProvider}|${currentSettings.baseUrl}|${currentSettings.model}`
+    if (!aiHealthRef.current || aiHealthRef.current.key !== healthKey || Date.now() - aiHealthRef.current.checkedAt > 5 * 60 * 1000) {
+      setProgressStage('analyzing')
+      const health = await window.electronAPI.checkAIHealth({
+        provider: currentSettings.aiProvider,
+        baseUrl: currentSettings.baseUrl,
+        model: currentSettings.model,
+      })
+      setProgressStage('')
+      if (!health.success) {
+        message.error(`AI 服务不可用：${health.error || '请检查服务商和模型配置'}`, 6)
+        return
+      }
+      aiHealthRef.current = { key: healthKey, checkedAt: Date.now() }
+    }
+
     // ==== 照片归档模式（直接调 photo:aiArchive，不走 AI 流）====
     const attachedFolder = attachedItems.find(i => i.type === 'folder')
     if (attachedFolder && (trimmedInput.includes('整理照片') || trimmedInput.includes('照片归档') || trimmedInput.includes('照片存档')) && currentProject) {
       setMessages(prev => [...prev, {
-        id: Date.now().toString(),
+        id: createMessageId('user'),
         role: 'user',
         content: trimmedInput + '\n📁 ' + attachedFolder.path,
         timestamp: new Date(),
@@ -302,9 +595,9 @@ export default function ProjectView() {
         const content = result.success
           ? `✅ **照片整理完成**\n\n共扫描 **${result.total}** 张照片\n已归档 **${result.archived}** 张\n\n${(result.months || []).map(m => '📁 ' + m).join('\n') || ''}\n\n${result.summary || ''}`
           : `❌ 整理失败：${result.error || '未知错误'}`
-        setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: 'assistant', content, timestamp: new Date() }])
+        setMessages(prev => [...prev, { id: createMessageId('assistant'), role: 'assistant', content, timestamp: new Date() }])
       } catch (e: any) {
-        setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: 'assistant', content: `❌ 整理出错：${e.message}`, timestamp: new Date() }])
+        setMessages(prev => [...prev, { id: createMessageId('assistant'), role: 'assistant', content: `❌ 整理出错：${e.message}`, timestamp: new Date() }])
       }
       setAttachedItems([])
       setProgressStage('')
@@ -313,7 +606,14 @@ export default function ProjectView() {
     }
 
     // ==== 意图分类 ====
-      const { mode, docType, dataToolIds } = identifyMode(trimmedInput)
+      const identified = identifyMode(trimmedInput)
+      let { mode, docType, dataToolIds } = identified
+      // 选定文种后，即使用户只输入现场事实，也必须按当前文种生成。
+      if (activeDocumentType && (mode === 'CHAT' || (mode === 'DOC' && docType === '通用文档'))) {
+        mode = 'DOC'
+        docType = activeDocumentType
+        dataToolIds = []
+      }
       const effectiveDocType = docType || activeDocumentType
       const needsReportPeriod = effectiveDocType === '监理周报' || effectiveDocType === '监理月报'
       if (needsReportPeriod && !reportPeriod) {
@@ -355,7 +655,7 @@ export default function ProjectView() {
     }
     const postProcessCtx = { docType: docType || '通用文档', holidayType }
     setMessages(prev => [...prev, {
-      id: Date.now().toString(),
+      id: createMessageId('user'),
       role: 'user',
       content: trimmedInput + (attachedItems.length > 0 ? '\n\n【附件】\n' + attachSummary : ''),
       timestamp: new Date(),
@@ -365,7 +665,7 @@ export default function ProjectView() {
     setProgressStage('analyzing')
 
     // 提前挂一个 assistant 占位消息
-    const assistantId = (Date.now() + 1).toString()
+    const assistantId = createMessageId('assistant')
     const showDocType = mode === 'DOC' || mode === 'HYBRID' ? docType : undefined
     setMessages(prev => [...prev, {
       id: assistantId,
@@ -374,6 +674,18 @@ export default function ProjectView() {
       docType: showDocType,
       timestamp: new Date(),
     }])
+
+    let operationId = ''
+    try {
+      const operation = await window.electronAPI.createOperation({
+        type: mode === 'DOC' || mode === 'HYBRID' ? 'document-generation' : 'ai-conversation',
+        title: mode === 'DOC' || mode === 'HYBRID' ? `生成${docType || '通用文档'}` : 'AI 对话',
+        projectPath: currentProject?.path,
+        metadata: { docType, mode, attachmentCount: attachedItems.length, model: currentSettings.model },
+      })
+      operationId = operation.task?.id || ''
+      if (operationId) await window.electronAPI.updateOperation(operationId, { status: 'running', stage: 'analyzing', progress: 10 })
+    } catch (error) { console.warn('[ProjectView] 任务记录创建失败:', error) }
 
     try {
       // v1.2.0：删除假值兜底（v1.1.x 用了 '建设单位'/'施工单位' 等字面字符串作为 fallback，
@@ -396,20 +708,21 @@ export default function ProjectView() {
       let attachContext = ''
       if (attachedItems.length > 0) {
         const parts: string[] = []
-        for (const item of attachedItems) {
+        for (const [sourceIndex, item] of attachedItems.entries()) {
+          const sourceId = `S${sourceIndex + 1}`
           if (item.type === 'folder') {
             try {
               const tree = await window.electronAPI.getDirTree(item.path, 5)
               if (tree) {
                 const files = flattenFileTree(tree)
                 if (files.length > 0) {
-                  parts.push(`【文件夹】${item.path}\n  文件清单：\n${files.map((f, i) => `    ${i + 1}. ${f}`).join('\n')}`)
+                  parts.push(`【来源:${sourceId}】文件夹：${item.path}\n  文件清单：\n${files.map((f, i) => `    ${i + 1}. ${f}`).join('\n')}`)
                 } else {
-                  parts.push(`【文件夹】${item.path}（空文件夹）`)
+                  parts.push(`【来源:${sourceId}】文件夹：${item.path}（空文件夹）`)
                 }
               }
             } catch {
-              parts.push(`【文件夹】${item.path}（读取失败）`)
+              parts.push(`【来源:${sourceId}】文件夹：${item.path}（读取失败）`)
             }
           } else {
             // 读取文件内容供 AI 分析
@@ -417,24 +730,25 @@ export default function ProjectView() {
               const fc = await window.electronAPI.readFileContent(item.path)
               if (fc.success && fc.type === 'text' && fc.content) {
                 const note = fc.truncated ? '\n  (内容较长已截断，仅显示前50KB)' : ''
-                parts.push(`【文件】${item.path}\n  ---- 文件内容 ----\n${fc.content}${note}`)
+                parts.push(`【来源:${sourceId}】文件：${item.path}\n  ---- 文件内容 ----\n${fc.content}${note}`)
               } else if (fc.success && fc.type === 'image') {
-                parts.push(`【图片】${item.path}（图片文件，大小：${(fc.size || 0) / 1024 > 1024 ? ((fc.size || 0) / 1024 / 1024).toFixed(1) + 'MB' : ((fc.size || 0) / 1024).toFixed(0) + 'KB'}）`)
+                parts.push(`【来源:${sourceId}】图片：${item.path}（图片文件，大小：${(fc.size || 0) / 1024 > 1024 ? ((fc.size || 0) / 1024 / 1024).toFixed(1) + 'MB' : ((fc.size || 0) / 1024).toFixed(0) + 'KB'}）`)
               } else {
-                parts.push(`【文件】${item.path}（${fc.note || '暂不支持内容解析'}）`)
+                parts.push(`【来源:${sourceId}】文件：${item.path}（${fc.note || '暂不支持内容解析'}）`)
               }
             } catch {
-              parts.push(`【文件】${item.path}（读取失败）`)
+              parts.push(`【来源:${sourceId}】文件：${item.path}（读取失败）`)
             }
           }
         }
         if (parts.length > 0) {
-          attachContext = `\n\n【附件内容】\n${parts.join('\n\n')}\n\n请根据以上附件内容给出分析或建议。如果是文件清单，建议每个文件应归档到项目下哪个子目录。`
+          attachContext = `\n\n【附件内容】\n${parts.join('\n\n')}\n\n请根据以上附件内容给出分析或建议。凡引用附件事实，必须在对应句末标注[来源:S编号]；无法对应来源的事实不得写入正式文档。如果是文件清单，建议每个文件应归档到项目下哪个子目录。`
         }
       }
 
       // ==== 按模式构建 messages ====
       let aiMessages: { role: string; content: string }[]
+      let generationTemplateFields: string[] = []
       const userContent = attachContext ? trimmedInput + attachContext : trimmedInput
       const extractedSubject = extractSubject(trimmedInput)  // 提取事由摘要，不让 AI 照抄原始输入
 
@@ -458,6 +772,7 @@ export default function ProjectView() {
             if (currentProject && docType && window.electronAPI?.getProjectTemplateContract) {
               const contract = await window.electronAPI.getProjectTemplateContract(currentProject.path, docType)
               templateFields = contract.fields || []
+              generationTemplateFields = templateFields
             }
           } catch (e) {
             console.warn('[ProjectView] 模板字段契约读取失败，继续使用文种规则:', e)
@@ -498,12 +813,20 @@ export default function ProjectView() {
       }
 
       setProgressStage('generating')
+      if (operationId) void window.electronAPI.updateOperation(operationId, { status: 'running', stage: 'generating', progress: 35 })
 
+      const hasImageAttachment = attachedItems.some(item => item.type === 'file' && isImagePath(item.path))
+      const route = await window.electronAPI.routeModel([currentSettings.model], {
+        vision: hasImageAttachment,
+        structuredOutput: mode === 'DOC' || mode === 'HYBRID',
+        streaming: true,
+      })
+      if (!route.success || !route.route?.selected) throw new Error(route.route?.reason || route.error || '当前模型不满足任务能力要求')
       const aiCfg = {
         provider: currentSettings.aiProvider as any,
         // 不再传 apiKey —— 主进程自己持有（脱敏设计）
         baseUrl: currentSettings.baseUrl,
-        model: currentSettings.model,
+        model: route.route.selected.model,
       }
 
       // 构造 IPC 参数（apiKey 已在主进程持有，前端不再传入；新签名的 AIOptions 已将 apiKey 改为可选）
@@ -514,58 +837,24 @@ export default function ProjectView() {
         dataToolIds,
         reportPeriod: needsReportPeriod ? reportPeriod || undefined : undefined,
         messages: aiMessages,
+        operationId,
       }
 
-      // 优先走流式 —— 套 30 秒超时，避免主进程 hang 时 await 永不返回
-      const streamable = await Promise.race([
-        window.electronAPI.callAIStream(ipcParams),
-        new Promise<{ success: false; error: string }>((resolve) =>
-          setTimeout(() => resolve({ success: false, error: '启动 AI 流式超时（30秒）' }), 30000)
-        ),
-      ])
+      // 监听器先注册、请求后启动，避免首批流式内容丢失。
+      const streamable = await collectAIStream(ipcParams, visible => {
+        const clean = stripThinkingContent(visible)
+        setMessages(prev => prev.map(m => m.id === assistantId ? {
+          ...m,
+          content: clean,
+          wordCount: countEffectiveWords(clean),
+        } : m))
+      })
 
       if (streamable.success) {
-        const { requestId } = streamable
-        let accumulated = ''
-
-        let offChunk = () => {}
-        let offEnd = () => {}
-        let ended = false
-        await new Promise<void>((resolve) => {
-          const cleanup = () => {
-            if (ended) return
-            ended = true
-            offChunk()
-            offEnd()
-            aiStreamCleanupRef.current = null
-            resolve()
-          }
-          offChunk = window.electronAPI.onAIStreamChunk((data) => {
-            if (data.requestId !== requestId) return
-            if (data.type === 'content' && data.content) {
-              accumulated += data.content
-              setMessages(prev => prev.map(m => m.id === assistantId ? {
-                ...m,
-                content: accumulated,
-                wordCount: countEffectiveWords(accumulated),
-              } : m))
-            } else if (data.type === 'error') {
-              message.error(data.error || 'AI 流式错误')
-            }
-          })
-          offEnd = window.electronAPI.onAIStreamEnd((data) => {
-            if (data.requestId !== requestId) return
-            cleanup()
-          })
-          aiStreamCleanupRef.current = cleanup
-
-          // 安全网：5 分钟超时
-          setTimeout(() => {
-            if (!ended) cleanup()
-          }, 300000)
-        })
+        let accumulated = streamable.content
 
         // 后处理：先跑反编造守门员（捕获原始日期），再处理时间字段占位符
+        accumulated = stripThinkingContent(accumulated)
         const guardResult = postProcessFabricationGuard(accumulated)
         if (guardResult.warnings.length > 0) {
           message.warning(`⚠️ ${guardResult.warnings.join('；')}，已替换为占位符请补充`, 5)
@@ -583,8 +872,7 @@ export default function ProjectView() {
             const extraUserMsg = `【字数补足要求】你刚刚输出 ${wordCount} 字，远低于本文档要求的 ${minWords} 字下限。请在原文基础上直接续写扩写，不要重写开头、不要重写已正确的内容。重点：补充缺失条款的细节、给出可执行的检查/整改步骤、引用规范条款编号；不得编造具体时间/人员/部位。继续输出正文即可。`
             try {
               console.log(`[AI] 触发续写：当前 ${wordCount}/${minWords} 字`)
-              const reRequestId = `retry-${Date.now()}`
-              const retryResult = await window.electronAPI.callAIStream({
+              const retryResult = await collectAIStream({
                 ...aiCfg,
                 mode: 'CHAT',  // 续写走 CHAT 模式避免再次走 DOC 复杂提示
                 projectName: currentProject?.name,
@@ -593,55 +881,22 @@ export default function ProjectView() {
                   { role: 'assistant', content: accumulated },
                   { role: 'user', content: extraUserMsg },
                 ],
+              }, retryContent => {
+                const merged = stripThinkingContent(accumulated + '\n' + retryContent)
+                setMessages(prev => prev.map(m => m.id === assistantId ? {
+                  ...m,
+                  content: merged,
+                  wordCount: countEffectiveWords(merged),
+                } : m))
               })
               if (!retryResult.success) {
-                console.error('[AI] 续写启动失败:', retryResult.error)
-                message.error(`续写启动失败：${retryResult.error || '未知错误'}，当前字数 ${wordCount}/${minWords}`)
-              } else if (retryResult.requestId) {
-                console.log('[AI] 续写流式已启动 requestId:', retryResult.requestId)
-                await new Promise<void>((resolve) => {
-                  let retryAcc = ''
-                  let retryEnded = false
-                  const cleanup = () => { if (retryEnded) return; retryEnded = true; offChunk(); offEnd(); resolve() }
-                  const offChunk = window.electronAPI.onAIStreamChunk((d) => {
-                    if (d.requestId !== retryResult.requestId) return
-                    if (d.type === 'content' && d.content) {
-                      retryAcc += d.content
-                      const merged = accumulated + '\n' + retryAcc
-                      setMessages(prev => prev.map(m => m.id === assistantId ? {
-                        ...m,
-                        content: merged,
-                        wordCount: countEffectiveWords(merged),
-                      } : m))
-                    } else if (d.type === 'error') {
-                      console.error('[AI] 续写流式 chunk error:', d.error)
-                      message.error(`续写中断：${d.error || '未知错误'}`)
-                    }
-                  })
-                  const offEnd = window.electronAPI.onAIStreamEnd((d) => {
-                    if (d.requestId !== retryResult.requestId) return
-                    console.log(`[AI] 续写完成，追加 ${retryAcc.length} 字符`)
-                    if (retryAcc) {
-                      accumulated = accumulated + '\n' + retryAcc
-                      const mergedFinal = postProcessTimeFields(
-                        postProcessFabricationGuard(accumulated).content,
-                        postProcessCtx
-                      )
-                      accumulated = docType === '监理日志' ? sanitizeUnsupportedLogParticipants(mergedFinal, trimmedInput) : mergedFinal
-                      setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: accumulated } : m))
-                    } else {
-                      console.warn('[AI] 续写流式结束但 retryAcc 为空')
-                    }
-                    cleanup()
-                  })
-                  // 续写也限 90 秒
-                  setTimeout(() => {
-                    if (!retryEnded) {
-                      console.warn('[AI] 续写 90s 超时')
-                      cleanup()
-                    }
-                  }, 90000)
-                })
+                console.error('[AI] 续写失败:', retryResult.error)
+                message.warning(`续写失败：${retryResult.error || '未知错误'}；已保留首次生成内容`)
+              } else {
+                accumulated = stripThinkingContent(accumulated + '\n' + retryResult.content)
+                const mergedFinal = postProcessTimeFields(postProcessFabricationGuard(accumulated).content, postProcessCtx)
+                accumulated = docType === '监理日志' ? sanitizeUnsupportedLogParticipants(mergedFinal, trimmedInput) : mergedFinal
+                setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: accumulated } : m))
               }
             } catch (e) {
               console.error('[ProjectView] 续写异常:', e)
@@ -666,6 +921,10 @@ export default function ProjectView() {
           // v1.2.7（2026-06-29 老板反馈）：信件语体清理（"尊敬的..."/"此致敬礼"）
           //   全文扫一遍，覆盖正文任意位置
           accumulated = sanitizeLetterStyle(accumulated)
+          const validation = validateGeneratedOutput(docType || '通用文档', accumulated, generationTemplateFields)
+          if (!validation.valid) throw new Error(`生成结果验收未通过：${validation.error}`)
+          const quality = await window.electronAPI.scoreDocumentQuality(docType || '通用文档', accumulated)
+          if (quality.quality && !quality.quality.passed) message.warning(`文档质量评分 ${quality.quality.score}，建议检查后再保存`)
           setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: accumulated } : m))
         }
 
@@ -697,10 +956,12 @@ export default function ProjectView() {
         setAttachedItems([])
         setProgressStage('')
         setLoading(false)
+        if (operationId) void window.electronAPI.updateOperation(operationId, { status: 'succeeded', stage: 'completed', progress: 100, result: { docType, wordCount: countEffectiveWords(accumulated) } })
         return
       }
 
-      // 流式失败降级非流式
+      // 流式失败自动降级非流式，保留同一条对话占位消息。
+      console.warn('[ProjectView] 流式生成失败，降级非流式:', streamable.error)
       setProgressStage('generating')
       const result = await callAI(aiCfg, aiMessages, {
         mode,
@@ -710,7 +971,7 @@ export default function ProjectView() {
       })
       if (!result.success) throw new Error(result.error || 'AI 调用失败')
 
-      let aiContent = stripCalibrationStatement(result.content || '')
+      let aiContent = stripThinkingContent(stripCalibrationStatement(result.content || ''))
       // 后处理：先跑反编造守门员（捕获原始日期），再处理时间字段占位符
       const guardResult = postProcessFabricationGuard(aiContent)
       if (guardResult.warnings.length > 0) {
@@ -730,11 +991,15 @@ export default function ProjectView() {
       if (mode === 'DOC' || mode === 'HYBRID') {
         aiContent = aiContent.replace(
           /【(事由|主题|标题|摘要)】\s*([\s\S]*?)(?=【|$)/g,
-          (m, k, v) => `【${k}】${sanitizeFieldValue(v.trim())}`
+          (_match: string, key: string, value: string) => `【${key}】${sanitizeFieldValue(value.trim())}`
         )
         // v1.2.7（2026-06-29 老板反馈）：信件语体清理（覆盖全文，含正文）
         aiContent = sanitizeLetterStyle(aiContent)
         if (docType === '监理日志') aiContent = sanitizeUnsupportedLogParticipants(aiContent, trimmedInput)
+        const validation = validateGeneratedOutput(docType || '通用文档', aiContent, generationTemplateFields)
+        if (!validation.valid) throw new Error(`生成结果验收未通过：${validation.error}`)
+        const quality = await window.electronAPI.scoreDocumentQuality(docType || '通用文档', aiContent)
+        if (quality.quality && !quality.quality.passed) message.warning(`文档质量评分 ${quality.quality.score}，建议检查后再保存`)
         setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: aiContent } : m))
       }
 
@@ -762,15 +1027,22 @@ export default function ProjectView() {
         setSavedPath('')
       }
       setProgressStage('')
+      if (operationId) void window.electronAPI.updateOperation(operationId, { status: 'succeeded', stage: 'completed', progress: 100, result: { docType, wordCount: countEffectiveWords(aiContent) } })
 
     } catch (e: any) {
       setProgressStage('')
-      message.error(e.message || '处理失败，请检查网络和 API Key')
+      const errorText = e.message || '处理失败，请检查网络和 API Key'
+      setMessages(prev => prev.map(item => item.id === assistantId ? { ...item, content: `生成失败：${errorText}` } : item))
+      message.error(errorText)
+      if (operationId) {
+        void window.electronAPI.updateOperation(operationId, { status: 'failed', stage: progressStage || 'unknown', progress: 100, retryable: true, error: errorText })
+        void window.electronAPI.appendDiagnostic({ taskId: operationId, level: 'error', stage: progressStage || 'generation', message: errorText })
+      }
     }
 
     setAttachedItems([])
     setLoading(false)
-  }, [input, loading, apiReady, currentProject, projectConfig, messages])
+  }, [input, loading, apiReady, currentProject, projectConfig, messages, activeDocumentType, attachedItems, reportPeriod])
 
   // 保存文档
   const handleSave = async () => {
@@ -818,9 +1090,15 @@ export default function ProjectView() {
     setGenerating(false)
   }
 
-  // 滚动到底部
+  // 流式输出期间只在用户仍停留于底部时跟随。直接设置 scrollTop，避免每个
+  // 文本帧都叠加一轮 smooth-scroll 动画而造成上下抽动；用户向上阅读后不抢滚动位置。
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (!autoFollowOutputRef.current) return
+    const frame = window.requestAnimationFrame(() => {
+      const pane = outputScrollRef.current
+      if (pane) pane.scrollTop = pane.scrollHeight
+    })
+    return () => window.cancelAnimationFrame(frame)
   }, [messages])
 
   const handleFileClick = (path: string) => {
@@ -862,7 +1140,7 @@ export default function ProjectView() {
   }
 
   return (
-    <div ref={containerRef} style={{ display: 'flex', height: '100%', gap: 0, overflow: 'hidden' }}>
+    <div ref={containerRef} className="ai-workbench" style={{ display: 'flex', height: '100%', gap: 0, overflow: 'hidden' }}>
       {/* 左侧：项目目录树（全高，可拖拽调整宽度） */}
       <div style={{
         width: treeWidth,
@@ -889,13 +1167,6 @@ export default function ProjectView() {
             </Text>
           </Space>
           <Space size={2}>
-            <Button
-              type="text"
-              size="small"
-              icon={<BookOutlined />}
-              onClick={() => setProjectTemplateCenterOpen(true)}
-              title="项目模板"
-            />
             <Button
               type="text"
               size="small"
@@ -963,7 +1234,19 @@ export default function ProjectView() {
       </div>
 
       {/* 中间：AI 聊天 */}
-      <div style={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column', background: '#fff' }}>
+      <div
+        className="ai-output-pane"
+        style={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column', position: 'relative' }}
+        onDragEnter={(event) => { event.preventDefault(); setImageDragging(true) }}
+        onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }}
+        onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setImageDragging(false) }}
+        onDrop={handleImageDrop}
+      >
+        {imageDragging && (
+          <div style={{ position: 'absolute', inset: 8, zIndex: 30, display: 'grid', placeItems: 'center', border: '2px dashed #1677ff', borderRadius: 12, background: 'rgba(230,244,255,.96)', pointerEvents: 'none' }}>
+            <div style={{ textAlign: 'center', color: '#1677ff' }}><InboxOutlined style={{ fontSize: 34 }} /><div style={{ marginTop: 8, fontWeight: 600 }}>松开即可识别现场图片</div><div style={{ marginTop: 4, fontSize: 12 }}>最多同时识别 6 张</div></div>
+          </div>
+        )}
         {/* 聊天头部 — 模式感知 */}
         <div style={{
           padding: '8px 16px',
@@ -973,9 +1256,9 @@ export default function ProjectView() {
           gap: 6,
           flexShrink: 0,
         }}>
-          <RobotOutlined style={{ color: '#1677ff', fontSize: 13 }} />
-          <Text strong style={{ fontSize: 12 }}>AI 助手</Text>
-          <Text type="secondary" style={{ fontSize: 11, marginRight: 4 }}>— 问规范 · 查数据 · 写文档</Text>
+          <span className="ai-output-icon"><RobotOutlined /></span>
+          <Text strong style={{ fontSize: 14 }}>AI 扩写结果</Text>
+          {loading && <span className="ai-stream-status"><span className="ai-live-dot" />正在生成…</span>}
           {/* 项目选择器：决定所有 AI 辅助的工作项目 */}
           <Select
             size="small"
@@ -1014,10 +1297,30 @@ export default function ProjectView() {
               {progressStage === 'analyzing' ? '分析中' : progressStage === 'generating' ? '生成中' : '处理中'}
             </Tag>
           )}
+          <div style={{ flex: 1 }} />
+          {loading && <Button size="small" onClick={stopStreaming}>停止生成</Button>}
+          <Button size="small" icon={<HistoryOutlined />} onClick={() => { setSessionModalOpen(true); void loadChatSessions('') }}>会话</Button>
+          <Button size="small" onClick={copyLatestAssistant}>复制</Button>
+          <Button size="small" className="ai-apply-button" disabled={!previewContent} onClick={handleSave}>应用到文档</Button>
         </div>
 
+        <Modal title="项目会话" open={sessionModalOpen} onCancel={() => setSessionModalOpen(false)} footer={null} width={620}>
+          <Space.Compact style={{ width: '100%', marginBottom: 12 }}><Input.Search value={sessionQuery} onChange={event => setSessionQuery(event.target.value)} onSearch={loadChatSessions} placeholder="搜索会话标题或内容" /><Button type="primary" icon={<PlusOutlined />} onClick={createSession}>新会话</Button></Space.Compact>
+          <List dataSource={chatSessions} locale={{ emptyText: '暂无会话' }} renderItem={session => <List.Item actions={[<Button key="open" type="link" onClick={() => openSession(session.id)}>打开</Button>, <Button key="archive" type="link" danger onClick={async () => { if (!currentProject) return; await window.electronAPI.archiveChatSession(currentProject.path, session.id, !session.archived); await loadChatSessions() }}>{session.archived ? '恢复' : '归档'}</Button>]}>
+            <List.Item.Meta title={<Space>{session.title}{session.id === activeSessionId && <Tag color="blue">当前</Tag>}{session.archived && <Tag>已归档</Tag>}</Space>} description={`${session.messageCount} 条消息 · ${session.preview || '暂无内容'} · ${new Date(session.updatedAt).toLocaleString()}`} />
+          </List.Item>} />
+        </Modal>
+
         {/* 消息区域 */}
-        <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+        <div
+          ref={outputScrollRef}
+          className="ai-output-scroll"
+          style={{ flex: 1, overflow: 'auto', padding: 20 }}
+          onScroll={(event) => {
+            const pane = event.currentTarget
+            autoFollowOutputRef.current = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 72
+          }}
+        >
           {messages.length === 0 && !loading ? (
             <div style={{ textAlign: 'center', padding: 40, color: '#bbb' }}>
               <RobotOutlined style={{ fontSize: 36, marginBottom: 12, color: '#d9d9d9' }} />
@@ -1037,29 +1340,43 @@ export default function ProjectView() {
                   marginBottom: 16,
                   display: 'flex',
                   flexDirection: 'column',
-                  alignItems: msg.role === 'user' ? 'flex-start' : 'flex-end',
+                  alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
                 }}
               >
-                <div style={{
-                  maxWidth: '92%',
-                  padding: '10px 14px',
-                  borderRadius: 10,
-                  background: msg.role === 'user' ? '#f6f8fa' : '#1677ff',
-                  color: msg.role === 'user' ? '#333' : '#fff',
-                  boxShadow: msg.role === 'user' ? '0 1px 2px rgba(0,0,0,0.04)' : 'none',
-                }}>
-                  {msg.role === 'user' ? (
-                    <span style={{ whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6 }}>{msg.content}</span>
-                  ) : (
-                    <div
-                      dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
-                      style={{ fontSize: 13, lineHeight: 1.8 }}
-                    />
+                <div className={msg.role === 'user' ? 'ai-question-output' : 'ai-document-output'}>
+                  {msg.imagePaths && msg.imagePaths.length > 0 && (
+                    <div className="ai-chat-image-grid">
+                      {msg.imagePaths.map((imagePath, index) => (
+                        <button
+                          type="button"
+                          className="ai-chat-image"
+                          key={`${imagePath}_${index}`}
+                          onClick={() => window.electronAPI.openFile(imagePath)}
+                          title="点击打开原图"
+                        >
+                          <img src={localImageUrl(imagePath)} alt={`现场图片 ${index + 1}`} />
+                        </button>
+                      ))}
+                    </div>
                   )}
+                  <div
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+                    style={{ fontSize: 14, lineHeight: 1.9 }}
+                  />
+                  {loading && msg.id === [...messages].reverse().find(item => item.role === 'assistant')?.id && <span className="ai-stream-cursor" />}
                   {msg.rawData && (
                     <div style={{ marginTop: 12 }}>
                       <DataPreviewTable data={msg.rawData} />
                     </div>
+                  )}
+                  {msg.actions && msg.actions.length > 0 && (
+                    <Space wrap style={{ marginTop: 12 }}>
+                      {msg.actions.map(action => (
+                        <Button key={action.key} size="small" type={action.key === 'correction' ? 'primary' : 'default'} onClick={() => handleImageDocumentAction(msg, action.key)}>
+                          {action.label}
+                        </Button>
+                      ))}
+                    </Space>
                   )}
                 </div>
                 {msg.docType && (
@@ -1127,16 +1444,16 @@ export default function ProjectView() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* 输入区域 */}
+        {/* 中间输入区：资料、文种和发送操作集中在 AI 结果下方 */}
         <div style={{
           padding: '10px 14px 12px',
           borderTop: '1px solid #f0f0f0',
           background: '#f7f9fc',
         }}>
           {/* 附件项目展示条 */}
-          {attachedItems.length > 0 && (
+          {attachedItems.some(item => !isImagePath(item.path)) && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
-              {attachedItems.map((item, i) => (
+              {attachedItems.map((item, i) => !isImagePath(item.path) && (
                 <div key={i} style={{
                   display: 'flex', alignItems: 'center', gap: 4,
                   padding: '3px 8px',
@@ -1175,39 +1492,18 @@ export default function ProjectView() {
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e4e9f0' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 26, paddingBottom: 4, borderBottom: '1px solid #f0f2f5' }}>
-              <Text type="secondary" style={{ fontSize: 11 }}>输入现场事实或要求；写文书时请选择文种</Text>
-              <Popover
-                trigger="click"
-                placement="topRight"
-                open={writingSetupOpen}
-                onOpenChange={setWritingSetupOpen}
-                content={<div style={{ width: 300 }}>
-                  <div style={{ marginBottom: 10 }}>
-                    <Text strong style={{ fontSize: 13 }}>写作设置</Text>
-                    <Text type="secondary" style={{ display: 'block', fontSize: 11, marginTop: 1 }}>项目资料已自动读取；这里只设置本次文书的写作方式</Text>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                    {WRITING_DOCUMENT_TYPES.map(docType => {
-                      const selected = docType === activeDocumentType
-                      return <Button key={docType} size="small" type={selected ? 'primary' : 'default'} onClick={() => selectWritingDocument(docType)} style={{ height: 30, textAlign: 'left', paddingInline: 9, fontSize: 12 }}>{docType}</Button>
-                    })}
-                  </div>
-                  <div style={{ marginTop: 10, padding: '7px 8px', borderRadius: 6, background: '#f6f8fb', fontSize: 11, color: '#64748b' }}>
-                    {activeDocumentType ? <><div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>适用项目：{projectConfig.projectType || '未分类'}{projectConfig.projectTags?.length ? ` · ${projectConfig.projectTags.join('、')}` : ''}</div><div style={{ marginTop: 3, color: '#1677ff' }}>已启用 {activeRulePacks.length} 条写作规则 <Button type="link" size="small" style={{ padding: '0 0 0 5px', height: 16, fontSize: 11 }} onClick={() => { setRightPanelTab('rules'); setWritingSetupOpen(false) }}>调整</Button></div></> : '不选文种可直接进行资料查询或规范问答。'}
-                  </div>
-                </div>}
-              >
-                <Button size="small" type={activeDocumentType ? 'default' : 'primary'} icon={<ControlOutlined />} style={{ borderRadius: 6, fontSize: 11, height: 25 }}>
-                  {activeDocumentType || '选择文种'} <DownOutlined style={{ fontSize: 9 }} />
-                </Button>
-              </Popover>
+              <Text type="secondary" style={{ fontSize: 11 }}><PictureOutlined style={{ marginRight: 4 }} />可拖入图片识别；写文书时请选择文种</Text>
+              <Button size="small" type="text" onClick={() => setRightPanelTab('templates')} style={{ borderRadius: 6, fontSize: 11, height: 25, color: '#1677ff' }}>
+                {activeDocumentType ? `当前模板：${activeDocumentType}` : '从右侧选择模板'}
+              </Button>
             </div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', paddingTop: 6 }}>
               <TextArea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onPressEnter={(e) => { if (!e.shiftKey) { e.preventDefault(); handleSend() } }}
-                placeholder={activeDocumentType ? `填写${activeDocumentType}的现场事实、事项和要求…` : '输入需求：查数据、问规范、写文档…'}
+                placeholder={recognizingImages ? '正在识别图片…' : activeDocumentType ? `填写${activeDocumentType}的现场事实、事项和要求…` : '输入需求，或直接拖入现场图片…'}
+                disabled={recognizingImages}
                 autoSize={{ minRows: 1, maxRows: 4 }}
                 variant="borderless"
                 style={{ fontSize: 13, padding: '2px 0', resize: 'none' }}
@@ -1222,7 +1518,7 @@ export default function ProjectView() {
       </div>
 
       {/* 拖拽手柄：AI聊天 ↔ 预览 */}
-      <div
+      {!rightPanelCollapsed && <div
         onMouseDown={handleResizeStart('preview')}
         style={{
           width: 5,
@@ -1240,15 +1536,16 @@ export default function ProjectView() {
           width: 1,
           background: '#e8e8e8',
         }} />
-      </div>
+      </div>}
 
       {/* 右侧：文档预览 / 模板资源 */}
       <div style={{
-        width: previewWidth,
+        width: rightPanelCollapsed ? 42 : previewWidth,
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
-        background: '#fff',
+        background: '#fbfaf7',
+        transition: 'width .2s ease',
       }}>
         {/* 右侧面板头部 — 标签切换 */}
         <div style={{
@@ -1258,55 +1555,52 @@ export default function ProjectView() {
           alignItems: 'stretch',
           flexShrink: 0,
         }}>
-          <div
+          {!rightPanelCollapsed && <div
             onClick={() => setRightPanelTab('preview')}
             style={{
               flex: 1,
               padding: '8px 12px',
               cursor: 'pointer',
-              borderBottom: rightPanelTab === 'preview' ? '2px solid #1677ff' : '2px solid transparent',
+              borderBottom: rightPanelTab === 'preview' ? '2px solid #43836a' : '2px solid transparent',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               gap: 6,
-              background: rightPanelTab === 'preview' ? '#f0f5ff' : 'transparent',
+              background: rightPanelTab === 'preview' ? '#f3f8f4' : 'transparent',
               transition: 'all 0.2s',
             }}
           >
-            <FilePdfOutlined style={{ color: rightPanelTab === 'preview' ? '#1677ff' : '#999', fontSize: 13 }} />
-            <Text style={{ fontSize: 12, fontWeight: rightPanelTab === 'preview' ? 600 : 400, color: rightPanelTab === 'preview' ? '#1677ff' : '#666' }}>
+            <FilePdfOutlined style={{ color: rightPanelTab === 'preview' ? '#43836a' : '#999', fontSize: 13 }} />
+            <Text style={{ fontSize: 12, fontWeight: rightPanelTab === 'preview' ? 600 : 400, color: rightPanelTab === 'preview' ? '#356e58' : '#666' }}>
               文档预览
             </Text>
-          </div>
-          <div style={{ width: 1, background: '#f0f0f0' }} />
-          <div
+          </div>}
+          {!rightPanelCollapsed && <div
             onClick={() => setRightPanelTab('templates')}
             style={{
               flex: 1,
               padding: '8px 12px',
               cursor: 'pointer',
-              borderBottom: rightPanelTab === 'templates' ? '2px solid #1677ff' : '2px solid transparent',
+              borderBottom: rightPanelTab === 'templates' ? '2px solid #43836a' : '2px solid transparent',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               gap: 6,
-              background: rightPanelTab === 'templates' ? '#f0f5ff' : 'transparent',
+              background: rightPanelTab === 'templates' ? '#f3f8f4' : 'transparent',
               transition: 'all 0.2s',
             }}
           >
-            <BookOutlined style={{ color: rightPanelTab === 'templates' ? '#1677ff' : '#999', fontSize: 13 }} />
-            <Text style={{ fontSize: 12, fontWeight: rightPanelTab === 'templates' ? 600 : 400, color: rightPanelTab === 'templates' ? '#1677ff' : '#666' }}>
+            <BookOutlined style={{ color: rightPanelTab === 'templates' ? '#43836a' : '#999', fontSize: 13 }} />
+            <Text style={{ fontSize: 12, fontWeight: rightPanelTab === 'templates' ? 600 : 400, color: rightPanelTab === 'templates' ? '#356e58' : '#666' }}>
               模板资源
             </Text>
-          </div>
-          <div style={{ width: 1, background: '#f0f0f0' }} />
-          <div onClick={() => setRightPanelTab('rules')} style={{ flex: 1, padding: '8px 8px', cursor: 'pointer', borderBottom: rightPanelTab === 'rules' ? '2px solid #1677ff' : '2px solid transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: rightPanelTab === 'rules' ? '#f0f5ff' : 'transparent' }}>
-            <ControlOutlined style={{ color: rightPanelTab === 'rules' ? '#1677ff' : '#999', fontSize: 13 }} />
-            <Text style={{ fontSize: 12, fontWeight: rightPanelTab === 'rules' ? 600 : 400, color: rightPanelTab === 'rules' ? '#1677ff' : '#666' }}>扩写规则</Text>
-          </div>
+          </div>}
+          <Button type="text" size="small" onClick={() => setRightPanelCollapsed(value => !value)} title={rightPanelCollapsed ? '展开右侧面板' : '收起右侧面板'} style={{ width: 40, height: 38, color: '#777' }}>
+            {rightPanelCollapsed ? '‹' : '›'}
+          </Button>
         </div>
 
-        {activeDocumentType && (activeDocumentType === '监理周报' || activeDocumentType === '监理月报') && (
+        {!rightPanelCollapsed && activeDocumentType && (activeDocumentType === '监理周报' || activeDocumentType === '监理月报') && (
           <div style={{ padding: '8px 12px', borderBottom: '1px solid #edf1f5', background: '#fafcff' }}>
             <Text strong style={{ fontSize: 12 }}>报告期数据</Text>
             <DatePicker.RangePicker
@@ -1323,32 +1617,8 @@ export default function ProjectView() {
         )}
 
         {/* 内容区 */}
-        <div style={{ flex: 1, overflow: 'auto' }}>
-          {rightPanelTab === 'rules' ? <div style={{ padding: 12 }}>
-            <Text strong style={{ fontSize: 13 }}>{activeDocumentType ? `${activeDocumentType}规则` : '选择文种后配置规则'}</Text>
-            <Text type="secondary" style={{ display: 'block', margin: '4px 0 10px', fontSize: 11, lineHeight: 1.5 }}>勾选即保存为本项目默认；生成时自动带入，无需编写提示词。</Text>
-            {activeDocumentType ? <>
-              <div style={{ marginBottom: 8 }}>
-                <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>项目默认</Tag>
-                <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>本次生成可直接使用</Text>
-              </div>
-              {['通用底线', activeDocumentType === '监理日志' ? '监理日志' : activeDocumentType === '监理周报' ? '监理周报' : activeDocumentType === '监理月报' ? '监理月报' : '通知与函件'].map(group => {
-                const packs = RULE_PACKS.filter(pack => pack.group === group && (!pack.docTypes || pack.docTypes.includes(activeDocumentType)))
-                if (!packs.length) return null
-                const selectedIds = normalizeDocumentRules(projectConfig.documentRules).rulePackIds
-                return <div key={group} style={{ border: '1px solid #f0f0f0', marginBottom: 8, borderRadius: 5, overflow: 'hidden' }}>
-                  <div style={{ padding: '6px 8px', background: '#fafafa', fontSize: 11, fontWeight: 600 }}>{group}</div>
-                  {packs.map(pack => <div key={pack.id} style={{ padding: '7px 8px', borderTop: '1px solid #f5f5f5' }}>
-                    <Checkbox checked={selectedIds.includes(pack.id)} onChange={event => updateRulePack(pack.id, event.target.checked)} style={{ fontSize: 12, lineHeight: 1.35 }}>
-                      {pack.label}{pack.minWords ? <Tag color="blue" style={{ marginLeft: 4, fontSize: 10, lineHeight: '16px' }}>≥{pack.minWords}字</Tag> : null}
-                    </Checkbox>
-                    <Text type="secondary" style={{ display: 'block', margin: '2px 0 0 23px', fontSize: 10, lineHeight: 1.45 }}>{pack.description}</Text>
-                  </div>)}
-                </div>
-              })}
-              <Text type="secondary" style={{ display: 'block', padding: '2px 2px 0', fontSize: 10, lineHeight: 1.45 }}>项目名称、单位、总监及专业标签由左侧「项目配置」统一维护，不在 AI 写作区重复设置。</Text>
-            </> : <Button size="small" type="primary" onClick={() => selectWritingDocument('监理日志')}>从监理日志开始</Button>}
-          </div> : rightPanelTab === 'preview' ? (
+        {!rightPanelCollapsed && <div style={{ flex: 1, overflow: 'auto' }}>
+          {rightPanelTab === 'preview' ? (
             /* ===== 文档预览 ===== */
             <>
               <div style={{
@@ -1554,7 +1824,7 @@ export default function ProjectView() {
 
                     {!editMode && (
                       <div style={{ marginTop: 12, padding: '8px 12px', background: '#f6f8fa', borderRadius: 6, fontSize: 11, color: '#888' }}>
-                        此处按系统交付版式展示字段与正文；空白字段将在生成 Word 时由项目配置、系统编号自动回填，仍为空的字段以待补充状态保留。
+                        此处按系统交付版式展示字段与正文；项目配置中已有的单位、人员和编号会自动回填，未配置的字段保持空白，可在后续编辑时补充。
                       </div>
                     )}
                   </>
@@ -1591,22 +1861,75 @@ export default function ProjectView() {
                   <Spin size="small" />
                   <div style={{ fontSize: 11, color: '#999', marginTop: 8 }}>加载模板目录...</div>
                 </div>
-              ) : templateCatalog.length === 0 ? (
+              ) : generationTemplates.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 40, color: '#bbb' }}>
                   <BookOutlined style={{ fontSize: 32, color: '#d9d9d9', marginBottom: 8 }} />
                   <div style={{ fontSize: 12, color: '#999' }}>暂无模板资源</div>
                 </div>
               ) : (
                 <div>
-                  {templateCatalog.map(item => renderTemplateNode(item, expandedCategories, setExpandedCategories, templateSearch))}
+                  {(() => {
+                    const keyword = templateSearch.trim().toLowerCase()
+                    const currentType = projectConfig.projectType || ''
+                    const visible = generationTemplates.filter(item => {
+                      const professionalMatch = item.scope !== 'professional'
+                        || item.projectType === currentType
+                        || item.projectTypeLabel === currentType
+                      const searchMatch = !keyword || `${item.name}${item.docType}${item.projectType || ''}`.toLowerCase().includes(keyword)
+                      return professionalMatch && searchMatch
+                    })
+                    const groups = [
+                      { key: 'general', label: '通用模板', items: visible.filter(item => item.scope === 'global' || item.scope === 'system') },
+                      { key: 'professional', label: `${currentType || '当前专业'}模板`, items: visible.filter(item => item.scope === 'professional') },
+                      { key: 'other', label: '其他模板', items: visible.filter(item => item.scope === 'other') },
+                    ].filter(group => group.items.length)
+                    if (!groups.length) return <div style={{ padding: 28, textAlign: 'center', color: '#999', fontSize: 12 }}>没有匹配的模板</div>
+                    const treeData = groups.map(group => ({
+                      key: `group:${group.key}`,
+                      selectable: false,
+                      title: <Space size={6}><Text strong style={{ fontSize: 12 }}>{group.label}</Text><Text type="secondary" style={{ fontSize: 10 }}>{group.items.length}</Text></Space>,
+                      children: group.items.map(template => ({
+                        key: template.id,
+                        isLeaf: true,
+                        title: <Dropdown
+                          trigger={['contextMenu']}
+                          menu={{ items: [
+                            { key: 'preview', label: '打开模板预览', icon: <EyeOutlined /> },
+                            { key: 'rules', label: '进入 AI 扩写规则', icon: <RobotOutlined /> },
+                          ], onClick: ({ key, domEvent }) => {
+                            domEvent.stopPropagation()
+                            if (key === 'preview') window.electronAPI.openFile(template.path)
+                            if (key === 'rules') navigate(`/template-center?rules=${encodeURIComponent(template.docType)}&templateId=${encodeURIComponent(template.id)}`)
+                          } }}
+                        >
+                          <div onContextMenu={event => event.stopPropagation()} style={{ display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 }}>
+                            <Text ellipsis style={{ flex: 1, minWidth: 0, fontSize: 12 }}>{template.name || template.docType}</Text>
+                            <Text type="secondary" style={{ marginLeft: 8, flexShrink: 0, fontSize: 10 }}>{template.docType}{template.fields?.length ? ` · ${template.fields.length}` : ''}</Text>
+                          </div>
+                        </Dropdown>,
+                      })),
+                    }))
+                    return <Tree
+                      blockNode
+                      showLine={{ showLeafIcon: false }}
+                      defaultExpandedKeys={['group:general']}
+                      selectedKeys={selectedGenerationTemplateId ? [selectedGenerationTemplateId] : []}
+                      treeData={treeData}
+                      onSelect={keys => {
+                        const id = String(keys[0] || '')
+                        const template = generationTemplates.find(item => item.id === id)
+                        if (template) selectGenerationTemplate(template)
+                      }}
+                      style={{ fontSize: 12 }}
+                    />
+                  })()}
+                  <Button block type="text" size="small" onClick={() => navigate('/template-center')} style={{ marginTop: 6, color: '#64748b' }}>管理模板</Button>
                 </div>
               )}
             </div>
           )}
-        </div>
+        </div>}
       </div>
-
-      <ProjectTemplateCenterModal open={projectTemplateCenterOpen} onClose={() => { setProjectTemplateCenterOpen(false); loadProjectConfig() }} project={{ name: currentProject.name, path: currentProject.path, projectType: projectConfig.projectType, templateOverrides: projectConfig.templateOverrides, templateSelections: projectConfig.templateSelections }} />
     </div>
   )
 }
@@ -1749,7 +2072,13 @@ function renderTemplateNode(
       </div>
       {isExpanded && item.children && (
         <div>
-          {item.children?.map((child: TemplateItem) => renderTemplateNode(child, expanded, setExpanded, search, depth + 1))}
+          {item.children.length > 0 ? (
+            item.children.map((child: TemplateItem) => renderTemplateNode(child, expanded, setExpanded, search, depth + 1))
+          ) : (
+            <div style={{ padding: '8px 12px', paddingLeft: 12 + depth * 16, fontSize: 12, color: '#bbb', fontStyle: 'italic' }}>
+              暂无模板，可上传
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1786,7 +2115,7 @@ function DocumentLayoutPreview({ docType, content, projectName, projectConfig }:
     ? [['项目名称', projectName], ['建设单位', projectConfig.ownerUnit || ''], ['施工单位', projectConfig.contractor || ''], ['监理单位', projectConfig.supervisorUnit || ''], ['总监理工程师', projectConfig.chiefEngineer || '']]
     : [['项目名称', projectName], ['文件编号', field('文件编号')], ['致单位', field('致单位') || projectConfig.contractor || ''], ['事由', field('事由', '主题')]]
   const body = field('正文内容', '内容', '正文') || content.replace(/【[^】]+】/g, '').trim()
-  const displayValue = (value: string) => value && !/(数据待核对|签发前请核对)/.test(value) ? value : '待补充'
+  const displayValue = (value: string) => value && !/(数据待核对|签发前请核对)/.test(value) ? value : ''
   return <div style={{ background: '#fff', border: '1px solid #e1e7ef', borderRadius: 8, minHeight: 300, overflow: 'hidden', boxShadow: '0 1px 3px rgba(15, 23, 42, .03)' }}>
     <div style={{ padding: '20px 20px 12px', textAlign: 'center', fontSize: 18, fontWeight: 700, letterSpacing: 3, color: '#1f2937' }}>{docType === '整改通知书' ? '监 理 整 改 通 知 书' : docType === '安全通知书' ? '监 理 安 全 通 知 书' : docType}</div>
     <div style={{ margin: '0 20px', display: 'grid', gridTemplateColumns: '88px minmax(0, 1fr)', border: '1px solid #dfe5ed', fontSize: 12 }}>
@@ -1799,7 +2128,7 @@ function DocumentLayoutPreview({ docType, content, projectName, projectConfig }:
 /** 轻量 Markdown 渲染 — 将 **粗体**、`代码` 转为 HTML */
 function renderMarkdown(text: string): string {
   // 转义 HTML 特殊字符
-  let s = text
+  let s = stripThinkingContent(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

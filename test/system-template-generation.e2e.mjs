@@ -111,7 +111,11 @@ async function main() {
       if (template.fields.includes('项目名称')) {
         assert.ok(xml.includes('信息化文档生成验收项目'), `${template.docType} 应写入项目名称`)
       }
-      assert.equal(/仿宋_GB2312|方正小标宋简体|楷体_GB2312|w:eastAsia="黑体"/.test(xml), false, `${template.docType} 不得保留本机不可用的旧字体`)
+      // 系统结构化正式件必须同时具备标题字体与正文字体，避免整篇被刷成黑体。
+      if (['整改通知书', '安全通知书', '工程联系单', '监理日志', '监理周报', '监理月报', '进度分析报告'].includes(template.docType)) {
+        assert.ok(/FangSong_GB2312/.test(xml), `${template.docType} 正文应使用仿宋常规字重`)
+        assert.ok(/Heiti SC|方正小标宋简体/.test(xml), `${template.docType} 标题应保留独立标题字体`)
+      }
     } else {
       const xlsxModule = await import('xlsx')
       const xlsx = xlsxModule.default || xlsxModule
@@ -129,5 +133,7 @@ async function main() {
 main().catch(error => { console.error(error.stack || error); process.exitCode = 1 }).finally(() => {
   if (process.env.KEEP_TEST_OUTPUT) console.log('KEPT TEST OUTPUT:', runtimeDir)
   else fs.rmSync(runtimeDir, { recursive: true, force: true })
-  app.exit(process.exitCode || 0)
+  // Electron 42.9+ 在批量打开 Office 文档后可能残留框架事件循环。
+  // 测试资源已在 main 中关闭，直接结束隔离测试进程，避免 app.exit 停止兜底定时器后假性挂起。
+  process.exit(process.exitCode || 0)
 })

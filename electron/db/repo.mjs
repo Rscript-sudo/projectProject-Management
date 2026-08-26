@@ -51,6 +51,178 @@ function escapeLike(s) {
   return String(s).replace(/[\\%_]/g, '\\$&')
 }
 
+const ENTITY_TYPES = new Set([
+  'inspection', 'hazard', 'correspondence', 'progress_node', 'payment_request',
+  'contract', 'change_order', 'claim', 'photo', 'document', 'ledger_simple',
+  'evidence',
+])
+
+const ENTITY_TABLES = {
+  hazard: 'hazard', correspondence: 'correspondence', progress_node: 'progress_node',
+  payment_request: 'payment_request', contract: 'contract', change_order: 'change_order',
+  claim: 'claim', photo: 'photo', ledger_simple: 'ledger_simple',
+  evidence: 'evidence_item',
+}
+
+function normalizeEntityType(value) {
+  const type = String(value || '').trim()
+  if (!ENTITY_TYPES.has(type)) throw new Error(`不支持的业务对象类型：${type || '空'}`)
+  return type
+}
+
+function normalizeEntityId(value) {
+  const id = String(value ?? '').trim()
+  if (!id || id.length > 200) throw new Error('业务对象 ID 无效')
+  return id
+}
+
+function assertEntityInProject(projectName, entityType, entityId) {
+  const table = ENTITY_TABLES[entityType]
+  if (!table) return
+  const row = getDb().prepare(`SELECT project_name FROM ${table} WHERE id = ?`).get(entityId)
+  if (!row) throw new Error(`${entityType} #${entityId} 不存在`)
+  if (row.project_name !== projectName) throw new Error('禁止关联不同项目的数据')
+}
+
+// ============ 统一业务关系 ============
+
+export function createBusinessRelation(relation) {
+  assertSafeProjectName(relation.project_name)
+  const sourceType = normalizeEntityType(relation.source_type)
+  const targetType = normalizeEntityType(relation.target_type)
+  const sourceId = normalizeEntityId(relation.source_id)
+  const targetId = normalizeEntityId(relation.target_id)
+  if (sourceType === targetType && sourceId === targetId) throw new Error('业务对象不能关联自身')
+  assertEntityInProject(relation.project_name, sourceType, sourceId)
+  assertEntityInProject(relation.project_name, targetType, targetId)
+  const relationType = clampText(relation.relation_type, 80, 'relation_type').trim()
+  if (!relationType) throw new Error('关系类型不能为空')
+  const now = new Date().toISOString()
+  const metadata = relation.metadata == null ? null : JSON.stringify(relation.metadata)
+  getDb().prepare(`
+    INSERT INTO business_relation
+    (project_name, source_type, source_id, target_type, target_id, relation_type, metadata, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(project_name, source_type, source_id, target_type, target_id, relation_type)
+    DO UPDATE SET metadata = excluded.metadata, updated_at = excluded.updated_at
+  `).run(relation.project_name, sourceType, sourceId, targetType, targetId, relationType, metadata, now, now)
+  return getDb().prepare(`
+    SELECT * FROM business_relation
+    WHERE project_name = ? AND source_type = ? AND source_id = ?
+      AND target_type = ? AND target_id = ? AND relation_type = ?
+  `).get(relation.project_name, sourceType, sourceId, targetType, targetId, relationType)
+}
+
+export function listBusinessRelations(projectName, entityType, entityId) {
+  assertSafeProjectName(projectName)
+  const type = normalizeEntityType(entityType)
+  const id = normalizeEntityId(entityId)
+  return getDb().prepare(`
+    SELECT *, CASE WHEN source_type = ? AND source_id = ? THEN 'outgoing' ELSE 'incoming' END direction
+    FROM business_relation
+    WHERE project_name = ?
+      AND ((source_type = ? AND source_id = ?) OR (target_type = ? AND target_id = ?))
+    ORDER BY created_at DESC
+  `).all(type, id, projectName, type, id, type, id).map(row => ({
+    ...row,
+    metadata: row.metadata ? JSON.parse(row.metadata) : null,
+  }))
+}
+
+export function deleteBusinessRelation(projectName, relationId) {
+  assertSafeProjectName(projectName)
+  const db = getDb()
+  const relation = db.prepare('SELECT * FROM business_relation WHERE project_name = ? AND id = ?').get(projectName, relationId)
+  if (!relation) return false
+  db.transaction(() => {
+    db.prepare('DELETE FROM business_relation WHERE project_name = ? AND id = ?').run(projectName, relationId)
+    if (relation.relation_type === 'rectification_notice' && relation.source_type === 'hazard') {
+      db.prepare('UPDATE hazard SET rectification_id = NULL WHERE id = ?').run(relation.source_id)
+    }
+    if (relation.source_type === 'photo' && relation.relation_type === 'hazard_evidence') {
+      db.prepare('UPDATE photo SET linked_hazard_id = NULL WHERE id = ?').run(relation.source_id)
+    }
+    if (relation.source_type === 'photo' && relation.relation_type === 'progress_evidence') {
+      db.prepare('UPDATE photo SET linked_node_id = NULL WHERE id = ?').run(relation.source_id)
+    }
+  })()
+  return true
+}
+
+export function countBusinessRelations(projectName, entityType, entityId) {
+  assertSafeProjectName(projectName)
+  const type = normalizeEntityType(entityType)
+  const id = normalizeEntityId(entityId)
+  return getDb().prepare(`
+    SELECT COUNT(*) count FROM business_relation
+    WHERE project_name = ?
+      AND ((source_type = ? AND source_id = ?) OR (target_type = ? AND target_id = ?))
+  `).get(projectName, type, id, type, id).count
+}
+
+// ============ AI 事实证据 ============
+
+export function createEvidenceItem(item) {
+  assertSafeProjectName(item.project_name)
+  const title = clampText(item.title, 200, 'title').trim()
+  if (!title) throw new Error('证据标题不能为空')
+  const status = ['confirmed', 'pending', 'invalid'].includes(item.status) ? item.status : 'pending'
+  const now = new Date().toISOString()
+  const info = getDb().prepare(`
+    INSERT INTO evidence_item
+    (project_name, title, evidence_type, source_ref, source_location, excerpt, status, critical, confirmed_by, confirmed_at, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    item.project_name, title, clampText(item.evidence_type || 'other', 50, 'evidence_type'),
+    clampText(item.source_ref, 1000, 'source_ref'), clampText(item.source_location, 500, 'source_location'),
+    clampText(item.excerpt, 4000, 'excerpt'), status, item.critical ? 1 : 0,
+    status === 'confirmed' ? clampText(item.confirmed_by, 100, 'confirmed_by') : '',
+    status === 'confirmed' ? (item.confirmed_at || now) : null, now, now,
+  )
+  return getDb().prepare('SELECT * FROM evidence_item WHERE id = ?').get(info.lastInsertRowid)
+}
+
+export function listEvidenceItems(projectName, options = {}) {
+  assertSafeProjectName(projectName)
+  const status = options.status && ['confirmed', 'pending', 'invalid'].includes(options.status) ? options.status : null
+  return status
+    ? getDb().prepare('SELECT * FROM evidence_item WHERE project_name = ? AND status = ? ORDER BY created_at DESC').all(projectName, status)
+    : getDb().prepare('SELECT * FROM evidence_item WHERE project_name = ? ORDER BY created_at DESC').all(projectName)
+}
+
+export function updateEvidenceStatus(projectName, id, status, confirmedBy = '') {
+  assertSafeProjectName(projectName)
+  if (!['confirmed', 'pending', 'invalid'].includes(status)) throw new Error('无效的证据状态')
+  const now = new Date().toISOString()
+  const result = getDb().prepare(`
+    UPDATE evidence_item SET status = ?, confirmed_by = ?, confirmed_at = ?, updated_at = ?
+    WHERE project_name = ? AND id = ?
+  `).run(status, status === 'confirmed' ? clampText(confirmedBy, 100, 'confirmed_by') : '', status === 'confirmed' ? now : null, now, projectName, id)
+  return result.changes > 0
+}
+
+export function validateDocumentEvidence(projectName, evidenceIds = []) {
+  assertSafeProjectName(projectName)
+  const ids = [...new Set(evidenceIds.map(Number).filter(Number.isInteger))]
+  if (!ids.length) return { valid: true, items: [], blockers: [] }
+  const placeholders = ids.map(() => '?').join(',')
+  const items = getDb().prepare(`SELECT * FROM evidence_item WHERE project_name = ? AND id IN (${placeholders})`).all(projectName, ...ids)
+  const found = new Set(items.map(item => item.id))
+  const blockers = [
+    ...ids.filter(id => !found.has(id)).map(id => ({ id, reason: '证据不存在或不属于当前项目' })),
+    ...items.filter(item => item.critical && item.status !== 'confirmed').map(item => ({ id: item.id, reason: `关键证据状态为 ${item.status}` })),
+    ...items.filter(item => item.status === 'invalid').map(item => ({ id: item.id, reason: '证据已失效' })),
+  ]
+  return { valid: blockers.length === 0, items, blockers }
+}
+
+export function linkDocumentEvidence(projectName, documentId, evidenceIds = []) {
+  return evidenceIds.map(evidenceId => createBusinessRelation({
+    project_name: projectName, source_type: 'document', source_id: documentId,
+    target_type: 'evidence', target_id: evidenceId, relation_type: 'document_evidence',
+  }))
+}
+
 // ============ 项目元数据 ============
 
 export function getProjectMeta(projectName) {
@@ -258,7 +430,19 @@ export function updateHazardStatus(id, status) {
 }
 
 export function linkHazardToRectification(hazardId, correspondenceId) {
-  getDb().prepare('UPDATE hazard SET rectification_id = ? WHERE id = ?').run(correspondenceId, hazardId)
+  const hazard = getDb().prepare('SELECT project_name FROM hazard WHERE id = ?').get(hazardId)
+  const correspondence = getDb().prepare('SELECT project_name FROM correspondence WHERE id = ?').get(correspondenceId)
+  if (!hazard || !correspondence) throw new Error('隐患或整改函件不存在')
+  if (hazard.project_name !== correspondence.project_name) throw new Error('禁止关联不同项目的数据')
+  getDb().transaction(() => {
+    getDb().prepare('UPDATE hazard SET rectification_id = ? WHERE id = ?').run(correspondenceId, hazardId)
+    createBusinessRelation({
+      project_name: hazard.project_name,
+      source_type: 'hazard', source_id: hazardId,
+      target_type: 'correspondence', target_id: correspondenceId,
+      relation_type: 'rectification_notice',
+    })
+  })()
 }
 
 // ============ 进度节点 ============
@@ -317,6 +501,10 @@ export function updateProgressNode(id, updates) {
 }
 
 export function deleteProgressNode(id) {
+  const node = getDb().prepare('SELECT project_name FROM progress_node WHERE id = ?').get(id)
+  if (!node) return
+  const relationCount = countBusinessRelations(node.project_name, 'progress_node', id)
+  if (relationCount > 0) throw new Error(`该进度节点存在 ${relationCount} 条业务关联，请先解除关联后再删除`)
   getDb().prepare('DELETE FROM progress_node WHERE id = ?').run(id)
 }
 
@@ -345,7 +533,25 @@ export function insertPaymentRequest(p) {
     p.approval_history || '[]', p.related_nodes || '[]',
     p.status || '审批中', now, now,
   )
-  return info.lastInsertRowid
+  const id = info.lastInsertRowid
+  const relatedNodes = Array.isArray(p.related_nodes)
+    ? p.related_nodes
+    : (() => { try { return JSON.parse(p.related_nodes || '[]') } catch { return [] } })()
+  for (const nodeId of relatedNodes) {
+    createBusinessRelation({
+      project_name: p.project_name,
+      source_type: 'payment_request', source_id: id,
+      target_type: 'progress_node', target_id: nodeId,
+      relation_type: 'payment_progress',
+    })
+  }
+  if (p.contract_id) createBusinessRelation({
+    project_name: p.project_name,
+    source_type: 'contract', source_id: p.contract_id,
+    target_type: 'payment_request', target_id: id,
+    relation_type: 'contract_payment',
+  })
+  return id
 }
 
 export function updatePaymentStage(id, stage, history) {
@@ -409,7 +615,14 @@ export function insertChangeOrder(c) {
     c.amount_change || 0, c.schedule_change || 0,
     c.status || '草稿', c.file_name || '', now, now,
   )
-  return info.lastInsertRowid
+  const id = info.lastInsertRowid
+  if (c.contract_id) createBusinessRelation({
+    project_name: c.project_name,
+    source_type: 'contract', source_id: c.contract_id,
+    target_type: 'change_order', target_id: id,
+    relation_type: 'contract_change',
+  })
+  return id
 }
 
 // ============ 索赔 ============
@@ -470,7 +683,20 @@ export function insertPhoto(p) {
     p.linked_hazard_id || null, p.linked_node_id || null,
     now,
   )
-  return info.lastInsertRowid
+  const id = info.lastInsertRowid
+  if (p.linked_hazard_id) createBusinessRelation({
+    project_name: p.project_name,
+    source_type: 'photo', source_id: id,
+    target_type: 'hazard', target_id: p.linked_hazard_id,
+    relation_type: 'hazard_evidence',
+  })
+  if (p.linked_node_id) createBusinessRelation({
+    project_name: p.project_name,
+    source_type: 'photo', source_id: id,
+    target_type: 'progress_node', target_id: p.linked_node_id,
+    relation_type: 'progress_evidence',
+  })
+  return id
 }
 
 // ============ 简易台账（其他 4 类）============
@@ -531,6 +757,157 @@ export function recordIssuedDocument({ projectName, docType, fileName, subDir, f
   const ledgerType = docType === '监理日志' || docType === '监理周报' || docType === '监理月报'
     ? 'log' : docType === '会议纪要' ? 'meeting' : docType === '施工方案' ? 'construction' : 'document'
   return insertSimpleLedger(projectName, ledgerType, { fileName, subDir, createdAt, docType, fileNumber, status: meta.status || '正式件', subject: meta.subject || '' })
+}
+
+// ============ 项目主数据中心 ============
+
+const MASTER_CONFIG = {
+  participant: {
+    table: 'project_participant',
+    fields: ['organization_type', 'organization_name', 'credit_code', 'contact_name', 'contact_phone'],
+    required: ['organization_type', 'organization_name'],
+  },
+  member: {
+    table: 'project_member',
+    fields: ['member_name', 'role', 'phone', 'certificate_no'],
+    required: ['member_name', 'role'],
+  },
+  structure: {
+    table: 'project_structure',
+    fields: ['structure_type', 'name', 'code', 'parent_id'],
+    required: ['structure_type', 'name'],
+  },
+}
+
+function masterConfig(entityType) {
+  const config = MASTER_CONFIG[entityType]
+  if (!config) throw new Error(`不支持的主数据类型：${entityType}`)
+  return config
+}
+
+function parseMasterRow(row) {
+  return row || null
+}
+
+export function listMasterData(projectName, entityType, { includeHistory = false } = {}) {
+  assertSafeProjectName(projectName)
+  const { table } = masterConfig(entityType)
+  return getDb().prepare(`SELECT * FROM ${table} WHERE project_name = ? ${includeHistory ? '' : "AND status = 'active'"} ORDER BY created_at DESC`).all(projectName)
+}
+
+export function saveMasterData(projectName, entityType, data, replacingId = null) {
+  assertSafeProjectName(projectName)
+  const config = masterConfig(entityType)
+  for (const field of config.required) {
+    if (!String(data?.[field] ?? '').trim()) throw new Error(`${field} 不能为空`)
+  }
+  const db = getDb()
+  const now = new Date().toISOString()
+  const effectiveFrom = data.effective_from || now
+  if (!Number.isFinite(new Date(effectiveFrom).getTime())) throw new Error('生效时间格式无效')
+  return db.transaction(() => {
+    let before = null
+    if (replacingId) {
+      before = db.prepare(`SELECT * FROM ${config.table} WHERE project_name = ? AND id = ? AND status = 'active'`).get(projectName, replacingId)
+      if (!before) throw new Error('要变更的主数据不存在或已失效')
+      if (new Date(effectiveFrom).getTime() < new Date(before.effective_from).getTime()) throw new Error('新版本生效时间不能早于原版本')
+      db.prepare(`UPDATE ${config.table} SET status = 'inactive', effective_to = ?, updated_at = ? WHERE id = ?`).run(effectiveFrom, now, replacingId)
+    }
+    const fields = config.fields
+    const columns = ['project_name', ...fields, 'effective_from', 'effective_to', 'status', 'created_at', 'updated_at']
+    const values = [projectName, ...fields.map(field => data[field] ?? null), effectiveFrom, null, 'active', now, now]
+    const info = db.prepare(`INSERT INTO ${config.table} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`).run(...values)
+    const after = db.prepare(`SELECT * FROM ${config.table} WHERE id = ?`).get(info.lastInsertRowid)
+    db.prepare(`INSERT INTO master_data_change (project_name, entity_type, entity_id, action, before_value, after_value, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(projectName, entityType, String(info.lastInsertRowid), before ? 'replace' : 'create', before ? JSON.stringify(before) : null, JSON.stringify(after), now)
+    return parseMasterRow(after)
+  })()
+}
+
+export function retireMasterData(projectName, entityType, id) {
+  assertSafeProjectName(projectName)
+  const { table } = masterConfig(entityType)
+  const db = getDb()
+  const now = new Date().toISOString()
+  return db.transaction(() => {
+    const before = db.prepare(`SELECT * FROM ${table} WHERE project_name = ? AND id = ? AND status = 'active'`).get(projectName, id)
+    if (!before) return false
+    db.prepare(`UPDATE ${table} SET status = 'inactive', effective_to = ?, updated_at = ? WHERE id = ?`).run(now, now, id)
+    db.prepare(`INSERT INTO master_data_change (project_name, entity_type, entity_id, action, before_value, changed_at) VALUES (?, ?, ?, 'retire', ?, ?)`)
+      .run(projectName, entityType, String(id), JSON.stringify(before), now)
+    return true
+  })()
+}
+
+export function setProjectPhase(projectName, phase, note = '', effectiveFrom = '') {
+  assertSafeProjectName(projectName)
+  const value = clampText(phase, 50, 'phase').trim()
+  if (!value) throw new Error('项目阶段不能为空')
+  const db = getDb()
+  const now = effectiveFrom || new Date().toISOString()
+  return db.transaction(() => {
+    const current = db.prepare('SELECT * FROM project_phase_history WHERE project_name = ? AND effective_to IS NULL ORDER BY id DESC LIMIT 1').get(projectName)
+    if (current?.phase === value) return current
+    if (current) db.prepare('UPDATE project_phase_history SET effective_to = ? WHERE id = ?').run(now, current.id)
+    const info = db.prepare('INSERT INTO project_phase_history (project_name, phase, effective_from, note, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(projectName, value, now, clampText(note, 500, 'note'), new Date().toISOString())
+    const after = db.prepare('SELECT * FROM project_phase_history WHERE id = ?').get(info.lastInsertRowid)
+    db.prepare(`INSERT INTO master_data_change (project_name, entity_type, entity_id, action, before_value, after_value, changed_at) VALUES (?, 'phase', ?, 'transition', ?, ?, ?)`)
+      .run(projectName, String(info.lastInsertRowid), current ? JSON.stringify(current) : null, JSON.stringify(after), new Date().toISOString())
+    return after
+  })()
+}
+
+export function getProjectPhaseHistory(projectName) {
+  assertSafeProjectName(projectName)
+  return getDb().prepare('SELECT * FROM project_phase_history WHERE project_name = ? ORDER BY effective_from DESC, id DESC').all(projectName)
+}
+
+export function listMasterChanges(projectName, limit = 200) {
+  assertSafeProjectName(projectName)
+  return getDb().prepare('SELECT * FROM master_data_change WHERE project_name = ? ORDER BY changed_at DESC LIMIT ?').all(projectName, Math.min(Math.max(Number(limit) || 200, 1), 1000)).map(row => ({
+    ...row,
+    before_value: row.before_value ? JSON.parse(row.before_value) : null,
+    after_value: row.after_value ? JSON.parse(row.after_value) : null,
+  }))
+}
+
+export function getCurrentMasterSnapshot(projectName) {
+  assertSafeProjectName(projectName)
+  return {
+    project: getProjectMeta(projectName) || null,
+    participants: listMasterData(projectName, 'participant'),
+    members: listMasterData(projectName, 'member'),
+    structures: listMasterData(projectName, 'structure'),
+    phase: getDb().prepare('SELECT * FROM project_phase_history WHERE project_name = ? AND effective_to IS NULL ORDER BY id DESC LIMIT 1').get(projectName) || null,
+    captured_at: new Date().toISOString(),
+  }
+}
+
+export function getCurrentMasterProfile(projectName) {
+  const snapshot = getCurrentMasterSnapshot(projectName)
+  const organization = type => snapshot.participants.find(item => item.organization_type === type)?.organization_name || ''
+  const chief = snapshot.members.find(item => item.role === '总监理工程师')
+  return {
+    ownerUnit: organization('建设单位'),
+    contractor: organization('施工单位'),
+    supervisorUnit: organization('监理单位'),
+    chiefEngineer: chief?.member_name || '',
+    chiefEngineerPhone: chief?.phone || '',
+    projectPhase: snapshot.phase?.phase || '',
+  }
+}
+
+export function saveDocumentMasterSnapshot(projectName, filePath, docType = '') {
+  const snapshot = getCurrentMasterSnapshot(projectName)
+  getDb().prepare(`INSERT OR REPLACE INTO document_master_snapshot (project_name, file_path, doc_type, master_data, created_at) VALUES (?, ?, ?, ?, ?)`)
+    .run(projectName, filePath, docType, JSON.stringify(snapshot), snapshot.captured_at)
+  return snapshot
+}
+
+export function getDocumentMasterSnapshot(filePath) {
+  const row = getDb().prepare('SELECT * FROM document_master_snapshot WHERE file_path = ?').get(filePath)
+  return row ? { ...row, master_data: JSON.parse(row.master_data) } : null
 }
 
 // ============ 审计日志 ============

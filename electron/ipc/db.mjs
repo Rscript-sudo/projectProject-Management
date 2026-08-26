@@ -11,6 +11,47 @@ import { getDb, closeDb } from '../db/database.mjs'
 import * as repo from '../db/repo.mjs'
 
 export function register(ipcMain, mainWindow) {
+  // ============ 项目主数据中心 ============
+  ipcMain.handle('db:listMasterData', safeCall((_, projectName, entityType, options) => repo.listMasterData(projectName, entityType, options || {})))
+  ipcMain.handle('db:saveMasterData', safeCall((_, projectName, entityType, data, replacingId) => ({
+    success: true, item: repo.saveMasterData(projectName, entityType, data, replacingId || null),
+  })))
+  ipcMain.handle('db:retireMasterData', safeCall((_, projectName, entityType, id) => ({
+    success: true, retired: repo.retireMasterData(projectName, entityType, id),
+  })))
+  ipcMain.handle('db:setProjectPhase', safeCall((_, projectName, phase, note, effectiveFrom) => ({
+    success: true, phase: repo.setProjectPhase(projectName, phase, note, effectiveFrom),
+  })))
+  ipcMain.handle('db:getProjectPhaseHistory', safeCall((_, projectName) => repo.getProjectPhaseHistory(projectName)))
+  ipcMain.handle('db:listMasterChanges', safeCall((_, projectName, limit) => repo.listMasterChanges(projectName, limit)))
+  ipcMain.handle('db:getCurrentMasterSnapshot', safeCall((_, projectName) => repo.getCurrentMasterSnapshot(projectName)))
+  ipcMain.handle('db:getDocumentMasterSnapshot', safeCall((_, filePath) => repo.getDocumentMasterSnapshot(filePath)))
+
+  // ============ 统一业务关系 ============
+  ipcMain.handle('db:createBusinessRelation', safeCall((_, relation) => {
+    const item = repo.createBusinessRelation(relation)
+    repo.logAudit(relation.project_name, 'relation.create', 'business_relation', item.id, relation)
+    return { success: true, relation: item }
+  }))
+  ipcMain.handle('db:listBusinessRelations', safeCall((_, projectName, entityType, entityId) =>
+    repo.listBusinessRelations(projectName, entityType, entityId)))
+  ipcMain.handle('db:deleteBusinessRelation', safeCall((_, projectName, relationId) => {
+    const deleted = repo.deleteBusinessRelation(projectName, relationId)
+    if (deleted) repo.logAudit(projectName, 'relation.delete', 'business_relation', relationId, {})
+    return { success: true, deleted }
+  }))
+  ipcMain.handle('db:countBusinessRelations', safeCall((_, projectName, entityType, entityId) => ({
+    success: true, count: repo.countBusinessRelations(projectName, entityType, entityId),
+  })))
+
+  // ============ AI 事实证据 ============
+  ipcMain.handle('db:createEvidenceItem', safeCall((_, item) => ({ success: true, item: repo.createEvidenceItem(item) })))
+  ipcMain.handle('db:listEvidenceItems', safeCall((_, projectName, options) => repo.listEvidenceItems(projectName, options || {})))
+  ipcMain.handle('db:updateEvidenceStatus', safeCall((_, projectName, id, status, confirmedBy) => ({
+    success: true, updated: repo.updateEvidenceStatus(projectName, id, status, confirmedBy),
+  })))
+  ipcMain.handle('db:validateDocumentEvidence', safeCall((_, projectName, evidenceIds) => repo.validateDocumentEvidence(projectName, evidenceIds || [])))
+
   // ============ 项目元数据 ============
   ipcMain.handle('db:getProjectMeta', safeCall((_, name) => repo.getProjectMeta(name)))
   ipcMain.handle('db:upsertProjectMeta', safeCall((_, meta) => {

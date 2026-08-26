@@ -146,8 +146,8 @@ async function readXlsxContent(filePath) {
   const stat = fs.statSync(filePath)
   if (stat.size > 10 * 1024 * 1024) return ''
 
-  const xlsxModule = await import('xlsx')
-  const XLSX = xlsxModule.default || xlsxModule
+  const { loadXlsx } = await import('../xlsxRuntime.mjs')
+  const XLSX = await loadXlsx()
   const wb = XLSX.readFile(filePath)
   const parts = []
   for (const sheetName of wb.SheetNames) {

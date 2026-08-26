@@ -11,6 +11,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
 import { useElectronAPI } from '../hooks/useElectronAPI'
 import type { InspectionIssue } from '../types'
+import BusinessRelationsPanel from '../components/BusinessRelationsPanel'
 
 const { Text, Title } = Typography
 const { TextArea } = Input
@@ -69,6 +70,7 @@ export default function InspectionView() {
   const [history, setHistory] = useState<any[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
+  const [relationRecord, setRelationRecord] = useState<any | null>(null)
 
   // 加载历史
   const loadHistory = async () => {
@@ -340,7 +342,7 @@ export default function InspectionView() {
           <List
             dataSource={history}
             renderItem={r => (
-              <List.Item>
+              <List.Item actions={r.id ? [<Button key="relations" size="small" type="link" icon={<FileTextOutlined />} onClick={() => setRelationRecord(r)}>关联资料</Button>] : []}>
                 <List.Item.Meta
                   title={
                     <Space>
@@ -364,6 +366,15 @@ export default function InspectionView() {
             )}
           />
         )}
+      </Modal>
+      <Modal
+        title={`巡视关联资料 · ${relationRecord?.date || ''} ${relationRecord?.location || ''}`}
+        open={!!relationRecord}
+        onCancel={() => setRelationRecord(null)}
+        footer={null}
+        width={680}
+      >
+        {relationRecord?.id && <BusinessRelationsPanel projectName={currentProject.name} entityType="inspection" entityId={relationRecord.id} />}
       </Modal>
     </div>
   )

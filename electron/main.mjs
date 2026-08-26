@@ -1,8 +1,8 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
-import { registerAll } from './ipc/register.mjs'
+import { registerAll, bootstrapCustomTypes } from './ipc/register.mjs'
 import { getDb, closeDb } from './db/database.mjs'
 import { runMigrations } from './db/migrations.mjs'
 
@@ -26,6 +26,12 @@ function logCrash(scope, err) {
     // 兜底：日志都写不进去就不写了
   }
   console.error(line.trimEnd())
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[char])
 }
 
 process.on('uncaughtException', (err) => {
@@ -64,8 +70,8 @@ function createErrorWindow(dbError) {
   <li>如仍无法解决，附日志联系开发</li>
 </ol>
 <h3>错误信息：</h3>
-<pre>${dbError}</pre>
-<div class="log-path">崩溃日志路径：${crashLogPath}</div>
+<pre>${escapeHtml(dbError)}</pre>
+<div class="log-path">崩溃日志路径：${escapeHtml(crashLogPath)}</div>
 </body></html>`
 
   const win = new BrowserWindow({
@@ -94,7 +100,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   })
 
@@ -110,12 +116,51 @@ function createWindow() {
     console.log('[Main] Page loaded successfully')
   })
 
+  // 渲染页面不允许导航到外部站点；合法 http(s) 链接交给系统浏览器。
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  win.webContents.on('will-navigate', (event, url) => {
+    const currentUrl = win.webContents.getURL()
+    if (url === currentUrl) return
+    event.preventDefault()
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+  })
+
+  // Electron 打包后不会自动给网页输入框提供右键编辑菜单。
+  // 统一补齐剪切/复制/粘贴/全选，Password 输入框也可正常粘贴。
+  win.webContents.on('context-menu', (_, params) => {
+    if (!params.isEditable) return
+    Menu.buildFromTemplate([
+      { role: 'cut', label: '剪切', enabled: params.editFlags.canCut },
+      { role: 'copy', label: '复制', enabled: params.editFlags.canCopy },
+      { role: 'paste', label: '粘贴', enabled: params.editFlags.canPaste },
+      { type: 'separator' },
+      { role: 'selectAll', label: '全选', enabled: params.editFlags.canSelectAll },
+    ]).popup({ window: win })
+  })
+
+  // macOS 打包应用在部分机器上不会把 Cmd+V 自动转发到网页 Password 输入框。
+  // 在主进程显式执行粘贴，确保密钥和其他文本输入框都能使用系统快捷键。
+  win.webContents.on('before-input-event', (event, input) => {
+    const isPaste = input.type === 'keyDown'
+      && (input.meta || input.control)
+      && input.key.toLowerCase() === 'v'
+    if (!isPaste) return
+    event.preventDefault()
+    win.webContents.paste()
+  })
+
   if (process.env.NODE_ENV === 'development' || process.argv.includes('--dev')) {
     win.loadURL('http://localhost:5173')
     win.webContents.openDevTools()
   } else {
     win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
   }
+
+  // v1.x：显式 show()，防 macOS 升级后窗口不显示
+  win.show()
 
   return win
 }
@@ -145,6 +190,8 @@ app.whenReady().then(() => {
   // 3. 正常路径：注册所有 IPC + 创建主窗口
   mainWindow = createWindow()
   registerAll(ipcMain, mainWindow)
+  // v1.x：自定义专业/文种注入运行时 + 推送给渲染进程
+  bootstrapCustomTypes(mainWindow)
 
   app.on('activate', () => {
     if (!mainWindow || mainWindow.isDestroyed()) {

@@ -234,6 +234,149 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_photo_project ON photo(project_name);
     CREATE INDEX IF NOT EXISTS idx_photo_date ON photo(project_name, shoot_date);
 
+    -- 统一业务关系：跨模块关联的唯一真相源。旧表中的 linked_* / related_nodes
+    -- 继续保留兼容，但新功能统一读写本表。
+    CREATE TABLE IF NOT EXISTS business_relation (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_name TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      target_type TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      relation_type TEXT NOT NULL,
+      metadata TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(project_name, source_type, source_id, target_type, target_id, relation_type)
+    );
+    CREATE INDEX IF NOT EXISTS idx_relation_source
+      ON business_relation(project_name, source_type, source_id);
+    CREATE INDEX IF NOT EXISTS idx_relation_target
+      ON business_relation(project_name, target_type, target_id);
+
+    -- AI 事实证据：正式件只能引用已确认的关键证据。
+    CREATE TABLE IF NOT EXISTS evidence_item (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_name TEXT NOT NULL,
+      title TEXT NOT NULL,
+      evidence_type TEXT NOT NULL DEFAULT 'other',
+      source_ref TEXT,
+      source_location TEXT,
+      excerpt TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('confirmed', 'pending', 'invalid')),
+      critical INTEGER NOT NULL DEFAULT 0,
+      confirmed_by TEXT,
+      confirmed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_evidence_project_status
+      ON evidence_item(project_name, status, critical);
+
+    CREATE TABLE IF NOT EXISTS unified_import_batch (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_name TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      source_file TEXT NOT NULL,
+      source_hash TEXT NOT NULL,
+      field_mapping TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'committed',
+      imported_count INTEGER NOT NULL DEFAULT 0,
+      report TEXT,
+      created_at TEXT NOT NULL,
+      undone_at TEXT,
+      UNIQUE(project_name, entity_type, source_hash, status)
+    );
+    CREATE TABLE IF NOT EXISTS unified_import_row (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id INTEGER NOT NULL,
+      entity_table TEXT NOT NULL,
+      entity_id INTEGER NOT NULL,
+      source_row INTEGER,
+      raw_data TEXT,
+      FOREIGN KEY(batch_id) REFERENCES unified_import_batch(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_unified_import_row_batch ON unified_import_row(batch_id);
+
+    -- 项目主数据：所有对象采用生效区间和状态，禁止覆盖历史事实。
+    CREATE TABLE IF NOT EXISTS project_participant (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_name TEXT NOT NULL,
+      organization_type TEXT NOT NULL,
+      organization_name TEXT NOT NULL,
+      credit_code TEXT,
+      contact_name TEXT,
+      contact_phone TEXT,
+      effective_from TEXT NOT NULL,
+      effective_to TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_participant_active ON project_participant(project_name, status, organization_type);
+
+    CREATE TABLE IF NOT EXISTS project_member (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_name TEXT NOT NULL,
+      member_name TEXT NOT NULL,
+      role TEXT NOT NULL,
+      phone TEXT,
+      certificate_no TEXT,
+      effective_from TEXT NOT NULL,
+      effective_to TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_member_active ON project_member(project_name, status, role);
+
+    CREATE TABLE IF NOT EXISTS project_structure (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_name TEXT NOT NULL,
+      structure_type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      code TEXT,
+      parent_id INTEGER,
+      effective_from TEXT NOT NULL,
+      effective_to TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_structure_project ON project_structure(project_name, structure_type, status);
+
+    CREATE TABLE IF NOT EXISTS project_phase_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_name TEXT NOT NULL,
+      phase TEXT NOT NULL,
+      effective_from TEXT NOT NULL,
+      effective_to TEXT,
+      note TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_phase_current ON project_phase_history(project_name, effective_to);
+
+    CREATE TABLE IF NOT EXISTS master_data_change (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_name TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      before_value TEXT,
+      after_value TEXT,
+      changed_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_master_change ON master_data_change(project_name, changed_at);
+
+    CREATE TABLE IF NOT EXISTS document_master_snapshot (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_name TEXT NOT NULL,
+      file_path TEXT NOT NULL UNIQUE,
+      doc_type TEXT,
+      master_data TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
     -- 系统事件日志（审计追踪，B 后期用）
     CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -244,18 +387,28 @@ function initSchema(db) {
       detail TEXT,                    -- JSON
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS schema_migration (
+      version INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      applied_at TEXT NOT NULL
+    );
   `)
 
   // 兼容既有数据库：SQLite 的 CREATE TABLE 不会补列，升级时明确追加。
-  for (const statement of [
-    'ALTER TABLE progress_node ADD COLUMN source_file TEXT',
-    'ALTER TABLE progress_node ADD COLUMN source_sheet TEXT',
-    'ALTER TABLE progress_node ADD COLUMN source_row INTEGER',
-    'ALTER TABLE progress_node ADD COLUMN import_batch_id INTEGER',
-  ]) {
-    try { db.exec(statement) } catch (error) { if (!/duplicate column name/i.test(error.message)) throw error }
-  }
-  db.exec('CREATE INDEX IF NOT EXISTS idx_progress_source ON progress_node(project_name, source_file, source_sheet, source_row)')
+  db.transaction(() => {
+    for (const statement of [
+      'ALTER TABLE progress_node ADD COLUMN source_file TEXT',
+      'ALTER TABLE progress_node ADD COLUMN source_sheet TEXT',
+      'ALTER TABLE progress_node ADD COLUMN source_row INTEGER',
+      'ALTER TABLE progress_node ADD COLUMN import_batch_id INTEGER',
+      "ALTER TABLE project_structure ADD COLUMN effective_from TEXT NOT NULL DEFAULT ''",
+      'ALTER TABLE project_structure ADD COLUMN effective_to TEXT',
+    ]) {
+      try { db.exec(statement) } catch (error) { if (!/duplicate column name/i.test(error.message)) throw error }
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_progress_source ON progress_node(project_name, source_file, source_sheet, source_row)')
+    db.prepare('INSERT OR IGNORE INTO schema_migration (version, name, applied_at) VALUES (3, ?, ?)').run('P1-P6 unified capabilities', new Date().toISOString())
+  })()
 }
 
 /**

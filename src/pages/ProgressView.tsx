@@ -17,11 +17,13 @@ import {
   PlusOutlined, DeleteOutlined, EditOutlined, BarChartOutlined,
   CheckCircleOutlined, ClockCircleOutlined, WarningOutlined, ArrowLeftOutlined,
   ImportOutlined,
+  LinkOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useAppStore } from '../stores/useProjectStore'
 import { useElectronAPI } from '../hooks/useElectronAPI'
 import type { ProgressNode, ProgressNodeForm, GanttData, DeviationData, MonthlyCompare } from '../types'
+import BusinessRelationsPanel from '../components/BusinessRelationsPanel'
 
 const { Text, Title } = Typography
 
@@ -53,6 +55,7 @@ export default function ProgressView() {
   const [importing, setImporting] = useState(false)
   const [importSource, setImportSource] = useState('')
   const [importNodes, setImportNodes] = useState<any[]>([])
+  const [relationNode, setRelationNode] = useState<any | null>(null)
 
   // 编辑弹窗
   const [editing, setEditing] = useState<ProgressNode | 'new' | null>(null)
@@ -188,7 +191,11 @@ export default function ProgressView() {
           message.warning('系统尚未就绪，请稍后重试')
           return
         }
-        await window.electronAPI.progressDelete({ id: node.id })
+        const result = await window.electronAPI.progressDelete({ id: node.id })
+        if (!result.success) {
+          message.error((result as any).error || '删除失败')
+          return Promise.reject(new Error((result as any).error || '删除失败'))
+        }
         message.success('已删除')
         refresh()
       },
@@ -233,10 +240,11 @@ export default function ProgressView() {
       render: (v: any) => <Tag color={STATUS_COLOR[v as keyof typeof STATUS_COLOR] || 'default'}>{v}</Tag>,
     },
     {
-      title: '操作', key: 'action', width: 110,
+      title: '操作', key: 'action', width: 145,
       render: (_: any, n: any) => (
         <Space size={4}>
           <Button size="small" type="link" icon={<EditOutlined />} onClick={() => handleEdit(n)} style={{ padding: '0 4px' }} />
+          <Button size="small" type="link" icon={<LinkOutlined />} onClick={() => setRelationNode(n)} style={{ padding: '0 4px' }} />
           <Button size="small" type="link" danger icon={<DeleteOutlined />} onClick={() => handleDelete(n)} style={{ padding: '0 4px' }} />
         </Space>
       ),
@@ -589,6 +597,9 @@ export default function ProgressView() {
             { title: '来源位置', dataIndex: 'source', width: 130 },
           ]}
         />
+      </Modal>
+      <Modal open={!!relationNode} title={`关联资料 · ${relationNode?.name || ''}`} footer={null} onCancel={() => setRelationNode(null)} width={680}>
+        {relationNode && <BusinessRelationsPanel projectName={projectName} entityType="progress_node" entityId={relationNode.id} />}
       </Modal>
     </div>
   )

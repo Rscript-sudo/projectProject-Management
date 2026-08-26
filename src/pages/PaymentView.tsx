@@ -20,6 +20,7 @@ import {
 import { useAppStore } from '../stores/useProjectStore'
 import { useElectronAPI } from '../hooks/useElectronAPI'
 import type { PaymentRequest, PaymentForm, PaymentSummary, ApprovalAction } from '../types'
+import BusinessRelationsPanel from '../components/BusinessRelationsPanel'
 
 const { Text, Title } = Typography
 const { TextArea } = Input
@@ -44,6 +45,8 @@ export default function PaymentView() {
   const [payments, setPayments] = useState<PaymentRequest[]>([])
   const [summary, setSummary] = useState<PaymentSummary | null>(null)
   const [loading, setLoading] = useState(false)
+  const [progressNodes, setProgressNodes] = useState<any[]>([])
+  const [contracts, setContracts] = useState<any[]>([])
   const [editing, setEditing] = useState<PaymentRequest | 'new' | null>(null)
   const [historyOf, setHistoryOf] = useState<PaymentRequest | null>(null)
   const [editForm, setEditForm] = useState<PaymentForm>({
@@ -60,12 +63,16 @@ export default function PaymentView() {
     if (!apiReady) return
     setLoading(true)
     try {
-      const [list, sum] = await Promise.all([
+      const [list, sum, nodes, contractList] = await Promise.all([
         window.electronAPI.paymentList(projectPath),
         window.electronAPI.paymentSummary(projectPath),
+        window.electronAPI.progressList(projectPath),
+        window.electronAPI.contractList(projectPath),
       ])
       setPayments(list)
       setSummary(sum)
+      setProgressNodes(nodes || [])
+      setContracts(contractList || [])
     } catch (e: any) {
       message.error('加载失败：' + e.message)
     } finally {
@@ -308,8 +315,31 @@ export default function PaymentView() {
             <Input value={editForm.amount_upper ?? ''} onChange={e => setEditForm({ ...editForm, amount_upper: e.target.value })} placeholder="壹佰贰拾叁万肆仟伍佰陆拾柒元整" />
           </div>
           <div>
+            <Text type="secondary" style={{ fontSize: 12 }}>所属合同</Text>
+            <Select
+              allowClear
+              value={editForm.contract_id}
+              onChange={contract_id => setEditForm({ ...editForm, contract_id })}
+              options={contracts.map(contract => ({ value: contract.id, label: contract.contract_name }))}
+              placeholder="选择本次支付对应合同"
+              style={{ width: '100%' }}
+            />
+          </div>
+          <div>
             <Text type="secondary" style={{ fontSize: 12 }}>工程内容描述</Text>
             <TextArea value={editForm.description ?? ''} onChange={e => setEditForm({ ...editForm, description: e.target.value })} rows={3} placeholder="本月完成 XXX 工程..." />
+          </div>
+          <div>
+            <Text type="secondary" style={{ fontSize: 12 }}>关联已确认进度节点</Text>
+            <Select
+              mode="multiple"
+              allowClear
+              value={(() => { try { return JSON.parse(editForm.related_nodes || '[]') } catch { return [] } })()}
+              onChange={ids => setEditForm({ ...editForm, related_nodes: JSON.stringify(ids) })}
+              options={progressNodes.map(node => ({ value: node.id, label: `${node.name}（${node.progress_percent || 0}%）` }))}
+              placeholder="选择本期计量对应的进度节点"
+              style={{ width: '100%' }}
+            />
           </div>
         </Space>
       </Modal>
@@ -358,6 +388,9 @@ export default function PaymentView() {
             ) : (
               <Empty description="暂无审批记录" />
             )}
+            <div style={{ marginTop: 16 }}>
+              <BusinessRelationsPanel projectName={projectName} entityType="payment_request" entityId={historyOf.id} />
+            </div>
           </>
         )}
       </Modal>

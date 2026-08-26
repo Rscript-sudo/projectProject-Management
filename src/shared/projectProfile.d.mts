@@ -1,4 +1,4 @@
-export type ProjectTypeCode =
+export type BuiltinProjectTypeCode =
   | 'information'
   | 'communication'
   | 'power'
@@ -11,11 +11,13 @@ export type ProjectTypeCode =
   | 'unclassified'
 
 export interface ProjectTypeProfile {
-  code: ProjectTypeCode
+  code: string
   label: string
   aliases: string[]
   suggestedTags: string[]
   forbiddenTerms: string[]
+  source?: 'builtin' | 'custom'
+  hasCustomSop?: boolean
 }
 
 export interface ProjectProfileInput {
@@ -28,14 +30,17 @@ export interface ProjectProfileInput {
 
 export interface NormalizedProjectProfile {
   projectType: string
-  projectTypeCode: ProjectTypeCode
+  projectTypeCode: string
   projectTags: string[]
   projectFeatures: string
   projectPhase: string
 }
 
 export const PROJECT_TYPE_OPTIONS: ProjectTypeProfile[]
-export function normalizeProjectType(value: unknown): ProjectTypeCode
+export function setCustomProjectTypes(list: unknown): { ok: boolean; added: number; rejected: unknown[] }
+export function getCustomProjectTypes(): ProjectTypeProfile[]
+export function getAllProjectTypes(): ProjectTypeProfile[]
+export function normalizeProjectType(value: unknown): string
 export function getProjectTypeProfile(value: unknown): ProjectTypeProfile
 export function normalizeTags(tags: unknown): string[]
 export function normalizeProjectProfile(input?: ProjectProfileInput): NormalizedProjectProfile

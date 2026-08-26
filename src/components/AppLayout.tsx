@@ -8,18 +8,27 @@ import {
   ProjectOutlined,
   SearchOutlined,
   BookOutlined,
+  SafetyCertificateOutlined,
+  BarChartOutlined,
 } from '@ant-design/icons'
 import { useAppStore } from '../stores/useProjectStore'
 import GlobalSearch from './GlobalSearch'
-import TemplateCenterModal from './TemplateCenterModal'
 import { PROJECT_TYPE_OPTIONS, getProjectTypeProfile, normalizeTags } from '../shared/projectProfile.mjs'
+import { useSettingsStore } from '../stores/useSettingsStore'
+import OperationCenter from './OperationCenter'
 
 const { Sider, Content } = Layout
 const { Text } = Typography
 
 export default function AppLayout() {
   const navigate = useNavigate()
-  const { loadSettings, loadProjects, setCurrentProject, createProject, projectRoot } = useAppStore()
+  const { loadSettings, loadProjects, setCurrentProject, createProject, projectRoot, currentProject } = useAppStore()
+  // v1.x：自定义专业 + 内置 = 下拉数据源
+  const customProjectTypes = useSettingsStore(s => s.customProjectTypes)
+  const allProjectTypeOptions = [
+    ...PROJECT_TYPE_OPTIONS.filter(item => item.code !== 'unclassified'),
+    ...customProjectTypes,
+  ]
   const { message } = App.useApp()
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
@@ -33,7 +42,7 @@ export default function AppLayout() {
   const [newChiefEngineer, setNewChiefEngineer] = useState('')
   const [loading, setLoading] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [templateCenterOpen, setTemplateCenterOpen] = useState(false)
+  const [operationCenterOpen, setOperationCenterOpen] = useState(false)
 
   // 键盘快捷键 Cmd+K / Ctrl+K 打开搜索
   useEffect(() => {
@@ -49,6 +58,8 @@ export default function AppLayout() {
 
   useEffect(() => {
     loadSettings()
+    // 启动时同步文种 AI 规则与用户覆盖，确保无需先进设置页也能在 AI 工作台生效。
+    useSettingsStore.getState().loadCustomTypes()
   }, [])
 
   const handleCreateProject = async () => {
@@ -111,8 +122,22 @@ export default function AppLayout() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 0' }}>
           <Button
             type="text"
+            icon={<BarChartOutlined />}
+            onClick={() => navigate('/portfolio')}
+            style={{ fontSize: 18, width: 40, height: 40 }}
+            title="多项目驾驶舱"
+          />
+          <Button
+            type="text"
+            icon={<SafetyCertificateOutlined />}
+            onClick={() => setOperationCenterOpen(true)}
+            style={{ fontSize: 18, width: 40, height: 40 }}
+            title="运行与诊断中心"
+          />
+          <Button
+            type="text"
             icon={<BookOutlined />}
-            onClick={() => setTemplateCenterOpen(true)}
+            onClick={() => navigate('/template-center')}
             style={{ fontSize: 18, width: 40, height: 40 }}
             title="模板中心"
           />
@@ -168,7 +193,7 @@ export default function AppLayout() {
               style={{ width: '100%' }}
               size="small"
               placeholder="请选择项目类型"
-              options={PROJECT_TYPE_OPTIONS.filter(item => item.code !== 'unclassified').map(item => ({ value: item.label, label: item.label }))}
+              options={allProjectTypeOptions.map(item => ({ value: item.label, label: item.label }))}
             />
           </div>
           <div style={{ marginBottom: 12 }}>
@@ -216,7 +241,7 @@ export default function AppLayout() {
         onClose={() => setSearchOpen(false)}
         onOpenFile={(path) => window.electronAPI?.openFile(path)}
       />
-      <TemplateCenterModal open={templateCenterOpen} onClose={() => setTemplateCenterOpen(false)} />
+      <OperationCenter open={operationCenterOpen} onClose={() => setOperationCenterOpen(false)} projectPath={currentProject?.path} />
     </Layout>
   )
 }

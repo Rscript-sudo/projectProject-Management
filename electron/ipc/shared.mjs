@@ -3,7 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { encryptSecret, decryptSecret } from './secret.mjs'
 import { generateProjectCodeFromName } from './filename.mjs'
-import { normalizeProjectProfile } from '../../src/shared/projectProfile.mjs'
+import { normalizeProjectProfile, setCustomProjectTypes } from '../../src/shared/projectProfile.mjs'
 
 export function getDefaultRoot() {
   return path.join(app.getPath('home'), 'Desktop')
@@ -269,6 +269,9 @@ export function getSettings() {
           merged._apiKeyDecryptError = decrypted.decryptError
         }
       }
+      // 把 settings.json 里的 customProjectTypes 注入运行时缓存
+      // （供 aiService / normalizeProjectType / 项目类型 Select 用）
+      setCustomProjectTypes(merged.customProjectTypes || [])
       return merged
     }
   } catch (e) {
@@ -296,18 +299,30 @@ export function getSettingsForFrontend() {
 
 export function saveSettings(settings) {
   try {
-    const toSave = { ...settings }
+    // 设置页拿不到已加密密钥明文；保存其他字段时必须合并原始文件，不能把旧密钥抹掉。
+    let existingRaw = {}
+    try {
+      if (fs.existsSync(getSettingsPath())) existingRaw = JSON.parse(fs.readFileSync(getSettingsPath(), 'utf8'))
+    } catch (_) {}
+    const incomingApiKey = typeof settings.apiKey === 'string' ? settings.apiKey.trim() : ''
+    const toSave = { ...existingRaw, ...settings }
     // 剔除前端透传的运行时字段——这些不应该落盘
     delete toSave.hasApiKey
     delete toSave.apiKeyDecryptError
     // 如果前端传的是明文 apiKey，加密后落盘；不传或传空字符串则保留原值
-    if (typeof toSave.apiKey === 'string') {
-      if (toSave.apiKey === '') {
-        // 显式清空
-        delete toSave.apiKey
-      } else {
-        toSave.apiKey = encryptSecret(toSave.apiKey)
-      }
+    if (incomingApiKey) toSave.apiKey = encryptSecret(incomingApiKey)
+    else if (existingRaw.apiKey !== undefined) toSave.apiKey = existingRaw.apiKey
+    else delete toSave.apiKey
+    // ====== 校验 customProjectTypes / customDocTypes ======
+    if (Array.isArray(toSave.customProjectTypes)) {
+      toSave.customProjectTypes = sanitizeCustomProjectTypes(toSave.customProjectTypes)
+    } else if (toSave.customProjectTypes !== undefined) {
+      delete toSave.customProjectTypes
+    }
+    if (Array.isArray(toSave.customDocTypes)) {
+      toSave.customDocTypes = sanitizeCustomDocTypes(toSave.customDocTypes)
+    } else if (toSave.customDocTypes !== undefined) {
+      delete toSave.customDocTypes
     }
     fs.writeFileSync(getSettingsPath(), JSON.stringify(toSave, null, 2), 'utf8')
     return { success: true }
@@ -315,4 +330,86 @@ export function saveSettings(settings) {
     console.error('[saveSettings] Error:', e.message)
     return { success: false, error: e.message }
   }
+}
+
+/**
+ * 清洗用户提交的自定义专业列表
+ * - code 必须英文小写、合法字符
+ * - label 非空
+ * - 拒绝与内置 code 冲突的项
+ * - 拒绝重复 code（保留先出现的）
+ */
+function sanitizeCustomProjectTypes(list) {
+  // 内置 code 列表——与 projectProfile.mjs 的 PROJECT_TYPE_OPTIONS 同步
+  const builtinCodes = new Set([
+    'information', 'communication', 'power', 'civil', 'municipal',
+    'building', 'landscape', 'steel', 'decoration', 'unclassified',
+  ])
+  const seen = new Set()
+  const cleaned = []
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue
+    const code = String(item.code || '').trim().toLowerCase()
+    const label = String(item.label || '').trim()
+    if (!code || !/^[a-z][a-z0-9_]{0,30}$/.test(code)) continue
+    if (!label) continue
+    if (builtinCodes.has(code)) continue
+    if (seen.has(code)) continue
+    seen.add(code)
+    cleaned.push({
+      code,
+      label,
+      aliases: Array.isArray(item.aliases) ? item.aliases.map(a => String(a).trim()).filter(Boolean) : [],
+      suggestedTags: Array.isArray(item.suggestedTags) ? item.suggestedTags.map(t => String(t).trim()).filter(Boolean) : [],
+      forbiddenTerms: Array.isArray(item.forbiddenTerms) ? item.forbiddenTerms.map(t => String(t).trim()).filter(Boolean) : [],
+      hasCustomSop: !!item.hasCustomSop,
+      createdAt: item.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+  }
+  return cleaned
+}
+
+/**
+ * 清洗用户提交的自定义文种列表
+ * - code 必须英文小写、合法字符
+ * - label / fileCode 非空
+ * - 拒绝与 27 个内置 docType 冲突（核心内置集合在 aiService.ts 的 identifyDocType）
+ *   - 但因为 aiService 的内置 docType 是中文 label，这里只校验 27 个内置 label 不冲突
+ */
+function sanitizeCustomDocTypes(list) {
+  const builtinDocLabels = new Set([
+    '监理日志', '监理周报', '监理月报', '会议纪要', '整改通知书', '安全通知书',
+    '工程联系单', '工程函件', '停工令', '施工方案', '监理总结', '专项汇报',
+    '项目进度', '安全资料', '问题清单', '审计报告', '进场报验', '隐蔽工程',
+    '分部分项验收', '竣工移交', '缺陷责任期', '开工报审', '图纸会审',
+    '监理规划', '监理细则', '开工条件检查表', '承建资格报审',
+  ])
+  const seen = new Set()
+  const cleaned = []
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue
+    const code = String(item.code || '').trim().toLowerCase()
+    const label = String(item.label || '').trim()
+    const fileCode = String(item.fileCode || '').trim().toUpperCase()
+    if (!code || !/^[a-z][a-z0-9_]{0,30}$/.test(code)) continue
+    if (!label) continue
+    if (!fileCode || !/^[A-Z][A-Z0-9_-]{0,9}$/.test(fileCode)) continue
+    if (builtinDocLabels.has(label)) continue
+    if (seen.has(code) || seen.has(`label:${label}`)) continue
+    seen.add(code)
+    seen.add(`label:${label}`)
+    cleaned.push({
+      code,
+      label,
+      fileCode,
+      projectType: String(item.projectType || '').trim() || null,
+      minWords: Number.isFinite(item.minWords) && item.minWords > 0 ? Math.floor(item.minWords) : 600,
+      inStructuredWhitelist: !!item.inStructuredWhitelist,
+      hasCustomSop: !!item.hasCustomSop,
+      createdAt: item.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+  }
+  return cleaned
 }

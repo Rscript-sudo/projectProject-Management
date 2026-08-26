@@ -15,12 +15,13 @@ import {
 } from 'antd'
 import {
   PlusOutlined, ArrowLeftOutlined, FileProtectOutlined, WarningOutlined,
-  ExclamationCircleOutlined, DollarOutlined, SearchOutlined, StopOutlined,
+  ExclamationCircleOutlined, DollarOutlined, SearchOutlined, StopOutlined, LinkOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useAppStore } from '../stores/useProjectStore'
 import { useElectronAPI } from '../hooks/useElectronAPI'
 import type { Contract, ChangeOrder, Claim, ContractDashboard } from '../types'
+import BusinessRelationsPanel from '../components/BusinessRelationsPanel'
 
 const { Text, Title } = Typography
 const { TextArea } = Input
@@ -64,6 +65,7 @@ export default function ContractView() {
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState('contract')
   const [editing, setEditing] = useState<{ type: string; mode: string; record?: any } | null>(null)
+  const [relationEntity, setRelationEntity] = useState<{ type: string; id: number; title: string } | null>(null)
 
   useEffect(() => {
     if (!apiReady || !projectPath) return
@@ -129,9 +131,10 @@ export default function ContractView() {
       ),
     },
     {
-      title: '操作', key: 'action', width: 80,
-      render: (_: any, r: any) => r.status === '执行中' ? (
-        <Button size="small" type="link" danger icon={<StopOutlined />}
+      title: '操作', key: 'action', width: 150,
+      render: (_: any, r: any) => <Space size={2}>
+        <Button size="small" type="link" icon={<LinkOutlined />} onClick={() => setRelationEntity({ type: 'contract', id: r.id, title: r.contract_name })}>关联</Button>
+        {r.status === '执行中' ? <Button size="small" type="link" danger icon={<StopOutlined />}
           onClick={() => {
             modal.confirm({
               title: '终止合同？', okType: 'danger',
@@ -141,8 +144,8 @@ export default function ContractView() {
                 refresh()
               },
             })
-          }}>终止</Button>
-      ) : '-',
+          }}>终止</Button> : null}
+      </Space>,
     },
   ]
 
@@ -170,6 +173,7 @@ export default function ContractView() {
         return <Tag color={c?.color}>{v}</Tag>
       },
     },
+    { title: '操作', key: 'action', width: 80, render: (_: any, r: any) => <Button size="small" type="link" icon={<LinkOutlined />} onClick={() => setRelationEntity({ type: 'change_order', id: r.id, title: r.subject })}>关联</Button> },
   ]
 
   // ============= 索赔 =============
@@ -306,14 +310,17 @@ export default function ContractView() {
         />
       </Card>
 
-      <ContractEditModal editing={editing} setEditing={setEditing} projectPath={projectPath}
+      <ContractEditModal editing={editing} setEditing={setEditing} projectPath={projectPath} contracts={contracts}
         onSaved={() => { setEditing(null); refresh() }} message={message} />
+      <Modal open={!!relationEntity} title={`关联资料 · ${relationEntity?.title || ''}`} footer={null} onCancel={() => setRelationEntity(null)} width={680}>
+        {relationEntity && <BusinessRelationsPanel projectName={projectName} entityType={relationEntity.type} entityId={relationEntity.id} />}
+      </Modal>
     </div>
   )
 }
 
 // 单独的编辑弹窗组件
-function ContractEditModal({ editing, setEditing, projectPath, onSaved, message }: any) {
+function ContractEditModal({ editing, setEditing, projectPath, contracts, onSaved, message }: any) {
   const [form, setForm] = useState<any>({})
 
   useEffect(() => {
@@ -405,6 +412,12 @@ function ContractEditModal({ editing, setEditing, projectPath, onSaved, message 
 
       {editing.type === 'change' && (
         <Space direction="vertical" style={{ width: '100%' }} size={10}>
+          <div>
+            <Text type="secondary" style={{ fontSize: 12 }}>所属合同</Text>
+            <Select value={form.contract_id} onChange={contract_id => setForm({ ...form, contract_id })}
+              options={(contracts || []).map((contract: any) => ({ value: contract.id, label: contract.contract_name }))}
+              style={{ width: '100%' }} placeholder="选择本次变更对应合同" allowClear />
+          </div>
           <Row gutter={8}>
             <Col span={12}>
               <Text type="secondary" style={{ fontSize: 12 }}>变更编号</Text>

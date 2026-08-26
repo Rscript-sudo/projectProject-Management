@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
+import { loadXlsx } from './xlsxRuntime.mjs'
 
 const execFileAsync = promisify(execFile)
 const date = value => {
@@ -43,7 +44,7 @@ export async function parseMaterial(filePath) {
   if (!filePath || !fs.existsSync(filePath)) throw new Error('文件不存在')
   const ext = path.extname(filePath).toLowerCase(); const fileName = path.basename(filePath)
   if (ext === '.xlsx' || ext === '.xls') {
-    const module = await import('xlsx'); const XLSX = module.default || module; const workbook = XLSX.readFile(filePath, { cellDates: true })
+    const XLSX = await loadXlsx(); const workbook = XLSX.readFile(filePath, { cellDates: true })
     const text = workbook.SheetNames.map(name => `【工作表：${name}】\n${XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: '' }).map(row => row.join('\t')).join('\n')}`).join('\n\n')
     return { success: true, fileName, ext, type: 'excel', text: text.slice(0, 50000), truncated: text.length > 50000, progressCandidates: progressCandidates(workbook, XLSX, fileName) }
   }

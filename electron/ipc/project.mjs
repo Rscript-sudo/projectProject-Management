@@ -1,13 +1,14 @@
 import { app, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import crypto from 'node:crypto'
 import { fileURLToPath } from 'url'
 import { safeCall } from './safe.mjs'
 import { ensureDir, ensureProjectIndex, readProjectIndex, writeProjectIndex, createProjectStructure, getProjectDataPath, ensureProjectDataDir, getDefaultRoot, getSettings } from './shared.mjs'
 import { generateProjectCodeFromName } from './filename.mjs'
 import { normalizeProjectProfile } from '../../src/shared/projectProfile.mjs'
 import { normalizeDocumentRules } from '../../src/shared/documentRules.mjs'
-import { assertSafeProjectName } from '../db/repo.mjs'
+import { assertSafeProjectName, getCurrentMasterProfile } from '../db/repo.mjs'
 
 const PROJECT_LEDGER_FILES = new Set([
   '合同台账.json',
@@ -54,6 +55,33 @@ function projectTemplateConfig(projectPath) {
   return { dataDir, configPath, config: { ...config, documentRules: normalizeDocumentRules(config.documentRules) } }
 }
 
+function projectChatHistoryPath(projectPath) {
+  const dataDir = getProjectDataPath(path.basename(projectPath))
+  return { dataDir, historyPath: path.join(dataDir, 'ai-chat-history.json') }
+}
+
+function normalizeChatMessage(item) {
+  return {
+    id: String(item?.id || crypto.randomUUID()), role: item?.role === 'user' ? 'user' : 'assistant', content: String(item?.content || ''),
+    ...(item?.docType ? { docType: String(item.docType) } : {}), ...(item?.wordCount != null ? { wordCount: Number(item.wordCount) || 0 } : {}),
+    ...(item?.rawData && typeof item.rawData === 'object' ? { rawData: item.rawData } : {}), ...(item?.imageContext ? { imageContext: String(item.imageContext) } : {}),
+    ...(Array.isArray(item?.imagePaths) ? { imagePaths: item.imagePaths.map(String).slice(0, 20) } : {}), ...(Array.isArray(item?.actions) ? { actions: item.actions.slice(0, 10) } : {}),
+    timestamp: item?.timestamp ? new Date(item.timestamp).toISOString() : new Date().toISOString(),
+  }
+}
+function readChatStore(projectPath) {
+  const { dataDir, historyPath } = projectChatHistoryPath(projectPath)
+  if (!fs.existsSync(historyPath)) return { dataDir, historyPath, store: { version: 3, activeSessionId: '', sessions: [] } }
+  const parsed = JSON.parse(fs.readFileSync(historyPath, 'utf8'))
+  if (parsed.version >= 3 && Array.isArray(parsed.sessions)) return { dataDir, historyPath, store: parsed }
+  const id = crypto.randomUUID(); const messages = (Array.isArray(parsed.messages) ? parsed.messages : []).map(normalizeChatMessage)
+  return { dataDir, historyPath, store: { version: 3, activeSessionId: id, sessions: [{ id, title: '历史会话', archived: false, createdAt: parsed.updatedAt || new Date().toISOString(), updatedAt: parsed.updatedAt || new Date().toISOString(), messages }] } }
+}
+function writeChatStore(dataDir, historyPath, store) {
+  ensureDir(dataDir); const temporary = `${historyPath}.${process.pid}.tmp`
+  fs.writeFileSync(temporary, JSON.stringify({ ...store, version: 3, updatedAt: new Date().toISOString() }, null, 2), 'utf8'); fs.renameSync(temporary, historyPath)
+}
+
 export function register(ipcMain) {
   ipcMain.handle('fs:getRoot', () => {
     try {
@@ -98,7 +126,9 @@ export function register(ipcMain) {
       if (!cfg.projectCode) {
         cfg.projectCode = generateProjectCodeFromName(path.basename(projectPath))
       }
-      return { ...cfg, ...normalizeProjectProfile(cfg), documentRules: normalizeDocumentRules(cfg.documentRules) }
+      const master = getCurrentMasterProfile(path.basename(projectPath))
+      const merged = { ...cfg, ...Object.fromEntries(Object.entries(master).filter(([, value]) => value)) }
+      return { ...merged, ...normalizeProjectProfile(merged), documentRules: normalizeDocumentRules(merged.documentRules) }
     } catch {
       return { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', ...normalizeProjectProfile(), documentRules: normalizeDocumentRules(), projectCode: 'PROJECT' }
     }
@@ -110,6 +140,41 @@ export function register(ipcMain) {
     const configPath = path.join(dataDir, 'project.config.json')
     fs.writeFileSync(configPath, JSON.stringify({ ...config, ...normalizeProjectProfile(config), documentRules: normalizeDocumentRules(config.documentRules) }, null, 2), 'utf8')
     return { success: true }
+  }))
+
+  ipcMain.handle('fs:readProjectChatHistory', safeCall((_, projectPath) => {
+    const index = readProjectIndex()
+    assertIndexedProjectPath(projectPath, index)
+    const { dataDir, historyPath, store } = readChatStore(projectPath)
+    let session = store.sessions.find(item => item.id === store.activeSessionId && !item.archived) || store.sessions.find(item => !item.archived)
+    if (!session) { const now = new Date().toISOString(); session = { id: crypto.randomUUID(), title: '新会话', archived: false, createdAt: now, updatedAt: now, messages: [] }; store.sessions.unshift(session); store.activeSessionId = session.id; writeChatStore(dataDir, historyPath, store) }
+    return { success: true, sessionId: session.id, messages: session.messages || [] }
+  }))
+
+  ipcMain.handle('fs:writeProjectChatHistory', safeCall((_, projectPath, messages) => {
+    const index = readProjectIndex()
+    assertIndexedProjectPath(projectPath, index)
+    const { dataDir, historyPath, store } = readChatStore(projectPath)
+    let session = store.sessions.find(item => item.id === store.activeSessionId)
+    if (!session) { const now = new Date().toISOString(); session = { id: crypto.randomUUID(), title: '新会话', archived: false, createdAt: now, updatedAt: now, messages: [] }; store.sessions.unshift(session); store.activeSessionId = session.id }
+    const normalized = (Array.isArray(messages) ? messages : []).slice(-200).map(normalizeChatMessage)
+    session.messages = normalized; session.updatedAt = new Date().toISOString(); if (session.title === '新会话' && normalized[0]?.content) session.title = normalized[0].content.slice(0, 28)
+    writeChatStore(dataDir, historyPath, store)
+    return { success: true, count: normalized.length }
+  }))
+
+  ipcMain.handle('chat:listSessions', safeCall((_, projectPath, query = '') => {
+    assertIndexedProjectPath(projectPath, readProjectIndex()); const { store } = readChatStore(projectPath); const keyword = String(query).trim().toLowerCase()
+    return { success: true, activeSessionId: store.activeSessionId, sessions: store.sessions.filter(session => !keyword || session.title.toLowerCase().includes(keyword) || session.messages.some(message => message.content.toLowerCase().includes(keyword))).map(({ messages, ...session }) => ({ ...session, messageCount: messages.length, preview: messages.at(-1)?.content?.slice(0, 80) || '' })) }
+  }))
+  ipcMain.handle('chat:createSession', safeCall((_, projectPath, title = '新会话') => {
+    assertIndexedProjectPath(projectPath, readProjectIndex()); const { dataDir, historyPath, store } = readChatStore(projectPath); const now = new Date().toISOString(); const session = { id: crypto.randomUUID(), title: String(title || '新会话').slice(0, 60), archived: false, createdAt: now, updatedAt: now, messages: [] }; store.sessions.unshift(session); store.activeSessionId = session.id; writeChatStore(dataDir, historyPath, store); return { success: true, session }
+  }))
+  ipcMain.handle('chat:openSession', safeCall((_, projectPath, sessionId) => {
+    assertIndexedProjectPath(projectPath, readProjectIndex()); const { dataDir, historyPath, store } = readChatStore(projectPath); const session = store.sessions.find(item => item.id === sessionId); if (!session) throw new Error('会话不存在'); store.activeSessionId = session.id; session.archived = false; writeChatStore(dataDir, historyPath, store); return { success: true, session }
+  }))
+  ipcMain.handle('chat:archiveSession', safeCall((_, projectPath, sessionId, archived = true) => {
+    assertIndexedProjectPath(projectPath, readProjectIndex()); const { dataDir, historyPath, store } = readChatStore(projectPath); const session = store.sessions.find(item => item.id === sessionId); if (!session) throw new Error('会话不存在'); session.archived = Boolean(archived); session.updatedAt = new Date().toISOString(); if (archived && store.activeSessionId === sessionId) store.activeSessionId = ''; writeChatStore(dataDir, historyPath, store); return { success: true }
   }))
 
   // 项目模板独立保存到项目目录；项目配置仅记录当前生效版本。

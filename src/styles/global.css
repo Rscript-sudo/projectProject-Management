@@ -146,3 +146,85 @@ html, body, #root {
   background: #ff4d4f;
   opacity: 0.9;
 }
+
+/* AI 扩写规则：按 Word 表格结构显示原始 DOCX 模板 */
+.docx-template-preview {
+  color: #20242a;
+  font-family: "Songti SC", "SimSun", serif;
+}
+
+.docx-template-preview table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin: 0 auto;
+  background: #fff;
+}
+
+.docx-template-preview td,
+.docx-template-preview th {
+  border: 1px solid #30343b;
+  padding: 7px 9px;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+.docx-template-preview td[rowspan="2"] {
+  height: 46px;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.docx-template-preview td[rowspan="4"] {
+  height: 116px;
+  vertical-align: top;
+}
+
+.docx-template-preview p {
+  margin: 0;
+  min-height: 20px;
+  line-height: 1.5;
+}
+
+.docx-template-preview .placeholder {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid #91caff;
+  border-radius: 5px;
+  background: #f0f7ff;
+  color: #0958d9;
+  font: inherit;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.docx-template-preview .placeholder.ai {
+  border-color: #d3adf7;
+  background: #f9f0ff;
+  color: #722ed1;
+}
+
+.docx-template-preview .placeholder.keep {
+  border-color: #d9d9d9;
+  background: #fafafa;
+  color: #595959;
+}
+
+.docx-template-preview .placeholder.selected {
+  outline: 2px solid #9254de;
+  outline-offset: 2px;
+}
+
+.docx-template-preview .placeholder span {
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: #fff;
+  background: #722ed1;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 10px;
+  white-space: nowrap;
+}

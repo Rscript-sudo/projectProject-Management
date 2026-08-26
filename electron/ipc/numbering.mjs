@@ -91,6 +91,33 @@ export function buildDefaultNumberingConfig() {
   }
 }
 
+// v1.x：自定义文种的 prefix 注入（settings 变更后调）
+// 自定义文种用 fileCode 的前 2 位做 prefix（兼容 ZX/AQ 等内置），reset 默认 'never'
+const customDocTypesCache = new Map()
+
+export function setCustomDocTypePrefixes(list) {
+  customDocTypesCache.clear()
+  if (!Array.isArray(list)) return
+  for (const item of list) {
+    if (item && (item.label || item.code)) {
+      const key = item.label || item.code
+      // prefix 取 fileCode 前 2 位（与内置风格一致，如 YFB → YF）
+      const prefix = (item.fileCode || 'XX').slice(0, 2).toUpperCase()
+      customDocTypesCache.set(key, { prefix, reset: 'never', lastDate: '', lastSeq: 0 })
+    }
+  }
+}
+
+/** 给 buildDefaultNumberingConfig 拼接自定义文种 */
+function mergeCustomDocTypes(defaults) {
+  if (customDocTypesCache.size === 0) return defaults
+  const result = { ...defaults }
+  for (const [label, rule] of customDocTypesCache) {
+    if (!result[label]) result[label] = rule
+  }
+  return result
+}
+
 /**
  * 获取日期关键词，用于判断是否需要重置序号
  */
@@ -121,6 +148,21 @@ function getISOWeek(date) {
   d.setUTCDate(d.getUTCDate() + 4 - dayNum)
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
   return Math.ceil((((d - yearStart) / 86400000) + 1) / 7)
+}
+
+function getProjectCode(projectName) {
+  const configPath = path.join(getProjectDataPath(projectName), 'project.config.json')
+  let configured = ''
+  if (fs.existsSync(configPath)) {
+    try { configured = JSON.parse(fs.readFileSync(configPath, 'utf8')).projectCode || '' } catch {}
+  }
+  const fallback = String(projectName || 'PROJECT').replace(/[^A-Za-z0-9\u4e00-\u9fff]/g, '').slice(0, 16)
+  return String(configured || fallback || 'PROJECT').replace(/[^A-Za-z0-9\u4e00-\u9fff-]/g, '').toUpperCase()
+}
+
+function attachProjectCode(number, projectName) {
+  const projectCode = getProjectCode(projectName)
+  return number.startsWith(`${projectCode}-`) ? number : `${projectCode}-${number}`
 }
 
 /**
@@ -188,7 +230,7 @@ export function getEffectiveRules(projectName) {
   }
 
   // 合并默认配置（用户自定义规则覆盖默认）
-  const defaults = buildDefaultNumberingConfig()
+  const defaults = mergeCustomDocTypes(buildDefaultNumberingConfig())
   const merged = { ...defaults }
   for (const [key, rule] of Object.entries(numbering)) {
     if (rule && typeof rule === 'object') {
@@ -233,14 +275,15 @@ export async function getAndIncrementNumber(docType, projectName) {
       // 没有配置这个类型，用默认规则生成一个
       const defaultRules = buildDefaultNumberingConfig()
       const defaultRule = defaultRules[docType] || { prefix: docType.slice(0, 2).toUpperCase(), reset: 'monthly', lastDate: '', lastSeq: 0 }
-      const result = generateNextNumber(docType, defaultRule, projectName)
+      // 正式编号以项目为边界永久递增，避免月度重置后在同一项目内出现重复编号。
+      const result = generateNextNumber(docType, { ...defaultRule, reset: 'never' }, projectName)
       // 同步更新配置
       rules[docType] = { ...defaultRule, lastSeq: result.lastSeq, lastDate: result.lastDate }
       saveNumberingRules(projectName, rules)
-      return result.number
+      return attachProjectCode(result.number, projectName)
     }
 
-    const result = generateNextNumber(docType, rule, projectName)
+    const result = generateNextNumber(docType, { ...rule, reset: 'never' }, projectName)
 
     // 更新规则状态
     rules[docType] = {
@@ -249,7 +292,7 @@ export async function getAndIncrementNumber(docType, projectName) {
       lastDate: result.lastDate,
     }
     saveNumberingRules(projectName, rules)
-    return result.number
+    return attachProjectCode(result.number, projectName)
   })
 }
 
@@ -259,5 +302,5 @@ export async function getAndIncrementNumber(docType, projectName) {
 export function previewNumber(docType, projectName) {
   const rules = getEffectiveRules(projectName)
   const rule = rules[docType] || buildDefaultNumberingConfig()[docType] || { prefix: docType.slice(0, 2).toUpperCase(), reset: 'monthly', lastDate: '', lastSeq: 0 }
-  return generateNextNumber(docType, rule, projectName).number
+  return attachProjectCode(generateNextNumber(docType, { ...rule, reset: 'never' }, projectName).number, projectName)
 }
