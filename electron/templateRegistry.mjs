@@ -3,6 +3,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { normalizeProjectType } from '../src/shared/projectProfile.mjs'
 import { getTemplateScopeDir, getTemplateWorkspaceRoot } from './templateWorkspace.mjs'
+import { isTemplateReady } from '../src/shared/templateReadiness.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -56,7 +57,7 @@ export function listTemplateLibrary(userDataPath) {
   return readRegistry(userDataPath).templates.sort((a, b) => {
     const byUpdatedAt = String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
     return byUpdatedAt || String(b.id || '').localeCompare(String(a.id || ''))
-  })
+  }).map(item => ({ ...item, missing: !item.path || !fs.existsSync(item.path) }))
 }
 
 /** 把旧版散落路径、英文 ID 文件名和同文种变体收敛为一份中文正式模板。 */
@@ -320,16 +321,19 @@ export function resolveLibraryTemplate(userDataPath, { docType, projectType, sel
   const templates = listTemplateLibrary(userDataPath).filter(item => item.docType === docType && fs.existsSync(item.path))
   if (selectedTemplateId) {
     const selected = templates.find(item => item.id === selectedTemplateId)
+    if (selected && !isTemplateReady(selected)) throw new Error(`模板“${selected.name || selected.docType}”尚未完成占位符识别和 AI 扩写规则配置`)
     if (selected) return selected
   }
+  // 未完成配置的用户模板可以继续在模板中心编辑，但不能自动参与正式文档生成。
+  const readyTemplates = templates.filter(isTemplateReady)
   // v1.x：projectType 兼容 label 和 code（normalizeProjectType 都处理）
   const targetCode = normalizeProjectType(projectType)
   // 优先级：personal（个人私有库，用户自己配）> professional（专业库）> global（通用库）
-  return templates.find(item => item.scope === 'personal')
-    || templates.find(item =>
+  return readyTemplates.find(item => item.scope === 'personal')
+    || readyTemplates.find(item =>
       item.scope === 'professional' &&
       (item.projectType === targetCode || normalizeProjectType(item.projectType) === targetCode)
-    ) || templates.find(item => item.scope === 'global') || null
+    ) || readyTemplates.find(item => item.scope === 'global') || null
 }
 
 /**

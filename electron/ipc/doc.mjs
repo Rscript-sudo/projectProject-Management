@@ -140,7 +140,7 @@ export function register(ipcMain) {
     console.debug('[saveDoc] Saving:', { docType, projectName, fileName: finalFileName, subDir: finalSubDir, ...(filenameMeta || {}) })
 
     const templatesDir = getTemplatesDir()
-    const { findTemplate, buildPlaceholderData, renderTemplate, renderStructuredSystemDocument, supportsStructuredSystemLayout, validateStructuredSystemData, renderXlsxTemplate, formatDocx, validateDocxFormatting } = await import('../templateService.mjs')
+    const { findTemplate, buildPlaceholderData, renderTemplate, renderXlsxTemplate, formatDocx, validateDocxFormatting } = await import('../templateService.mjs')
     let projectConfig = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', templateOverrides: {} }
     const configPath = path.join(getProjectDataPath(projectName), 'project.config.json')
     if (fs.existsSync(configPath)) {
@@ -185,21 +185,15 @@ export function register(ipcMain) {
 
       const engine = template.config.engine || 'docx'
 
-      // 系统预置的旧表格模板不再承担长正文：改由结构化交付版输出。
-      // 企业模板、项目模板仍完整尊重用户自己的字段与版式。
-      const useStructuredSystemLayout = engine !== 'xlsx'
-        && !projectConfig.templateOverrides?.[docType]
-        && !libraryTemplate
-        && supportsStructuredSystemLayout(docType)
       const renderBuffer = async () => {
         if (engine === 'xlsx') {
-        const cellMappings = template.config.placeholder_cells || []
+          const placeholderNames = Object.keys(template.config.placeholders || {})
+            .map(key => key.replace(/^\{\{|\}\}$/g, '').trim())
+          const cellMappings = (template.config.placeholder_cells || []).map((cell, index) => ({
+            cell,
+            field: placeholderNames[index],
+          }))
           return renderXlsxTemplate(template.templatePath, data, cellMappings)
-        }
-        if (useStructuredSystemLayout) {
-          const structuredCheck = validateStructuredSystemData(docType, data)
-          if (!structuredCheck.valid) throw new Error(`未通过正式件字段校验：${structuredCheck.missing.join('、')}未填写。请在 AI 结果中补齐对应段落后再保存。`)
-          return renderStructuredSystemDocument(docType, data)
         }
         return renderTemplate(template.templatePath, data)
       }
@@ -207,7 +201,7 @@ export function register(ipcMain) {
 
       fs.writeFileSync(temporarySavePath, buffer)
 
-      if (engine !== 'xlsx' && !useStructuredSystemLayout) {
+      if (engine !== 'xlsx') {
         await formatDocx(temporarySavePath, true, docType)
       }
 
@@ -220,7 +214,7 @@ export function register(ipcMain) {
           try { fs.unlinkSync(temporarySavePath) } catch {}
           return { success: false, error: `模板渲染后未通过正式件校验：${renderedCheck.markers.join('、')}。文件未保留。` }
         }
-        const formatCheck = await validateDocxFormatting(temporarySavePath, docType, !useStructuredSystemLayout)
+        const formatCheck = await validateDocxFormatting(temporarySavePath, docType, true)
         if (!formatCheck.valid) {
           try { fs.unlinkSync(temporarySavePath) } catch {}
           return { success: false, error: `文档排版验收未通过：${formatCheck.issues.join('、')}。文件未保留。` }
@@ -237,7 +231,7 @@ export function register(ipcMain) {
         data['文件编号'] = autoNumber
         buffer = await renderBuffer()
         fs.writeFileSync(temporarySavePath, buffer)
-        if (engine !== 'xlsx' && !useStructuredSystemLayout) await formatDocx(temporarySavePath, true, docType)
+        if (engine !== 'xlsx') await formatDocx(temporarySavePath, true, docType)
       }
       fs.renameSync(temporarySavePath, savePath)
       await updateLedger(projectPath, finalSubDir, finalFileName, docType, { ...meta, fileNumber: autoNumber, status: '正式件' })
@@ -318,7 +312,7 @@ export function register(ipcMain) {
     ensureDir(path.dirname(savePath))
 
     const templatesDir = getTemplatesDir()
-    const { findTemplate, buildPlaceholderData, renderTemplate, renderStructuredSystemDocument, supportsStructuredSystemLayout, validateStructuredSystemData } = await import('../templateService.mjs')
+    const { findTemplate, buildPlaceholderData, renderTemplate } = await import('../templateService.mjs')
     let projectConfig = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', templateOverrides: {} }
     const configPath = path.join(getProjectDataPath(projectName), 'project.config.json')
     if (fs.existsSync(configPath)) {
@@ -357,19 +351,7 @@ export function register(ipcMain) {
         userInput, content, config: template.config,
       })
       const engine = template.config.engine || 'docx'
-      const useStructuredSystemLayout = engine !== 'xlsx'
-        && !projectConfig.templateOverrides?.[docType]
-        && !libraryTemplate
-        && supportsStructuredSystemLayout(docType)
-      if (useStructuredSystemLayout) {
-        const structuredCheck = validateStructuredSystemData(docType, data)
-        if (!structuredCheck.valid) {
-          return { success: false, error: `未通过正式件字段校验：${structuredCheck.missing.join('、')}未填写。请补齐后再导出 PDF。` }
-        }
-        docBuffer = await renderStructuredSystemDocument(docType, data)
-      } else {
-        docBuffer = await renderTemplate(template.templatePath, data)
-      }
+      docBuffer = await renderTemplate(template.templatePath, data)
     } else {
       const { Document, Packer, Paragraph, TextRun } = await import('docx')
       const paragraphs = (content || '').split('\n').filter(line => line.trim())

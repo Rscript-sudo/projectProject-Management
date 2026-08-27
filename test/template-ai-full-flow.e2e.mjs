@@ -34,13 +34,14 @@ async function main() {
   await app.whenReady()
   const { registerAll } = await import('../electron/ipc/register.mjs')
   const { closeDb } = await import('../electron/db/database.mjs')
+  const { getSettings } = await import('../electron/ipc/shared.mjs')
   registerAll(ipcMain, null)
 
   // 设置页保存其他字段时必须保留原密钥；已保存密钥无需回显即可供主进程调用。
   const fakeKey = 'e2e-key-preserve-check'
   assert.equal((await call('settings:set', { projectRoot: runtimeDir, aiProvider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat', apiKey: fakeKey })).success, true)
   assert.equal((await call('settings:set', { projectRoot: runtimeDir, aiProvider: 'minimax', baseUrl: 'https://api.minimax.chat/v1', model: 'abab6.5s-chat' })).success, true)
-  assert.equal((await call('settings:getFull')).apiKey, fakeKey, '保存其他配置不应清除已加密 API Key')
+  assert.equal(getSettings().apiKey, fakeKey, '保存其他配置不应清除已加密 API Key')
   mockServer = await startMockServer(fakeKey)
   const port = mockServer.port
   const listedModels = await call('ai:listModels', { baseUrl: `http://127.0.0.1:${port}` })
@@ -91,6 +92,8 @@ async function main() {
     },
   })
   assert.equal(savedSettings.success, true, savedSettings.error)
+  const markedReady = await call('template:markRuleConfigured', { id: imported.template.id })
+  assert.equal(markedReady.ok, true, markedReady.error)
 
   // 3. AI 助手：加载真实运行时 prompt 构建器，确认读取的是刚保存的规则，并执行模拟模型调用。
   const { createServer } = await import('vite')
@@ -121,7 +124,7 @@ async function main() {
   const structured = ai.parseStructuredContent(aiResult.content)
   for (const field of Object.keys(fieldRules)) assert.ok(structured[field], `AI 输出缺少字段：${field}`)
 
-  // 4. 输出文档：当前项目选择导入模板，用 AI 结果生成正式 Word，并检查残留占位符。
+  // 4. 输出文档：完成占位符和规则配置后，直接使用导入模板生成正式 Word。
   const project = await call('fs:createProject', path.join(runtimeDir, 'projects'), '端到端测试项目', '土建工程', {})
   assert.equal(project.success, true, project.error)
   const chatMessages = [

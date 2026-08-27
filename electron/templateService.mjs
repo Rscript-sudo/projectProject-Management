@@ -19,6 +19,8 @@ const TEMPLATES_DIR = path.resolve(__dirname, '..', 'templates')
 // 在 fieldRegistry.ts 中新增字段时，必须同步更新此 JSON
 const FIELD_ALIASES_PATH = path.resolve(__dirname, '..', 'src', 'shared', 'field-aliases.json')
 const FIELD_ALIASES = JSON.parse(fs.readFileSync(FIELD_ALIASES_PATH, 'utf8'))
+const BUILTIN_DOC_TYPES_PATH = path.resolve(__dirname, '..', 'src', 'shared', 'builtin-doc-types.json')
+const BUILTIN_DOC_TYPES = new Set(JSON.parse(fs.readFileSync(BUILTIN_DOC_TYPES_PATH, 'utf8')))
 
 // 反向索引：alias → 标准 key
 const ALIAS_TO_KEY = {}
@@ -112,6 +114,8 @@ function selectTemplateFile(files, docType, expectedExtension) {
 export async function listSystemTemplates(templatesDir) {
   const entries = []
   for (const [docType, dirName] of Object.entries(DOC_TYPE_DIR_MAP)) {
+    // builtin-doc-types.json 是已完成“模板 + 占位符 + AI 规则”验收的唯一清单。
+    if (!BUILTIN_DOC_TYPES.has(docType)) continue
     if (!dirName) continue
     const dirPath = resolveTemplateDir(templatesDir, dirName)
     if (!dirPath || !fs.existsSync(dirPath)) continue
@@ -124,6 +128,9 @@ export async function listSystemTemplates(templatesDir) {
     const file = selectTemplateFile(fs.readdirSync(dirPath), docType, expectedExtension)
     if (!file) continue
     const templatePath = path.join(dirPath, file)
+    const fields = await getTemplatePlaceholders(templatePath)
+    // 没有占位符的底稿不能作为通用模板出现在客户端，也不能参与生成。
+    if (fields.length === 0) continue
     entries.push({
       id: `system:${docType}`,
       name: `${docType}（系统预置）`,
@@ -132,8 +139,9 @@ export async function listSystemTemplates(templatesDir) {
       projectType: '通用',
       sourceName: file,
       path: templatePath,
-      fields: await getTemplatePlaceholders(templatePath),
+      fields,
       readOnly: true,
+      configurationStatus: 'ready',
     })
   }
   return entries
@@ -903,9 +911,9 @@ export async function renderXlsxTemplate(templatePath, data, cellMappings) {
   const wb = XLSX.readFile(templatePath)
   const ws = wb.Sheets[wb.SheetNames[0]]
 
-  // 按 placeholder 名称映射单元格（正确的方式）
-  // config.json placeholder_cells 顺序与 placeholders 对象顺序一致
-  const PH_CELL_ORDER = {
+  // 兼容历史监理日志映射；正式模板统一使用 config.placeholder_cells 与
+  // config.placeholders 的同序映射，不再按文种写死单元格。
+  const LEGACY_CELL_FIELDS = {
     'E3': '项目名称',
     'E4': '日期',
     'K4': '星期几',
@@ -920,7 +928,13 @@ export async function renderXlsxTemplate(templatePath, data, cellMappings) {
   }
 
   if (!ws || wb.SheetNames.length === 0) return null
-  for (const [cellRef, placeholderName] of Object.entries(PH_CELL_ORDER)) {
+  const mappings = Array.isArray(cellMappings) && cellMappings.length
+    ? cellMappings.map(item => typeof item === 'string'
+      ? { cell: item, field: LEGACY_CELL_FIELDS[item] }
+      : item)
+    : Object.entries(LEGACY_CELL_FIELDS).map(([cell, field]) => ({ cell, field }))
+  for (const { cell: cellRef, field: placeholderName } of mappings) {
+    if (!cellRef || !placeholderName) continue
     if (!ws[cellRef]) continue
     const value = data[placeholderName]
     if (value && String(value).trim()) {

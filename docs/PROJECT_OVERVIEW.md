@@ -80,7 +80,7 @@
   → 流式反编造清洗(第2层) → 字数补足 → sanitizeFieldValue
   → 用户点保存 → fs:saveDoc
   → 主进程反编造再过(第3-7层) + 占位符白名单扫描
-  → 文件名生成(虚竹v2.0) → 三选一渲染(xlsx/结构化/docxtemplater)
+  → 文件名生成(虚竹v2.0) → 按实体模板渲染(xlsx/docxtemplater)
   → GB/T 9704 格式化 → 占号(TOCTOU锁) → 原子落盘 → 双台账登记
 ```
 
@@ -98,15 +98,14 @@
 | 6 | docxtemplater 渲染后 buffer | `templateService.mjs` 解 zip 扫占位符 |
 | 7 | saveDoc 落盘前 | `validateDeliverableContent(renderedText)` 兜底 |
 
-### 三条渲染分支
+### 统一模板渲染
 
 | 引擎 | 触发条件 | 函数 |
 |---|---|---|
 | **xlsx** | `config.engine === 'xlsx'` | `renderXlsxTemplate` |
-| **结构化系统版式** | 无 override + 无 libraryTemplate + 在白名单 7 类文种 | `renderStructuredSystemDocument` |
-| **docxtemplater 真模板** | 项目/企业库覆盖了模板 | `renderTemplate` |
+| **docxtemplater** | DOCX 通用/专业/私人模板 | `renderTemplate` |
 
-> ⚠️ 白名单内 7 类文种（监理日志/周报/月报/整改通知/安全通知/工程联系单/进度分析）的"系统预置 docx 模板"默认不会被使用。要让真模板生效，必须配项目级 `templateOverrides` 或企业模板库。
+系统通用模板与用户模板共用同一条生成链路：实体模板文件存在、至少一个占位符，并且所需 AI 扩写规则已完成，模板才可参与生成。历史结构化代码版式仅保留为兼容工具，不再由正式生成入口调用。
 
 ### 项目类型 → SOP 路由
 
@@ -205,7 +204,7 @@ npm run build             # macOS dmg（本机）
 | **AI 文档生成** | ✅ 完整 | 18 类“模板 + 占位符 + AI 规则”完整内置 docType（`builtin-doc-types.json`）+ 自定义 docType + 流式 SSE + 7 层反编造防线 + 字数补足 + 字段清洗 |
 | **AI 多 Provider** | ✅ 完整 | `providerConfigs` 支持 deepseek / qwen 等；apiKey 主进程安全存储（v1.0.6 脱敏） |
 | **项目类型 SOP 路由** | ✅ 完整 | 7 类项目（土建/市政/房建/信息化/园林/钢结构/装饰）SOP JSON **全部已建**（`src/shared/sop/<type>/safety-notice.json`） |
-| **模板系统** | ✅ 完整（v1.3.4 统一工作区） | 18 个开箱即用内置模板 + 专业/私人/其他模板 + 项目级 override + 三条渲染分支。安装后全部归入“文档/项目文档管理系统/模板库”；专业可新增或整目录移到废纸篓；文件统一为“文种名称模板.ext”且不展示变体。用户模板逐份记录 AI 规则完成状态，缺失时生成前拦截并在规则保存后返回原项目 |
+| **模板系统** | ✅ 完整（统一模板模型） | 18 个开箱即用通用模板 + 专业/私人/其他模板 + 项目级 override。所有模板统一按“实体文件 + 占位符 + AI 规则”验收和生成；安装后归入“文档/项目文档管理系统/模板库”；用户模板逐份记录规则完成状态，未完成时不参与生成 |
 | **全文检索** | ✅ 完整 | FlexSearch 引擎，Docx/Xlsx 全文索引，跨项目搜索（`search:query/rebuild/status`） |
 | **往来函件台账** | ✅ 完整 | 6 类函件 + 5 维度检索 + 状态机（已发出/已回复/已复查/已关闭/超期）+ 自动归档 |
 | **隐患联动闭环** | ✅ 完整 | 巡检 → 隐患入台账 → 生成整改通知 → 回执关闭（`hazard` 表关联 `correspondence`） |
@@ -238,7 +237,7 @@ npm run build             # macOS dmg（本机）
 | **latest.yml 自动升级** | ⚠️ 未启用 | CI 已生成 `latest.yml`，但 `--publish never`，未配 `generic` provider | 自动升级链路断 |
 | **CHANGELOG 同步** | ✅ 已修（v1.3.1） | `CHANGELOG.md` 已补齐 v1.1.0~v1.3.1，版本可追溯 |
 | **SOP 内容深度** | ✅ 已对齐（v1.3.2） | 7 类 SOP JSON 全部补齐到信息化深度：8 节 / 45-47 要点 / 标题+适用工艺+禁用术语齐全 / 字数下限 5 类文种 | 跨类型生成质量一致 |
-| **结构化模板白名单** | ✅ 已加提示（v1.3.2） | 白名单 7 类文种在模板中心显示「系统版式」徽标 + Alert 说明"要用自己的模板请导入企业模板库" | 用户知情，不再困惑 |
+| **统一模板生成** | ✅ 已完成 | 正式生成入口不再区分“系统版式/已关联”；系统和用户模板均以实体文件、占位符和规则为准 | 后续新增模板无需增加代码文种特判 |
 
 ### 文档与代码的偏差（已修正）
 

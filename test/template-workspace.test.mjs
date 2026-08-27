@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { cleanTemplateDocType, listTemplateLibrary, normalizeTemplateLibrary } from '../electron/templateRegistry.mjs'
-import { archiveLegacyTemplateLibrary, configureTemplateWorkspace } from '../electron/templateWorkspace.mjs'
+import { archiveLegacyTemplateLibrary, archiveUnapprovedGeneralTemplates, configureTemplateWorkspace } from '../electron/templateWorkspace.mjs'
 
 test('安装后模板统一迁移到用户文档目录并使用中文分类和正式文件名', t => {
   const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-template-workspace-'))
@@ -39,4 +39,28 @@ test('模板文种名称会清除迁移尾码、重复词和错别字', () => {
   assert.equal(cleanTemplateDocType('工程安装质量检查检查表'), '工程安装质量检查表')
   assert.equal(cleanTemplateDocType('软件安装调试纪录'), '软件安装调试记录')
   assert.equal(cleanTemplateDocType('BIM检查表'), 'BIM检查表')
+})
+
+test('通用目录把未验收重复底稿移入清理归档，同时保留用户登记模板', t => {
+  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-template-cleanup-'))
+  t.after(() => fs.rmSync(runtime, { recursive: true, force: true }))
+  const userDataPath = path.join(runtime, 'user-data')
+  const documentsPath = path.join(runtime, 'Documents')
+  const bundledTemplatesDir = path.join(runtime, 'bundled')
+  const bundledGeneral = path.join(bundledTemplatesDir, '通用', '01_监理日志')
+  fs.mkdirSync(bundledGeneral, { recursive: true })
+  const approved = path.join(bundledGeneral, '监理日志模板.docx')
+  const duplicate = path.join(bundledGeneral, '监理日志模板.xlsx')
+  fs.writeFileSync(approved, 'approved')
+  fs.writeFileSync(duplicate, 'duplicate')
+  const workspace = configureTemplateWorkspace({ userDataPath, documentsPath, bundledTemplatesDir })
+  const userTemplate = path.join(workspace.root, '内置模板', '通用', '用户模板', '自定义模板.docx')
+  fs.mkdirSync(path.dirname(userTemplate), { recursive: true })
+  fs.writeFileSync(userTemplate, 'user')
+
+  const result = archiveUnapprovedGeneralTemplates({ approvedPaths: [approved], protectedPaths: [userTemplate] })
+  assert.equal(result.archived, 1)
+  assert.ok(fs.existsSync(path.join(workspace.root, '内置模板', '通用', '01_监理日志', '监理日志模板.docx')))
+  assert.ok(fs.existsSync(userTemplate))
+  assert.ok(result.targets[0].includes('清理归档'))
 })

@@ -5,8 +5,9 @@ import { fileURLToPath } from 'url'
 import { registerAll, bootstrapCustomTypes } from './ipc/register.mjs'
 import { getDb, closeDb } from './db/database.mjs'
 import { runMigrations } from './db/migrations.mjs'
-import { migrateBuiltinProfessionalTemplates, normalizeTemplateLibrary } from './templateRegistry.mjs'
-import { archiveLegacyTemplateLibrary, configureTemplateWorkspace } from './templateWorkspace.mjs'
+import { listTemplateLibrary, migrateBuiltinProfessionalTemplates, normalizeTemplateLibrary } from './templateRegistry.mjs'
+import { listSystemTemplates } from './templateService.mjs'
+import { archiveLegacyTemplateLibrary, archiveUnapprovedGeneralTemplates, configureTemplateWorkspace } from './templateWorkspace.mjs'
 import { getSettings, saveSettings } from './ipc/shared.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -200,6 +201,14 @@ app.whenReady().then(async () => {
     bundledTemplatesDir,
   })
   const templateCleanup = normalizeTemplateLibrary(app.getPath('userData'))
+  const approvedGeneralTemplates = await listSystemTemplates(bundledTemplatesDir)
+  const generalCleanup = archiveUnapprovedGeneralTemplates({
+    approvedPaths: approvedGeneralTemplates.map(item => item.path),
+    protectedPaths: listTemplateLibrary(app.getPath('userData')).map(item => item.path).filter(Boolean),
+  })
+  if (generalCleanup.archived) {
+    console.info(`[Main] Archived ${generalCleanup.archived} unapproved general template(s)`)
+  }
   if (Object.keys(templateCleanup.renamedDocTypes || {}).length) {
     const settings = getSettings()
     const rename = value => templateCleanup.renamedDocTypes[value] || value

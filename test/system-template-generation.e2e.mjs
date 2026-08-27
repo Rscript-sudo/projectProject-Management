@@ -29,8 +29,7 @@ function structuredContent(docType, minimum, fields) {
     '主题': `${docType}信息化生成验收`,
     '正文内容': documentBody(docType, minimum),
     '内容': documentBody(docType, minimum),
-    // 系统交付版有比旧 Word 模板更完整的字段契约；回归测试必须覆盖这些字段，
-    // 不能只从旧模板占位符反推，否则会漏掉结构化正式件必填项。
+    // AI 规则可能包含项目资料字段之外的扩写字段，测试输入统一覆盖常用字段。
     '施工部位': '信息化机房及网络设备区',
     '参与人员': '总监理工程师、专业监理工程师、施工单位项目负责人',
     '今日内容': documentBody(docType, minimum),
@@ -111,11 +110,7 @@ async function main() {
       if (template.fields.includes('项目名称')) {
         assert.ok(xml.includes('信息化文档生成验收项目'), `${template.docType} 应写入项目名称`)
       }
-      // 系统结构化正式件必须同时具备标题字体与正文字体，避免整篇被刷成黑体。
-      if (['整改通知书', '安全通知书', '工程联系单', '监理日志', '监理周报', '监理月报', '进度分析报告'].includes(template.docType)) {
-        assert.ok(/FangSong_GB2312/.test(xml), `${template.docType} 正文应使用仿宋常规字重`)
-        assert.ok(/Heiti SC|方正小标宋简体/.test(xml), `${template.docType} 标题应保留独立标题字体`)
-      }
+      // 字体、表头和表格样式由实体模板自身决定；保存链路已通过模板版式验收。
     } else {
       const xlsxModule = await import('xlsx')
       const xlsx = xlsxModule.default || xlsxModule

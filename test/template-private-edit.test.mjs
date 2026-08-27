@@ -52,8 +52,10 @@ test('私人模板优先于专业和通用模板参与生成解析', async t => 
   t.after(() => fs.rmSync(userDataPath, { recursive: true, force: true }))
   const sourcePath = path.resolve('templates/通用/01_监理日志/监理日志模板.docx')
 
-  await importTemplateToLibrary({ userDataPath, sourcePath, docType: '监理日志', scope: 'global', projectType: '通用', name: '通用版本' })
+  const global = await importTemplateToLibrary({ userDataPath, sourcePath, docType: '监理日志', scope: 'global', projectType: '通用', name: '通用版本' })
   const personal = await importTemplateToLibrary({ userDataPath, sourcePath, docType: '监理日志', scope: 'personal', projectType: '通用', name: '我的私人版本' })
+  markTemplateRuleConfigured(userDataPath, global.id)
+  markTemplateRuleConfigured(userDataPath, personal.id)
   const resolved = resolveLibraryTemplate(userDataPath, { docType: '监理日志', projectType: '土建工程' })
 
   assert.equal(resolved.id, personal.id)
@@ -82,6 +84,7 @@ test('删除用户模板先移到系统废纸篓，成功后才移除登记', as
   t.after(() => fs.rmSync(userDataPath, { recursive: true, force: true }))
   const sourcePath = path.resolve('templates/通用/01_监理日志/监理日志模板.docx')
   const entry = await importTemplateToLibrary({ userDataPath, sourcePath, docType: '监理日志', scope: 'personal', projectType: '通用', name: '待删除模板' })
+  markTemplateRuleConfigured(userDataPath, entry.id)
   let trashedPath = ''
 
   const failed = await deleteTemplateFromLibrary(userDataPath, entry.id, {

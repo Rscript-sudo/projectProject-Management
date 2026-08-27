@@ -55,6 +55,43 @@ export function archiveLegacyTemplateLibrary() {
   return { archived: true, target }
 }
 
+/**
+ * 通用目录只保留已通过验收的系统模板和 registry 正在引用的用户模板。
+ * 旧版本留下的重复底稿、变体文件移入清理归档，不随通用模板继续展示或参与生成。
+ */
+export function archiveUnapprovedGeneralTemplates({ approvedPaths = [], protectedPaths = [] } = {}) {
+  if (!configured) return { archived: 0, targets: [] }
+  const runtimeRoot = getRuntimeSystemTemplatesDir()
+  if (!fs.existsSync(runtimeRoot)) return { archived: 0, targets: [] }
+  const keep = new Set([
+    ...approvedPaths.map(filePath => path.resolve(runtimeRoot, path.relative(configured.bundledTemplatesDir, filePath))),
+    ...protectedPaths.map(filePath => path.resolve(filePath)),
+  ])
+  const archiveRoot = path.join(configured.root, '清理归档', '未启用通用模板')
+  const targets = []
+  const walk = directory => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const fullPath = path.join(directory, entry.name)
+      if (entry.isDirectory()) {
+        walk(fullPath)
+        continue
+      }
+      if (!/\.(docx|xlsx)$/i.test(entry.name) || keep.has(path.resolve(fullPath))) continue
+      const relative = path.relative(runtimeRoot, fullPath)
+      let target = path.join(archiveRoot, relative)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      if (fs.existsSync(target)) {
+        const extension = path.extname(target)
+        target = `${target.slice(0, -extension.length)}-${Date.now()}${extension}`
+      }
+      fs.renameSync(fullPath, target)
+      targets.push(target)
+    }
+  }
+  walk(runtimeRoot)
+  return { archived: targets.length, targets }
+}
+
 export function getTemplateWorkspaceRoot(userDataPath) {
   return configured?.root || path.join(userDataPath, 'template-library')
 }

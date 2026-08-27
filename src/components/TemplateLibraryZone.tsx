@@ -8,14 +8,9 @@ import type { ColumnsType } from 'antd/es/table'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { getAllProjectTypes } from '../shared/projectProfile.mjs'
 import { BUILTIN_DOC_TYPES } from '../shared/builtinDocTypes'
+import { getTemplateStatus, TEMPLATE_STATUS } from '../shared/templateReadiness.mjs'
 
 const { Text } = Typography
-
-// 结构化系统版式白名单（与 electron/templateService.mjs STRUCTURED_SYSTEM_DOC_TYPES 同源）
-// 这 7 类文种默认用系统版式渲染，系统预置 docx 模板不会自动生效，需导入企业模板库才用真模板
-const STRUCTURED_SYSTEM_DOC_TYPES = new Set([
-  '监理日志', '监理周报', '监理月报', '整改通知书', '安全通知书', '工程联系单', '进度分析报告',
-])
 
 interface Props {
   scope: 'global' | 'professional' | 'other' | 'personal'
@@ -28,6 +23,7 @@ interface Props {
 interface Tpl {
   id: string; name: string; docType: string; scope: string; projectType: string
   path: string; sourceName: string; fields?: string[]; readOnly?: boolean; missing?: boolean
+  aiRuleConfiguredAt?: string
   customDocTypeCode?: string
   projectTypeLabel?: string
 }
@@ -319,20 +315,14 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
         </div>
       },
     },
-    { title: '文种', dataIndex: 'docType', width: 180, align: 'left', render: (d: string) => <Text>{d}</Text> },
     {
-      title: '模板文件', dataIndex: 'path', width: 130, align: 'center',
+      title: '配置状态', dataIndex: 'path', width: 140, align: 'center',
       render: (_: string, r: Tpl) => {
-        if (r.missing) return <Tag color="error">缺失</Tag>
-        // 白名单内文种 + 系统预置（readOnly）= 默认走系统版式，真模板不生效
-        if (r.readOnly && STRUCTURED_SYSTEM_DOC_TYPES.has(r.docType)) {
-          return (
-            <Tooltip title="该文种默认用系统版式渲染。要用自己的模板，请点右侧「编辑」导入企业模板库。">
-              <Tag color="purple">系统版式</Tag>
-            </Tooltip>
-          )
-        }
-        return <Tag color="success">已关联</Tag>
+        const status = getTemplateStatus(r)
+        if (status === TEMPLATE_STATUS.MISSING_FILE) return <Tag color="error">文件缺失</Tag>
+        if (status === TEMPLATE_STATUS.PENDING_FIELDS) return <Tag color="warning">待识别占位符</Tag>
+        if (status === TEMPLATE_STATUS.PENDING_RULES) return <Tag color="gold">待配置规则</Tag>
+        return <Tag color="success">可使用</Tag>
       },
     },
     {
@@ -410,8 +400,8 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
         <Alert
           type="info" showIcon
           style={{ marginBottom: 12 }}
-          message="部分文种默认使用系统版式渲染"
-          description="监理日志、监理周报、监理月报、整改通知书、安全通知书、工程联系单、进度分析报告这 7 类文种默认用系统内置版式生成，即便存在预置模板文件也不会自动套用。如需使用自定义模板，请在对应行点「编辑」导入您的模板到企业模板库。"
+          message="通用模板均已完成配置，可直接使用"
+          description="通用模板统一由实体模板文件、占位符和 AI 扩写规则组成。替换模板文件后，需要重新识别占位符并保存扩写规则。"
         />
       )}
       {(scope === 'professional' || scope === 'personal' || scope === 'other') && <Text type="secondary" style={{ display: 'block', marginBottom: 10 }}>提示：右击任意模板可打开操作菜单；删除会移到系统废纸篓，可恢复。</Text>}
@@ -419,7 +409,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
         size="small" rowKey="id" loading={loading} columns={columns} dataSource={templates}
         locale={{ emptyText: <Empty description="暂无模板，点上方「批量导入」" /> }}
         pagination={false}
-        scroll={{ x: 1020 }}
+        scroll={{ x: 840 }}
         onRow={record => ({
           onContextMenu: event => {
             event.preventDefault()
