@@ -1,8 +1,15 @@
 # AGENTS.md
 
-Electron 桌面应用：把"监理业务"21 类公文生成能力嵌入桌面端。栈 = Electron 42 + React 19 + TS 5 + Vite 6 + Ant Design 5 + better-sqlite3 + docxtemplater。
+Electron 桌面应用：把"监理业务"26 类公文生成能力嵌入桌面端。栈 = Electron 42 + React 19 + TS 5 + Vite 6 + Ant Design 5 + better-sqlite3 + docxtemplater。
 
-> 项目总览（架构全貌 + 数据模型 + 流程详图）见 `docs/PROJECT_OVERVIEW.md`。本文件是 agent 速查指令。
+> **文档唯一基线**：
+> - 架构全貌 + 数据模型 + 模块清单 + 完成度 → `docs/PROJECT_OVERVIEW.md`
+> - 文档生成全链路 + 7 层反编造防线行号 → `docs/文档生成流程.md`
+> - 测试分层 + 如何加测试 → `docs/TESTING.md`
+> - 发布流程 + 版本号 + 推错救法 → `RELEASE.md`
+> - 版本变更记录 → `CHANGELOG.md`
+>
+> 本文件只放 agent 开发时**必查的速查项**，不重复上述文档内容。
 
 ## 常用命令
 
@@ -12,7 +19,7 @@ npm run typecheck         # tsc --noEmit（仅 include src/，不查 electron/�
 npm run verify:ipc        # 校验 IPC 契约：handler 唯一 + preload 调用都有注册 + vite-env.d.ts 有类型
 npm test                  # node --test test/*.test.mjs（纯逻辑单测，不启 Electron）
 npm run test:e2e:smoke    # electron test/e2e.mjs（最小冒烟）
-npm run test:e2e          # 跑全部 *.e2e.mjs（十几个，较慢，需 Electron 环境）
+npm run test:e2e          # 跑全部 *.e2e.mjs（16 个，较慢，需 Electron 环境）
 npm run quality:gate      # verify:ipc -> typecheck -> test -> test:e2e -> build:renderer -> npm audit
 npm run build:renderer    # 只跑 vite build
 npm run build             # build:renderer + electron-builder（macOS dmg，本机）
@@ -32,44 +39,22 @@ npm run build:win         # Windows 构建——本地 macOS 跑会卡住，只�
 - **vite.config.ts 禁用 manualChunks**（注释里有详细原因：antd 5 + react 19 手动分块会触发循环依赖 / createContext 丢失 / TDZ）。不要重新开启。
 - **`tsconfig.json` 只 `include: ["src"]`**——`electron/` 不进类型检查。主进程是 `.mjs`（纯 JS），靠 `verify:ipc` + e2e 兜底。
 
-## 架构
+## 新增 IPC 必须三处同步
 
-三层进程：
+`verify:ipc` 会拦，缺一处就 fail：
 
-| 层 | 目录 | 角色 |
-|----|------|------|
-| 渲染层 | `src/` | React + Ant Design；通过 `window.electronAPI.*` 调 IPC |
-| 主进程 | `electron/` | Node.js 业务（SQLite / 文件 / 模板 / AI 调用），全 `.mjs` |
-| 桥接 | `electron/preload.cjs` | contextBridge 暴露 IPC；`src/vite-env.d.ts` 同步类型契约 |
-
-**新增 IPC 必须三处同步**（`verify:ipc` 会拦）：
 1. `electron/ipc/<biz>.mjs` 里 `ipcMain.handle('channel', ...)`
 2. `electron/ipc/register.mjs` 集中挂载（所有 handler 在此注册）
 3. `electron/preload.cjs` 暴露 + `src/vite-env.d.ts` 加类型声明
 
-主进程业务模块（`electron/ipc/` 下每业务一个 `.mjs`，约 28 个）：`doc` / `sop` / `db` / `filename` / `numbering` / `placeholderScan` / `completeness` / `contract` / `dashboard` / `delivery` / `material` / `payment` / `photo` / `progress` / `project` / `release` / `template` 等。`electron/` 根下还有 `templateService.mjs` / `documentFormatEngine.mjs` / `completenessEngine.mjs` / `materialParser.mjs` / `operationCenter.mjs` 等引擎。
+## 改 AI 文案必动
 
-渲染层入口：`src/main.tsx` → `src/App.tsx`（路由）→ `src/pages/*`。`ProjectView.tsx` 是 AI 文档助手主入口。
+铁律：**禁止 AI 编造**具体时间 / 场景 / 人员 / 法规条款。`aiService.ts` 是**唯一 AI 入口**，`buildDocPrompt` 按 docType 分 case。
 
-## 反编造三层防线（改 AI 文案必动）
-
-铁律：**禁止 AI 编造**具体时间 / 场景 / 人员 / 法规条款。三处都要补：
-
-| 层 | 位置 | 触发时机 |
-|----|------|---------|
-| 1 Prompt | `src/services/aiService.ts` `ANTI_FABRICATION_RULES` + `buildDocPrompt` 各 case typeRules + `PROOF_EXAMPLES` | 调 prompt 时 |
-| 2 Parse-time | `src/services/aiService.ts` `sanitizeFieldValue` / `sanitizeLetterStyle` / `postProcessTimeFields` / `postProcessFabricationGuard`（导出供 ProjectView 流式 + 非流式两路径调用） | 解析 AI 输出时 |
-| 3 渲染前兜底 | `electron/templateService.mjs` `sanitizeBodyContent` / `sanitizeForbiddenTerms` / `sanitizeLetterStyle` + `electron/placeholderScan.mjs`（保存时扫白名单） | docx 渲染 / 保存时 |
-
-`aiService.ts` 是**唯一 AI 入口**，`buildDocPrompt` 按 docType 分 case。
-
-## 项目类型 → SOP 路由
-
-`PROJECT_TYPE_ROUTER`（aiService.ts 顶部）按 7 类项目（土建/市政/房建/信息化/园林/钢结构/装饰）加载不同 SOP。**禁止跨类型混用术语**（信息化项目禁用塔吊/扬尘/木工等土建术语），`sanitizeForbiddenTerms` 做兜底。SOP 素材在 `src/shared/sop/<type>/safety-notice.json`。
-
-## 占位符白名单
-
-`electron/placeholderScan.mjs` 管三套：合法残留（`{{未指定时间}}` / `{{待补充：...}}` / `{{CURRENT_DATE}}`）、12 项必填手动填充字段、FieldRegistry alias。不在白名单的 `{{xxx}}` → 阻止保存。
+改 AI 文案时三处都要补（详见 `docs/文档生成流程.md` 7 层防线总表）：
+1. **Prompt 层**：`aiService.ts` `ANTI_FABRICATION_RULES` + `buildDocPrompt` 各 case typeRules + `wrapUserInput`（防 prompt 注入）
+2. **Parse 层**：`ProjectView.tsx` `sanitizeFullPipeline` 统一管道（流式/续写/非流式三路径共用）
+3. **渲染前兜底**：`electron/templateService.mjs` `sanitize*` 系列 + `electron/placeholderScan.mjs`（白名单）
 
 ## 关键约定
 
@@ -77,11 +62,7 @@ npm run build:win         # Windows 构建——本地 macOS 跑会卡住，只�
 - **用户输入是信息源不是逐字稿**：AI 必须归纳，禁止照抄。`extractSubject` (aiService.ts) 清理头尾命令词。
 - **文件名统一走** `electron/ipc/filename.mjs`：`{YYYYMMDD}_{typeCode}_{projectCode}_{summary}_{version}.docx`，禁止各模块自己拼。
 - **外部操作（写文件 / 推 git / 发消息）变更前先问**；内部操作（读文件 / 整理）可自主。
-- **字段真相源**在 `src/shared/`：`field-aliases.json` / `project-type-router.json` / `doc-type-min-words.json` / `sop/**`。
+- **字段真相源**在 `src/shared/`：`field-aliases.json` / `project-type-router.json` / `doc-type-min-words.json` / `sop/**`。不要在别处重复定义。
+- **项目类型 SOP 路由**：`PROJECT_TYPE_ROUTER` 按 7 类项目加载不同 SOP，**禁止跨类型混用术语**（信息化项目禁用塔吊/扬尘/木工等土建术语），`sanitizeForbiddenTerms` 做兜底。
+- **占位符白名单**：`placeholderScan.mjs` 管三套（合法残留 / 12 项必填 / FieldRegistry alias），不在白名单的 `{{xxx}}` → 阻止保存。
 - **发布默认不做**（除非老板特别说明）：修 bug / 完成新功能后只做 `npm run build` 本地构建 + `git commit` 代码提交，**不 push、不打 tag、不 `./release.sh`、不建 Release**。推 GitHub / 出 Windows EXE 一律等老板明确指示。
-
-## 发布
-
-> ⚠️ 默认不发布。只有老板明确说"发布/出包/推 GitHub"时才执行。
-
-`./release.sh vX.Y.Z "msg"` → push main + 打 tag → CI（`build-windows.yml`，windows-latest）5-10 分钟后出 Windows EXE 并自动建 GitHub Release。macOS 本机验证用 `npm run build` 出 dmg 装机。版本号规则见 `RELEASE.md`。

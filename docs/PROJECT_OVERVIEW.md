@@ -1,7 +1,7 @@
 # 项目总览
 
-> 本文件是项目开发的**总说明文档**，面向二次开发与标准化建设。agent 速查指令见根目录 `AGENTS.md`。
-> 最近一次梳理：2026-08-26。以 `package.json` + 代码为真相源。
+> 本文件是项目开发的**总说明文档**与**唯一基线**，面向二次开发与标准化建设。所有"项目是什么/架构/数据模型/完成度"的问题都以本文件为准。agent 速查指令见根目录 `AGENTS.md`，测试见 `docs/TESTING.md`，发布见 `RELEASE.md`。
+> 最近一次梳理：2026-08-27。以 `package.json` + 代码为真相源。
 
 ---
 
@@ -13,7 +13,7 @@
 - **栈**：Electron 42 + React 19 + TS 5 + Vite 6 + Ant Design 5 + better-sqlite3 + docxtemplater
 - **入口**：`electron/main.mjs`（主进程）· `src/main.tsx`（React 根）· `src/App.tsx`（路由）
 - **打包产物**：macOS arm64 dmg（开发机）· Windows nsis + portable（CI 出，详见 `RELEASE.md`）
-- **当前版本**：v1.3.0（见 `package.json`）
+- **当前版本**：v1.3.1（见 `package.json`，详见 `CHANGELOG.md`）
 
 ---
 
@@ -183,11 +183,12 @@ npm run build             # macOS dmg（本机）
 
 | 文档 | 用途 |
 |---|---|
-| `AGENTS.md` | agent 速查指令（开发命令 + 坑 + 架构要点） |
-| `docs/PROJECT_OVERVIEW.md` | 本文件，项目总览 |
+| `AGENTS.md` | agent 速查指令（开发命令 + 坑 + 关键约定） |
+| `docs/PROJECT_OVERVIEW.md` | 本文件，项目总览（开发唯一基线） |
 | `docs/文档生成流程.md` | 文档生成全链路 + 7 层防线详细行号 |
+| `docs/TESTING.md` | 测试总文档（分层策略 + 如何加测试 + 覆盖面） |
 | `RELEASE.md` | 发布流程 + 版本号规则 + 推错救法 |
-| `CHANGELOG.md` | 更新日志 |
+| `CHANGELOG.md` | 更新日志（版本变更唯一记录） |
 | `templates/format-spec/DOCX格式规范.json` | DOCX 格式规范真相源 |
 
 ---
@@ -224,6 +225,7 @@ npm run build             # macOS dmg（本机）
 | **自定义类型** | ✅ 完整 | 自定义 docType + 自定义项目类型（`settings:listCustomDocTypes/listCustomProjectTypes`） |
 | **Windows 打包** | ✅ 完整 | CI（`build-windows.yml`）出 NSIS + Portable，tag 触发自动 Release |
 | **macOS 打包** | ✅ 完整 | 本机 `npm run build` 出 dmg |
+| **安全加固** | ✅ 完整（v1.3.1） | IPC 路径校验（`isPathSafe` 全覆盖）+ SQL 表名白名单 + `assertSafeProjectName` 全覆盖 + 防 prompt 注入（`wrapUserInput`）+ 配置原子写 + XSS 防护（`renderMarkdown` 先转义）+ electron 安全配置（nodeIntegration:false / contextIsolation:true / sandbox:true） |
 
 ### 未完成 / 待完善
 
@@ -234,7 +236,7 @@ npm run build             # macOS dmg（本机）
 | **自动升级（静默）** | ⚠️ 半成品 | `update:download` 仅 `shell.openExternal` 跳转浏览器下载，非应用内静默升级 | 用户需手动下载安装包覆盖 |
 | **移动端预览** | ⚠️ 半成品 | `ProjectView.css` 有 `@media` 响应式断点，但无完整移动端适配 | 桌面端为主，移动端不可用 |
 | **latest.yml 自动升级** | ⚠️ 未启用 | CI 已生成 `latest.yml`，但 `--publish never`，未配 `generic` provider | 自动升级链路断 |
-| **CHANGELOG 同步** | ❌ 滞后 | `CHANGELOG.md` / `RELEASE_NOTES_v1.0.0.md` 只到 v1.0.0，实际已 v1.3.0 | 版本变更不可追溯 |
+| **CHANGELOG 同步** | ✅ 已修（v1.3.1） | `CHANGELOG.md` 已补齐 v1.1.0~v1.3.1，版本可追溯 |
 | **SOP 内容深度** | ⚠️ 待补 | 7 类 SOP JSON 已建但内容详略不一，信息化最全，其他类较薄 | 跨类型生成质量不均 |
 | **结构化模板白名单** | ⚠️ 设计陷阱 | 白名单 7 类文种的系统预置 docx 模板默认不生效，必须配 override 或企业库 | 用户困惑"为什么有模板却没用" |
 
@@ -252,8 +254,7 @@ npm run build             # macOS dmg（本机）
 ### 二次开发建议优先级
 
 1. **P0 代码签名**：申请 EV 证书，CI 加 `CSC_LINK` 配置，消除 SmartScreen 拦截
-2. **P0 CHANGELOG 补齐**：从 git log 梳理 v1.1.0~v1.3.0 变更，恢复版本可追溯
-3. **P1 静默自动升级**：接入 `electron-updater` + `generic` provider，启用 `latest.yml` 链路
-4. **P1 SOP 内容补全**：对齐 7 类 SOP 的字段深度，统一 `_禁用条款` / `sections` 结构
-5. **P2 多项目并发**：评估多窗口或多标签架构，支持同时打开多个项目
-6. **P2 结构化白名单文档**：在设置页明确提示"需配 override 才能用真模板"，或调整默认行为
+2. **P1 静默自动升级**：接入 `electron-updater` + `generic` provider，启用 `latest.yml` 链路
+3. **P1 SOP 内容补全**：对齐 7 类 SOP 的字段深度，统一 `_禁用条款` / `sections` 结构
+4. **P2 多项目并发**：评估多窗口或多标签架构，支持同时打开多个项目
+5. **P2 结构化白名单文档**：在设置页明确提示"需配 override 才能用真模板"，或调整默认行为
