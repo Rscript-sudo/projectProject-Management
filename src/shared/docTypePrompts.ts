@@ -201,6 +201,7 @@ export function resolveDocTypePromptForAny(
 
 /**
  * 取 marketplace 模板包列表
+ * @deprecated 无调用方，待清理
  */
 export function listMarketplace(): MarketplaceTemplate[] {
   return getDefaultPrompts().marketplace
@@ -208,6 +209,7 @@ export function listMarketplace(): MarketplaceTemplate[] {
 
 /**
  * 取内置全部 docType label 列表（UI 左侧列表）
+ * @deprecated 无调用方，待清理
  */
 export function listBuiltinDocTypes(): string[] {
   return Object.keys(getDefaultPrompts().docTypes)

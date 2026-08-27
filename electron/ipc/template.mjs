@@ -3,8 +3,9 @@
 // 这里只放新增的按专业+文种批量查询
 import { safeCall } from './safe.mjs'
 import { app } from 'electron'
-import { listTemplatesByProjectType, getSupportedDocTypes, deleteTemplateFromLibrary, updateTemplateInLibrary } from '../templateRegistry.mjs'
+import { listTemplatesByProjectType, deleteTemplateFromLibrary, updateTemplateInLibrary } from '../templateRegistry.mjs'
 import { getTemplatePlaceholders } from '../templateService.mjs'
+import { isPathSafe } from '../shared/pathSafety.mjs'
 
 export function register(ipcMain) {
   ipcMain.handle('template:listByProjectType', safeCall((_, params = {}) => {
@@ -16,13 +17,13 @@ export function register(ipcMain) {
     })
   }))
 
-  // v1.x：返回运行时全量文种（含 customDocTypes）
-  ipcMain.handle('template:listSupportedDocTypes', () => getSupportedDocTypes())
-
   // v1.x：扫描一个模板文件的占位符字段（{{字段}}），供"关联模板 → 字段分析"用
   ipcMain.handle('template:getFields', safeCall(async (_, { path: filePath }) => {
     if (!filePath || typeof filePath !== 'string' || !filePath.toLowerCase().endsWith('.docx')) {
       return { ok: false, error: '请选择有效的 Word 模板文件' }
+    }
+    if (!isPathSafe(filePath)) {
+      return { ok: false, error: '路径不安全' }
     }
     const fs = await import('fs')
     if (!fs.existsSync(filePath)) return { ok: false, error: '模板文件不存在' }

@@ -26,7 +26,7 @@ function getTemplatesDir() {
 }
 
 function findProfessionalForbiddenTerms(projectTypeCode, content) {
-  if (!['civil', 'municipal', 'building', 'landscape', 'steel', 'decoration'].includes(projectTypeCode)) return []
+  if (!['civil', 'municipal', 'building', 'information', 'landscape', 'steel', 'decoration'].includes(projectTypeCode)) return []
   const sopPath = path.join(__dirname, '..', '..', 'src', 'shared', 'sop', projectTypeCode, 'safety-notice.json')
   if (!fs.existsSync(sopPath)) return []
   const sop = JSON.parse(fs.readFileSync(sopPath, 'utf8'))
@@ -134,7 +134,7 @@ export function register(ipcMain) {
     ensureDir(path.dirname(savePath))
     const temporarySavePath = `${savePath}.${process.pid}.${Date.now()}.draft`
 
-    console.log('[saveDoc] Saving:', { docType, projectName, fileName: finalFileName, subDir: finalSubDir, ...(filenameMeta || {}) })
+    console.debug('[saveDoc] Saving:', { docType, projectName, fileName: finalFileName, subDir: finalSubDir, ...(filenameMeta || {}) })
 
     const templatesDir = getTemplatesDir()
     const { findTemplate, buildPlaceholderData, renderTemplate, renderStructuredSystemDocument, supportsStructuredSystemLayout, validateStructuredSystemData, renderXlsxTemplate, formatDocx, validateDocxFormatting } = await import('../templateService.mjs')
@@ -154,7 +154,7 @@ export function register(ipcMain) {
     const template = findTemplate(templatesDir, docType, { templateOverride: projectConfig.templateOverrides?.[docType] || libraryTemplate })
 
     if (template) {
-      console.log('[saveDoc] Using template:', template.templatePath)
+      console.debug('[saveDoc] Using template:', template.templatePath)
 
       // 先预览编号，全部渲染和校验通过后再正式占号，避免失败文件造成跳号。
       const previewAutoNumber = previewNumber(docType, projectName)
@@ -178,7 +178,7 @@ export function register(ipcMain) {
       // 覆盖文件编号占位符
       data['文件编号'] = previewAutoNumber
 
-      console.log('[saveDoc] Placeholder keys:', Object.keys(data).join(', '))
+      console.debug('[saveDoc] Placeholder keys:', Object.keys(data).join(', '))
 
       const engine = template.config.engine || 'docx'
 
@@ -241,13 +241,13 @@ export function register(ipcMain) {
       const issuedDocumentId = recordIssuedDocument({ projectName, docType, fileName: finalFileName, subDir: finalSubDir, fileNumber: autoNumber, meta: { ...meta, status: '正式件' } })
       if (referencedEvidenceIds.length) linkDocumentEvidence(projectName, issuedDocumentId, referencedEvidenceIds)
       saveDocumentMasterSnapshot(projectName, savePath, docType)
-      console.log('[saveDoc] Template saved OK:', savePath, 'size:', buffer.length)
+      console.debug('[saveDoc] Template saved OK:', savePath, 'size:', buffer.length)
 
       return { success: true, path: savePath, fileName: finalFileName, subDir: finalSubDir, filenameMeta }
     }
 
     // 降级方案：无模板时直接创建 docx
-    console.log('[saveDoc] No template for', docType, 'creating from scratch')
+    console.debug('[saveDoc] No template for', docType, 'creating from scratch')
     const { Document, Packer, Paragraph, TextRun } = await import('docx')
     const paragraphs = (content || '').split('\n').filter(line => line.trim())
     const doc = new Document({
@@ -283,7 +283,7 @@ export function register(ipcMain) {
     const issuedDocumentId = recordIssuedDocument({ projectName, docType, fileName: finalFileName, subDir: finalSubDir, meta: { ...meta, status: '正式件' } })
     if (referencedEvidenceIds.length) linkDocumentEvidence(projectName, issuedDocumentId, referencedEvidenceIds)
     saveDocumentMasterSnapshot(projectName, savePath, docType)
-    console.log('[saveDoc] Fallback saved OK:', savePath, 'size:', buffer.length)
+    console.debug('[saveDoc] Fallback saved OK:', savePath, 'size:', buffer.length)
 
     return { success: true, path: savePath, fileName: finalFileName, subDir: finalSubDir, filenameMeta }
   }))

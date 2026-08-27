@@ -143,6 +143,32 @@ function validateGeneratedOutput(docType: string, content: string, templateField
   return { valid: true, envelope }
 }
 
+/**
+ * 统一 sanitize 管道（v1.3.1 新增）：流式主路径 / 续写路径 / 非流式降级 三路径共用
+ * 顺序：stripThinking → stripCalibration → 反编造守门员 → 时间字段 → 事由前缀 → 信件语体 → 日志参与者
+ * 返回 { content, warnings } 供调用方决定是否 message.warning
+ */
+function sanitizeFullPipeline(
+  rawContent: string,
+  ctx: { docType: string; holidayType?: string; sourceText?: string; isDocMode: boolean }
+): { content: string; warnings: string[] } {
+  let result = stripThinkingContent(rawContent)
+  result = stripCalibrationStatement(result)
+  const guardResult = postProcessFabricationGuard(result)
+  result = postProcessTimeFields(guardResult.content, { docType: ctx.docType, holidayType: ctx.holidayType })
+  if (ctx.isDocMode) {
+    result = result.replace(
+      /【(事由|主题|标题|摘要)】\s*([\s\S]*?)(?=【|$)/g,
+      (_m, k, v) => `【${k}】${sanitizeFieldValue(String(v).trim())}`
+    )
+    result = sanitizeLetterStyle(result)
+  }
+  if (ctx.docType === '监理日志') {
+    result = sanitizeUnsupportedLogParticipants(result, ctx.sourceText || '')
+  }
+  return { content: result, warnings: guardResult.warnings }
+}
+
 export default function ProjectView() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -653,7 +679,6 @@ export default function ProjectView() {
       else if (lower.includes('春节') || lower.includes('过年')) holidayType = '春节'
       else if (lower.includes('清明')) holidayType = '清明'
     }
-    const postProcessCtx = { docType: docType || '通用文档', holidayType }
     setMessages(prev => [...prev, {
       id: createMessageId('user'),
       role: 'user',
@@ -683,8 +708,12 @@ export default function ProjectView() {
         projectPath: currentProject?.path,
         metadata: { docType, mode, attachmentCount: attachedItems.length, model: currentSettings.model },
       })
-      operationId = operation.task?.id || ''
-      if (operationId) await window.electronAPI.updateOperation(operationId, { status: 'running', stage: 'analyzing', progress: 10 })
+      if (operation?.success && operation.task?.id) {
+        operationId = operation.task.id
+        await window.electronAPI.updateOperation(operationId, { status: 'running', stage: 'analyzing', progress: 10 })
+      } else {
+        console.warn('[ProjectView] 任务记录创建失败:', operation?.error)
+      }
     } catch (error) { console.warn('[ProjectView] 任务记录创建失败:', error) }
 
     try {
@@ -853,14 +882,17 @@ export default function ProjectView() {
       if (streamable.success) {
         let accumulated = streamable.content
 
-        // 后处理：先跑反编造守门员（捕获原始日期），再处理时间字段占位符
-        accumulated = stripThinkingContent(accumulated)
-        const guardResult = postProcessFabricationGuard(accumulated)
-        if (guardResult.warnings.length > 0) {
-          message.warning(`⚠️ ${guardResult.warnings.join('；')}，已替换为占位符请补充`, 5)
+        // v1.3.1：统一用 sanitizeFullPipeline（原流式主路径分散调用 sanitizeFieldValue/sanitizeLetterStyle 在续写之后）
+        const mainSanitized = sanitizeFullPipeline(accumulated, {
+          docType: docType || '通用文档',
+          holidayType,
+          sourceText: trimmedInput,
+          isDocMode: mode === 'DOC' || mode === 'HYBRID',
+        })
+        accumulated = mainSanitized.content
+        if (mainSanitized.warnings.length > 0) {
+          message.warning(`⚠️ ${mainSanitized.warnings.join('；')}，已替换为占位符请补充`, 5)
         }
-        accumulated = stripCalibrationStatement(postProcessTimeFields(guardResult.content, postProcessCtx))
-        if (docType === '监理日志') accumulated = sanitizeUnsupportedLogParticipants(accumulated, trimmedInput)
 
         // v1.2.1（2026-06-28 接入）：DOC/HYBRID 模式下自动续写
         //   AI 输出 < getMinWordCount(docType) → 追加一轮 user 消息要求扩写，最多 1 次
@@ -882,7 +914,13 @@ export default function ProjectView() {
                   { role: 'user', content: extraUserMsg },
                 ],
               }, retryContent => {
-                const merged = stripThinkingContent(accumulated + '\n' + retryContent)
+                // v1.3.1 修复：续写中间态也要 sanitize（原直接显示未清洗内容）
+                const merged = sanitizeFullPipeline(accumulated + '\n' + retryContent, {
+                  docType: docType || '通用文档',
+                  holidayType,
+                  sourceText: trimmedInput,
+                  isDocMode: mode === 'DOC' || mode === 'HYBRID',
+                }).content
                 setMessages(prev => prev.map(m => m.id === assistantId ? {
                   ...m,
                   content: merged,
@@ -893,9 +931,14 @@ export default function ProjectView() {
                 console.error('[AI] 续写失败:', retryResult.error)
                 message.warning(`续写失败：${retryResult.error || '未知错误'}；已保留首次生成内容`)
               } else {
-                accumulated = stripThinkingContent(accumulated + '\n' + retryResult.content)
-                const mergedFinal = postProcessTimeFields(postProcessFabricationGuard(accumulated).content, postProcessCtx)
-                accumulated = docType === '监理日志' ? sanitizeUnsupportedLogParticipants(mergedFinal, trimmedInput) : mergedFinal
+                // v1.3.1 修复：续写成功分支用统一 sanitizeFullPipeline（原漏 sanitizeFieldValue + sanitizeLetterStyle）
+                const finalResult = sanitizeFullPipeline(accumulated + '\n' + retryResult.content, {
+                  docType: docType || '通用文档',
+                  holidayType,
+                  sourceText: trimmedInput,
+                  isDocMode: mode === 'DOC' || mode === 'HYBRID',
+                })
+                accumulated = finalResult.content
                 setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: accumulated } : m))
               }
             } catch (e) {
@@ -909,18 +952,9 @@ export default function ProjectView() {
           }
         }
 
-        // v1.2.4（2026-06-29）：预览前对【事由】【主题】字段值兜底剥前缀
-        //   老板反馈 v1.2.3 双重冒号还在 → 模板渲染走 templateService 已修，
-        //   但预览面板直接显示 AI 原文，需要前端再清洗一次
-        //   只对【事由】【主题】【标题】【摘要】字段清洗，不动正文
+        // v1.3.1：sanitizeFieldValue + sanitizeLetterStyle 已由 sanitizeFullPipeline 统一处理
+        //   保留验收 + 质量评分 + 最终 setMessages
         if (mode === 'DOC' || mode === 'HYBRID') {
-          accumulated = accumulated.replace(
-            /【(事由|主题|标题|摘要)】\s*([\s\S]*?)(?=【|$)/g,
-            (m, k, v) => `【${k}】${sanitizeFieldValue(v.trim())}`
-          )
-          // v1.2.7（2026-06-29 老板反馈）：信件语体清理（"尊敬的..."/"此致敬礼"）
-          //   全文扫一遍，覆盖正文任意位置
-          accumulated = sanitizeLetterStyle(accumulated)
           const validation = validateGeneratedOutput(docType || '通用文档', accumulated, generationTemplateFields)
           if (!validation.valid) throw new Error(`生成结果验收未通过：${validation.error}`)
           const quality = await window.electronAPI.scoreDocumentQuality(docType || '通用文档', accumulated)
@@ -971,13 +1005,17 @@ export default function ProjectView() {
       })
       if (!result.success) throw new Error(result.error || 'AI 调用失败')
 
-      let aiContent = stripThinkingContent(stripCalibrationStatement(result.content || ''))
-      // 后处理：先跑反编造守门员（捕获原始日期），再处理时间字段占位符
-      const guardResult = postProcessFabricationGuard(aiContent)
-      if (guardResult.warnings.length > 0) {
-        message.warning(`⚠️ ${guardResult.warnings.join('；')}，已替换为占位符请补充`, 5)
+      // v1.3.1：非流式降级路径统一用 sanitizeFullPipeline（原分散调用，与流式路径对齐）
+      const nonStreamSanitized = sanitizeFullPipeline(result.content || '', {
+        docType: docType || '通用文档',
+        holidayType,
+        sourceText: trimmedInput,
+        isDocMode: mode === 'DOC' || mode === 'HYBRID',
+      })
+      let aiContent = nonStreamSanitized.content
+      if (nonStreamSanitized.warnings.length > 0) {
+        message.warning(`⚠️ ${nonStreamSanitized.warnings.join('；')}，已替换为占位符请补充`, 5)
       }
-      aiContent = postProcessTimeFields(guardResult.content, postProcessCtx)
       setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: aiContent } : m))
 
       // v1.2.0：AI 扩写字数软警告（与流式路径同源，老板 2026-06-27 反馈内容过简）
@@ -987,15 +1025,8 @@ export default function ProjectView() {
         if (wordCount < minWords) message.warning(`⚠️ AI 仅输出 ${wordCount} 字（要求 ≥ ${minWords} 字），建议补充现场事实后重新生成`, 6)
       }
 
-      // v1.2.4（2026-06-29）：非流式降级路径同样兜底剥【事由】前缀
+      // v1.3.1：sanitizeFieldValue + sanitizeLetterStyle + 日志参与者已由 sanitizeFullPipeline 统一处理
       if (mode === 'DOC' || mode === 'HYBRID') {
-        aiContent = aiContent.replace(
-          /【(事由|主题|标题|摘要)】\s*([\s\S]*?)(?=【|$)/g,
-          (_match: string, key: string, value: string) => `【${key}】${sanitizeFieldValue(value.trim())}`
-        )
-        // v1.2.7（2026-06-29 老板反馈）：信件语体清理（覆盖全文，含正文）
-        aiContent = sanitizeLetterStyle(aiContent)
-        if (docType === '监理日志') aiContent = sanitizeUnsupportedLogParticipants(aiContent, trimmedInput)
         const validation = validateGeneratedOutput(docType || '通用文档', aiContent, generationTemplateFields)
         if (!validation.valid) throw new Error(`生成结果验收未通过：${validation.error}`)
         const quality = await window.electronAPI.scoreDocumentQuality(docType || '通用文档', aiContent)

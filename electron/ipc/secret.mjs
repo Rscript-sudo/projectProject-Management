@@ -7,8 +7,6 @@
  */
 
 export function isEncryptionAvailable() { return false }
-export function setForcePlainMode() {}
-export function isForcePlainMode() { return true }
 
 export function encryptSecret(plain) {
   if (!plain) return null

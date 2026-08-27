@@ -50,7 +50,8 @@ function extractShootDate(filePath) {
     const stat = fs.statSync(filePath)
     const d = stat.mtime
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  } catch {
+  } catch (e) {
+    console.warn('[photo] 读取文件时间失败，用当前日期兜底:', e.message)
     return new Date().toISOString().slice(0, 10)
   }
 }
@@ -167,6 +168,8 @@ export function register(ipcMain) {
 
   // 手动归档单个文件
   ipcMain.handle('photo:archive', safeCall(async (_, { projectPath, srcPath, shootDate, location, tags, description }) => {
+    if (!projectPath || !isPathSafe(projectPath)) return { success: false, error: '项目路径不安全' }
+    if (!srcPath || !isPathSafe(srcPath)) return { success: false, error: '源文件路径不安全' }
     const projectName = path.basename(projectPath)
     if (!fs.existsSync(srcPath)) return { success: false, error: '源文件不存在' }
 
@@ -199,6 +202,8 @@ export function register(ipcMain) {
   // ===== AI 智能归档 =====
   // 扫描目录 → 自动分析文件名/路径 → 按月份+部位重命名 → 移动到归档目录
   ipcMain.handle('photo:aiArchive', safeCall(async (_, { projectPath, scanDir, aiConfig }) => {
+    if (!projectPath || !isPathSafe(projectPath)) return { success: false, error: '项目路径不安全' }
+    if (!scanDir || !isPathSafe(scanDir)) return { success: false, error: '扫描目录不安全' }
     const projectName = path.basename(projectPath)
     if (!fs.existsSync(scanDir)) return { success: false, error: '扫描目录不存在' }
 

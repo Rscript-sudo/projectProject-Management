@@ -282,19 +282,19 @@ export interface ElectronAPI {
 
   // 投资控制（B5）
   paymentList: (projectPath: string) => Promise<any[]>
-  paymentAdd: (options: { projectPath: string; payment: any }) => Promise<{ success: boolean; id: number; cumulative_amount: number; cumulative_percent: number }>
+  paymentAdd: (options: { projectPath: string; payment: any }) => Promise<{ success: boolean; id: number; cumulative_amount: number; cumulative_percent: number; error?: string }>
   paymentAdvance: (options: { id: number; person?: string; opinion?: string }) => Promise<{ success: boolean; nextStage?: string; error?: string }>
   paymentReject: (options: { id: number; person?: string; opinion?: string }) => Promise<{ success: boolean; error?: string }>
   paymentSummary: (projectPath: string) => Promise<any>
 
   // 合同管理（B6）
   contractList: (projectPath: string) => Promise<any[]>
-  contractAdd: (options: { projectPath: string; contract: any }) => Promise<{ success: boolean; id: number }>
-  contractTerminate: (options: { id: number }) => Promise<{ success: boolean }>
+  contractAdd: (options: { projectPath: string; contract: any }) => Promise<{ success: boolean; id: number; error?: string }>
+  contractTerminate: (options: { id: number }) => Promise<{ success: boolean; error?: string }>
   changeList: (projectPath: string) => Promise<any[]>
-  changeAdd: (options: { projectPath: string; change: any }) => Promise<{ success: boolean; id: number }>
+  changeAdd: (options: { projectPath: string; change: any }) => Promise<{ success: boolean; id: number; error?: string }>
   claimList: (projectPath: string) => Promise<any[]>
-  claimAdd: (options: { projectPath: string; claim: any }) => Promise<{ success: boolean; id: number }>
+  claimAdd: (options: { projectPath: string; claim: any }) => Promise<{ success: boolean; id: number; error?: string }>
   contractDashboard: (projectPath: string) => Promise<any>
 
   // 照片归档（B8）

@@ -164,10 +164,16 @@ npm run build             # macOS dmg（本机）
 - **文件名统一走** `electron/ipc/filename.mjs`：`{YYYYMMDD}_{typeCode}_{projectCode}_{summary}_{version}.docx`，禁止各模块自己拼。
 - **外部操作（写文件 / 推 git / 发消息）变更前先问**；内部操作（读文件 / 整理）可自主。
 - **字段真相源**在 `src/shared/`，不要在别处重复定义。
+- **发布与构建默认流程**（除非老板特别说明）：修 bug / 完成新功能后，**只做本地构建 + 代码提交，不推 GitHub、不打 tag、不做 Release**。
+  - 本地构建：`npm run build`（macOS dmg 装机验证）。
+  - 代码提交：`git add` + `git commit`，**不 `git push`、不 `./release.sh`、不打 tag**。
+  - 推 GitHub / 触发 CI / 出 Windows EXE / 建 Release 一律等老板明确指示后才做。
 
 ---
 
 ## 八、发布
+
+> ⚠️ 默认不发布。只有老板明确说"发布/出包/推 GitHub"时才执行本节流程。
 
 `./release.sh vX.Y.Z "msg"` → push main + 打 tag → CI（`.github/workflows/build-windows.yml`，windows-latest）5-10 分钟后出 Windows EXE 并自动建 GitHub Release。macOS 本机验证用 `npm run build` 出 dmg 装机。版本号规则与故障恢复见 `RELEASE.md`。
 

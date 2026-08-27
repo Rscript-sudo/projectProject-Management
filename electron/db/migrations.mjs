@@ -62,7 +62,8 @@ function migrateProjects(db, result) {
   let index
   try {
     index = JSON.parse(fs.readFileSync(indexPath, 'utf8'))
-  } catch {
+  } catch (e) {
+    console.error('[migrations] 读取 project-index.json 失败:', e.message)
     return
   }
 
@@ -231,7 +232,8 @@ function migrateNumbering(db, result) {
     let cfg
     try {
       cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'))
-    } catch {
+    } catch (e) {
+      console.error('[migrations] 读取 project.config.json 失败:', e.message)
       return 0
     }
     const numbering = cfg.numbering || {}

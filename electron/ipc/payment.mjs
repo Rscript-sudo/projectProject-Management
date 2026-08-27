@@ -147,7 +147,8 @@ function enrichPayment(p) {
 function safeJsonParse(str, fallback) {
   try {
     return JSON.parse(str)
-  } catch {
+  } catch (e) {
+    console.warn('[payment] JSON 解析失败，用 fallback 兜底:', e.message)
     return fallback
   }
 }

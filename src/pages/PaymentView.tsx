@@ -93,7 +93,8 @@ export default function PaymentView() {
       return
     }
     try {
-      await window.electronAPI.paymentAdd({ projectPath, payment: editForm })
+      const res = await window.electronAPI.paymentAdd({ projectPath, payment: editForm })
+      if (!res?.success) { message.error(res?.error || '新增失败'); return }
       message.success('已新增付款申请')
       setEditing(null)
       refresh()

@@ -299,6 +299,7 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_unified_import_row_batch ON unified_import_row(batch_id);
 
     -- 项目主数据：所有对象采用生效区间和状态，禁止覆盖历史事实。
+    -- 注：repo.mjs MASTER_CONFIG 动态引用这三张表（participant/member/structure），不可删除。
     CREATE TABLE IF NOT EXISTS project_participant (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       project_name TEXT NOT NULL,

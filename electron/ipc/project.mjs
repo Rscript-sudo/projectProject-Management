@@ -9,6 +9,7 @@ import { generateProjectCodeFromName } from './filename.mjs'
 import { normalizeProjectProfile } from '../../src/shared/projectProfile.mjs'
 import { normalizeDocumentRules } from '../../src/shared/documentRules.mjs'
 import { assertSafeProjectName, getCurrentMasterProfile } from '../db/repo.mjs'
+import { isPathSafe } from '../shared/pathSafety.mjs'
 
 const PROJECT_LEDGER_FILES = new Set([
   '合同台账.json',
@@ -129,12 +130,14 @@ export function register(ipcMain) {
       const master = getCurrentMasterProfile(path.basename(projectPath))
       const merged = { ...cfg, ...Object.fromEntries(Object.entries(master).filter(([, value]) => value)) }
       return { ...merged, ...normalizeProjectProfile(merged), documentRules: normalizeDocumentRules(merged.documentRules) }
-    } catch {
+    } catch (e) {
+      console.error('[fs:readProjectConfig] 读取失败:', e.message)
       return { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', ...normalizeProjectProfile(), documentRules: normalizeDocumentRules(), projectCode: 'PROJECT' }
     }
   })
 
   ipcMain.handle('fs:writeProjectConfig', safeCall((_, projectPath, config) => {
+    if (!projectPath || !isPathSafe(projectPath)) return { success: false, error: '项目路径不安全' }
     const dataDir = getProjectDataPath(path.basename(projectPath))
     ensureDir(dataDir)
     const configPath = path.join(dataDir, 'project.config.json')
@@ -183,6 +186,8 @@ export function register(ipcMain) {
     if (!projectPath || !docType || !sourcePath || path.extname(sourcePath).toLowerCase() !== '.docx') {
       return { success: false, error: '请选择有效的 Word 模板文件' }
     }
+    assertIndexedProjectPath(projectPath, readProjectIndex())
+    if (!isPathSafe(sourcePath)) return { success: false, error: '模板源路径不安全' }
     if (!fs.existsSync(sourcePath)) return { success: false, error: '模板文件不存在' }
     const templateDir = path.join(projectPath, '项目模板')
     ensureDir(templateDir)
@@ -263,6 +268,7 @@ export function register(ipcMain) {
     if (!PROJECT_LEDGER_FILES.has(ledgerName)) {
       return { success: false, error: '不允许写入未知台账文件' }
     }
+    assertIndexedProjectPath(projectPath, readProjectIndex())
     const projectName = path.basename(projectPath)
     const ledgerPath = path.join(getProjectDataPath(projectName), ledgerName)
     fs.writeFileSync(ledgerPath, JSON.stringify(data, null, 2), 'utf8')

@@ -71,12 +71,11 @@ export default function ProgressView() {
 
   useEffect(() => {
     if (!apiReady || !projectPath) return
-    // 异步竞态保护：再次确认 API 仍可用
     const api = window.electronAPI
     if (!api) return
     api.progressMonthlyCompare({ projectPath, yearMonth })
       .then(setMonthly).catch(console.error)
-  }, [apiReady, projectPath, yearMonth, nodes])
+  }, [apiReady, projectPath, yearMonth])
 
   const refresh = async () => {
     if (!apiReady) return
@@ -90,6 +89,8 @@ export default function ProgressView() {
       setNodes(list)
       setGantt(g)
       setDeviation(d)
+      window.electronAPI.progressMonthlyCompare({ projectPath, yearMonth })
+        .then(setMonthly).catch(console.error)
     } catch (e: any) {
       message.error('加载失败：' + e.message)
     } finally {

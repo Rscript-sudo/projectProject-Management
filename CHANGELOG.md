@@ -5,6 +5,31 @@
 
 ---
 
+## v1.3.1 · 2026-08-26 · ⚠️ 未打 tag
+
+> 安全加固 + 反编造铁律强化 + 代码清理审计。
+
+### 安全
+- sec: IPC 路径校验 — `file` / `shell` / `material` / `photo` / `project` / `template` 所有接收外部路径的 handler 加 `isPathSafe()` 前置校验，防越权访问
+- sec: 撤销导入 `entity_table` 加白名单 — `material:commitUnifiedImport` 原 `DELETE FROM ${row.entity_table}` 直接拼表名，加 `ALLOWED_TABLES` 白名单防 SQL 注入
+- sec: 写台账/上传模板加 `assertIndexedProjectPath` — 防越权写未索引项目
+- sec: 防 prompt 注入 — `aiService.ts` 新增第十条反编造铁律 + `wrapUserInput()` 用 `<USER_INPUT>` 标签隔离用户输入，所有 buildDocPrompt case 接入
+
+### 反编造强化
+- fix: `postProcessFabricationGuard` 放宽 3 处正则距离限制（修绕过）+ 新增「编造具体人名」检测 + 模糊时间词补「日前/前几日/这些天」+ 法规条文引用去掉日期依赖
+- refactor: `ProjectView.tsx` 抽出 `sanitizeFullPipeline()` 统一流式主/续写/非流式降级三路径，修续写中间态漏 sanitize 的 bug
+
+### 代码清理
+- chore: 删死代码 — `secret.mjs` 的 `setForcePlainMode`/`isForcePlainMode`、`settings.mjs` 的 `settings:getFull` handler、`template.mjs` 的 `template:listSupportedDocTypes` handler
+- chore: 4 个无调用方函数标 `@deprecated`（`docTypePrompts` / `fieldRegistry` / `structuredGeneration` / `aiService`）
+- chore: `console.log` → `console.debug` 降级（`doc` / `shell` / `sop` / `shared`）
+- chore: 6 处静默 `catch {}` → `catch (e) { console.warn/error }`
+
+### SOP 路由修正
+- fix: 默认兜底「土建」→「未分类」；新增「通信」类型；`doc.mjs` 漏掉的 `information` 类型补回；7 类项目 enabledSections 名称统一
+
+---
+
 ## v1.3.0 · 2026-08 · ⚠️ 未打 tag
 
 > v1.1.29 之后的修复与硬化工作，package.json 已升至 1.3.0。

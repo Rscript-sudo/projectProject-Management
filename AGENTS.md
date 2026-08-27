@@ -78,7 +78,10 @@ npm run build:win         # Windows 构建——本地 macOS 跑会卡住，只�
 - **文件名统一走** `electron/ipc/filename.mjs`：`{YYYYMMDD}_{typeCode}_{projectCode}_{summary}_{version}.docx`，禁止各模块自己拼。
 - **外部操作（写文件 / 推 git / 发消息）变更前先问**；内部操作（读文件 / 整理）可自主。
 - **字段真相源**在 `src/shared/`：`field-aliases.json` / `project-type-router.json` / `doc-type-min-words.json` / `sop/**`。
+- **发布默认不做**（除非老板特别说明）：修 bug / 完成新功能后只做 `npm run build` 本地构建 + `git commit` 代码提交，**不 push、不打 tag、不 `./release.sh`、不建 Release**。推 GitHub / 出 Windows EXE 一律等老板明确指示。
 
 ## 发布
+
+> ⚠️ 默认不发布。只有老板明确说"发布/出包/推 GitHub"时才执行。
 
 `./release.sh vX.Y.Z "msg"` → push main + 打 tag → CI（`build-windows.yml`，windows-latest）5-10 分钟后出 Windows EXE 并自动建 GitHub Release。macOS 本机验证用 `npm run build` 出 dmg 装机。版本号规则见 `RELEASE.md`。

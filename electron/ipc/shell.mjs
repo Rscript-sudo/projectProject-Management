@@ -7,6 +7,7 @@ import { getSettings } from './shared.mjs'
 import { DATA_TOOLS } from '../dataTools.mjs'
 import { parseMaterial } from './material.mjs'
 import { registerTaskCancellation, updateTask, appendDiagnostic } from '../operationCenter.mjs'
+import { isPathSafe } from '../shared/pathSafety.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -50,6 +51,9 @@ function getTemplatesDir() {
 
 export function register(ipcMain, mainWindow) {
   ipcMain.handle('shell:openFile', async (_, filePath) => {
+    if (!filePath || !isPathSafe(filePath)) {
+      return { success: false, error: '路径不安全' }
+    }
     if (!fs.existsSync(filePath)) {
       return { success: false, error: '文件不存在' }
     }
@@ -59,6 +63,9 @@ export function register(ipcMain, mainWindow) {
   })
 
   ipcMain.handle('shell:openPath', async (_, dirPath) => {
+    if (!dirPath || !isPathSafe(dirPath)) {
+      return { success: false, error: '路径不安全' }
+    }
     if (!fs.existsSync(dirPath)) {
       return { success: false, error: '路径不存在' }
     }
@@ -102,7 +109,10 @@ export function register(ipcMain, mainWindow) {
 
   // 读取文件内容（供 AI 分析使用）
   ipcMain.handle('fs:readFileContent', safeCall(async (_, filePath) => {
-    if (!filePath || !fs.existsSync(filePath)) {
+    if (!filePath || !isPathSafe(filePath)) {
+      return { success: false, error: '路径不安全' }
+    }
+    if (!fs.existsSync(filePath)) {
       return { success: false, error: '文件不存在' }
     }
 
@@ -236,7 +246,7 @@ function trimContext(messages, modelName) {
   const dropped = messages.length - result.length
 
   if (dropped > 0) {
-    console.log(`[trimContext] ${modelName || 'unknown'} — dropped ${dropped}/${messages.length} messages (${total}→${keptTotal} tokens)`)
+    console.debug(`[trimContext] ${modelName || 'unknown'} — dropped ${dropped}/${messages.length} messages (${total}→${keptTotal} tokens)`)
   }
 
   return result

@@ -144,7 +144,7 @@ export function ensureProjectIndex(rootPath) {
     if (!fs.existsSync(configPath)) {
       try {
         createProjectStructure(p.path, p.name, '通用')
-        console.log(`[ensureProjectIndex] 补建数据目录: ${p.name}`)
+        console.debug(`[ensureProjectIndex] 补建数据目录: ${p.name}`)
       } catch (e) {
         console.warn(`[ensureProjectIndex] 补建失败 ${p.name}:`, e.message)
       }

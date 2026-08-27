@@ -137,13 +137,13 @@ export default function PhotoArchiveView() {
         const filePath = (file as any).path
         if (!filePath) continue
         try {
-          await window.electronAPI.photoArchive({
+          const res = await window.electronAPI.photoArchive({
             projectPath,
             srcPath: filePath,
             shootDate: dayjs(file.lastModified || Date.now()).format('YYYY-MM-DD'),
             location: activeLocation || '未分类',
           })
-          okCount++
+          if (res?.success) okCount++
         } catch (e) { console.error(e) }
       }
       setUploading(false)

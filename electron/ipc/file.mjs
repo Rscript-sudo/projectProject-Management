@@ -14,7 +14,10 @@ export { isPathSafe } from '../shared/pathSafety.mjs'
 export function register(ipcMain) {
   ipcMain.handle('fs:getDirTree', (_, dirPath, maxDepth = 2) => {
     try {
-      if (!dirPath || !fs.existsSync(dirPath)) {
+      if (!dirPath || !isPathSafe(dirPath)) {
+        return { name: '', path: dirPath || '', children: [], type: 'folder' }
+      }
+      if (!fs.existsSync(dirPath)) {
         return { name: path.basename(dirPath || ''), path: dirPath || '', children: [], type: 'folder' }
       }
 
@@ -63,7 +66,8 @@ export function register(ipcMain) {
 
   ipcMain.handle('fs:readFile', (_, filePath) => {
     try {
-      if (!filePath || !fs.existsSync(filePath)) return null
+      if (!filePath || !isPathSafe(filePath)) return null
+      if (!fs.existsSync(filePath)) return null
       if (!fs.statSync(filePath).isFile()) return null
       const ext = path.extname(filePath).toLowerCase()
       if (['.json', '.txt', '.md'].includes(ext)) {

@@ -113,7 +113,7 @@ export default function ProjectArchiveView() {
           {evidence.length ? <Space direction="vertical" style={{ width: '100%' }}>
             {evidence.slice(0, 8).map(item => <div key={item.id} style={{ borderBottom: '1px solid #f0f0f0', paddingBottom: 6 }}>
               <Space wrap><Text>E{item.id} · {item.title}</Text>{item.critical ? <Tag color="red">关键</Tag> : null}<Tag color={item.status === 'confirmed' ? 'green' : item.status === 'invalid' ? 'red' : 'gold'}>{item.status === 'confirmed' ? '已确认' : item.status === 'invalid' ? '已失效' : '待确认'}</Tag></Space>
-              {item.status === 'pending' ? <Space><Button type="link" size="small" onClick={async () => { await window.electronAPI.dbUpdateEvidenceStatus(projectName, item.id, 'confirmed', '项目用户'); await refresh() }}>确认</Button><Button type="link" danger size="small" onClick={async () => { await window.electronAPI.dbUpdateEvidenceStatus(projectName, item.id, 'invalid'); await refresh() }}>标记失效</Button></Space> : null}
+              {item.status === 'pending' ? <Space><Button type="link" size="small" onClick={async () => { const r = await window.electronAPI.dbUpdateEvidenceStatus(projectName, item.id, 'confirmed', '项目用户'); if (r?.success) { await refresh() } else { message.error(r?.error || '操作失败') } }}>确认</Button><Button type="link" danger size="small" onClick={async () => { const r = await window.electronAPI.dbUpdateEvidenceStatus(projectName, item.id, 'invalid'); if (r?.success) { await refresh() } else { message.error(r?.error || '操作失败') } }}>标记失效</Button></Space> : null}
             </div>)}
           </Space> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无证据" />}
         </Card>

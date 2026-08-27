@@ -177,7 +177,7 @@ export function register(ipcMain) {
       }
       const result = writeCustomSop(normalized, sopData)
       if (result.ok) {
-        console.log(`[sop:uploadCustom] 写入 ${normalized} SOP → ${result.path}`)
+        console.debug(`[sop:uploadCustom] 写入 ${normalized} SOP → ${result.path}`)
       }
       return result
     } catch (e) {

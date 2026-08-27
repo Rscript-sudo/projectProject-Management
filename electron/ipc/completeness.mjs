@@ -81,7 +81,8 @@ function scanDirForFiles(dirPath, maxDepth = 20) {
 
     countRecursive(dirPath, 0)
     return { fileCount, lastModified: latestMtime ? latestMtime.toISOString() : null }
-  } catch {
+  } catch (e) {
+    console.error('[completeness] 统计目录失败:', e.message)
     return { fileCount: 0, lastModified: null }
   }
 }

@@ -190,6 +190,7 @@ export function resolveKey(name: string): string | null {
 
 /**
  * 构建模板占位符数据 — 统一从 Registry + env 解析
+ * @deprecated 无调用方，待清理
  */
 export function buildDataFromRegistry(values: {
   projectName?: string
@@ -237,6 +238,7 @@ export function buildDataFromRegistry(values: {
 
 /**
  * 给 AI prompt 用的字段提示
+ * @deprecated 无调用方，待清理
  */
 export function buildAIPromptHint(): string {
   const lines: string[] = []
@@ -258,6 +260,7 @@ export function buildAIPromptHint(): string {
 
 /**
  * 模板里出现的 `{{XXX}}` 反查标准 key
+ * @deprecated 无调用方，待清理
  */
 export function templateVarToKey(varName: string): { key: string | null; alias: string } {
   const stripped = varName.replace(/^\{\{|\}\}$/g, '').trim()

@@ -2,7 +2,7 @@
   "_comment": "项目类型 → SOP 路由表。前端用 projectTypeRouter.ts 加载此 JSON 作为单一真相源。AI 助手生成前必须先做项目类型识别 → 加载对应 SOP → 输出校准声明。",
   "_version": "1.0.0",
   "_updated": "2026-06-28",
-  "默认类型兜底": "土建",
+  "默认类型兜底": "未分类",
   "土建": {
     "displayName": "土建工程",
     "sopFile": "src/shared/sop/civil/safety-notice.json",
@@ -207,6 +207,70 @@
       "交通导改",
       "深基坑/高支模"
     ],
+    "minWordsByDocType": {
+      "安全通知书": 800,
+      "整改通知书": 800,
+      "监理日志": 200,
+      "监理周报": 1000,
+      "监理月报": 2000
+    }
+  },
+  "通信": {
+    "displayName": "通信工程",
+    "sopFile": "src/shared/sop/communication/safety-notice.json",
+    "keyWords": ["通信", "光缆", "光纤", "基站", "传输"],
+    "enabledSections": [
+      "通信设备与光缆材料核验",
+      "测试记录与网络割接管理",
+      "临时用电与高处作业（仅实际发生时）",
+      "设备及成品保护"
+    ],
+    "disabledSections": [
+      "扬尘污染防治",
+      "木工加工区",
+      "土方覆盖",
+      "深基坑/高支模",
+      "塔吊/施工升降机"
+    ],
+    "minWordsByDocType": {
+      "安全通知书": 800,
+      "整改通知书": 800,
+      "监理日志": 200,
+      "监理周报": 1000,
+      "监理月报": 2000
+    }
+  },
+  "电力": {
+    "displayName": "电力工程",
+    "sopFile": "src/shared/sop/power/safety-notice.json",
+    "keyWords": ["电力", "变配电", "配电柜", "继电保护"],
+    "enabledSections": [
+      "停送电及作业许可",
+      "设备材料核验",
+      "电缆敷设与接地",
+      "调试与试验记录"
+    ],
+    "disabledSections": [
+      "扬尘污染防治",
+      "木工加工区",
+      "土方覆盖",
+      "深基坑/高支模",
+      "塔吊/施工升降机"
+    ],
+    "minWordsByDocType": {
+      "安全通知书": 800,
+      "整改通知书": 800,
+      "监理日志": 200,
+      "监理周报": 1000,
+      "监理月报": 2000
+    }
+  },
+  "未分类": {
+    "displayName": "未完成专业设定",
+    "sopFile": "",
+    "keyWords": ["通用", "未分类"],
+    "enabledSections": [],
+    "disabledSections": [],
     "minWordsByDocType": {
       "安全通知书": 800,
       "整改通知书": 800,

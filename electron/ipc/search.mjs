@@ -77,7 +77,8 @@ async function collectFiles(projectPath, maxDepth = 10) {
     let entries
     try {
       entries = fs.readdirSync(dirPath, { withFileTypes: true })
-    } catch {
+    } catch (e) {
+      console.warn('[search] 读取目录失败，跳过:', dirPath, e.message)
       return
     }
     for (const entry of entries) {

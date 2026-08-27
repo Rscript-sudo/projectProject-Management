@@ -139,7 +139,8 @@ export default function ContractView() {
             modal.confirm({
               title: '终止合同？', okType: 'danger',
               onOk: async () => {
-                await window.electronAPI.contractTerminate({ id: r.id })
+                const res = await window.electronAPI.contractTerminate({ id: r.id })
+                if (!res?.success) { message.error(res?.error || '终止失败'); return }
                 message.success('已终止')
                 refresh()
               },
@@ -336,15 +337,18 @@ function ContractEditModal({ editing, setEditing, projectPath, contracts, onSave
     try {
       if (editing.type === 'contract') {
         if (!form.contract_name) { message.warning('请输入合同名称'); return }
-        await window.electronAPI.contractAdd({ projectPath, contract: form })
+        const res = await window.electronAPI.contractAdd({ projectPath, contract: form })
+        if (!res?.success) { message.error(res?.error || '新增失败'); return }
         message.success('合同已新增')
       } else if (editing.type === 'change') {
         if (!form.subject) { message.warning('请输入变更主题'); return }
-        await window.electronAPI.changeAdd({ projectPath, change: form })
+        const res = await window.electronAPI.changeAdd({ projectPath, change: form })
+        if (!res?.success) { message.error(res?.error || '新增失败'); return }
         message.success('变更单已新增')
       } else if (editing.type === 'claim') {
         if (!form.subject) { message.warning('请输入索赔主题'); return }
-        await window.electronAPI.claimAdd({ projectPath, claim: form })
+        const res = await window.electronAPI.claimAdd({ projectPath, claim: form })
+        if (!res?.success) { message.error(res?.error || '新增失败'); return }
         message.success('索赔已登记')
       }
       onSaved()

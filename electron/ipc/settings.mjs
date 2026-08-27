@@ -51,8 +51,6 @@ export function register(ipcMain) {
     }
     return result
   }))
-  // 主进程内部用：返回完整 settings（含明文 apiKey），仅供 ai:stream/ai:call 等 handler 调
-  ipcMain.handle('settings:getFull', () => getSettings())
   // 诊断：报告当前本机配置存储模式（不访问系统钥匙串）
   ipcMain.handle('settings:diagnose', () => diagnoseStorage())
   // v1.x：返回当前自定义专业列表（不含内置）

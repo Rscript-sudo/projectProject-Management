@@ -9,6 +9,7 @@ import { safeCall } from './safe.mjs'
 import * as repo from '../db/repo.mjs'
 import { parseMaterial as parseLocalMaterial } from '../materialParser.mjs'
 import { getDb } from '../db/database.mjs'
+import { isPathSafe } from '../shared/pathSafety.mjs'
 
 export { parseLocalMaterial as parseMaterial }
 
@@ -34,7 +35,10 @@ function sourceHash(sourceFile, records) {
 }
 
 export function register(ipcMain) {
-  ipcMain.handle('material:parse', safeCall(async (_, { filePath }) => parseLocalMaterial(filePath)))
+  ipcMain.handle('material:parse', safeCall(async (_, { filePath }) => {
+    if (!filePath || !isPathSafe(filePath)) throw new Error('路径不安全')
+    return parseLocalMaterial(filePath)
+  }))
   ipcMain.handle('material:previewUnifiedImport', safeCall((_, { entityType, records, fieldMapping }) => {
     const adapter = IMPORT_ADAPTERS[entityType]
     if (!adapter) throw new Error(`不支持的导入类型：${entityType}`)
@@ -47,6 +51,8 @@ export function register(ipcMain) {
   ipcMain.handle('material:commitUnifiedImport', safeCall((_, { projectPath, entityType, records, fieldMapping, sourceFile = '' }) => {
     const adapter = IMPORT_ADAPTERS[entityType]
     if (!adapter) throw new Error(`不支持的导入类型：${entityType}`)
+    if (!projectPath || !isPathSafe(projectPath)) throw new Error('项目路径不安全')
+    if (sourceFile && !isPathSafe(sourceFile)) throw new Error('源文件路径不安全')
     const projectName = path.basename(projectPath)
     const rows = mapImportRows(records, fieldMapping)
     const errors = rows.flatMap(row => adapter.required.filter(field => row.mapped[field] == null || row.mapped[field] === '').map(field => ({ sourceRow: row.sourceRow, field })))
@@ -85,7 +91,11 @@ export function register(ipcMain) {
       const batch = db.prepare("SELECT * FROM unified_import_batch WHERE project_name = ? AND id = ? AND status = 'committed'").get(projectName, batchId)
       if (!batch) throw new Error('导入批次不存在或已撤销')
       const rows = db.prepare('SELECT * FROM unified_import_row WHERE batch_id = ? ORDER BY id DESC').all(batchId)
+      const ALLOWED_TABLES = new Set(Object.values(IMPORT_ADAPTERS).map(a => a.table))
       for (const row of rows) {
+        if (!ALLOWED_TABLES.has(row.entity_table)) {
+          throw new Error(`非法表名：${row.entity_table}`)
+        }
         db.prepare('DELETE FROM business_relation WHERE project_name = ? AND ((source_type IN (?, ?) AND source_id = ?) OR (target_type IN (?, ?) AND target_id = ?))')
           .run(projectName, batch.entity_type, row.entity_table, String(row.entity_id), batch.entity_type, row.entity_table, String(row.entity_id))
         db.prepare(`DELETE FROM ${row.entity_table} WHERE id = ? AND project_name = ?`).run(row.entity_id, projectName)

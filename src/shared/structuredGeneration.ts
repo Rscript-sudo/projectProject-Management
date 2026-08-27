@@ -38,6 +38,7 @@ export function validateStructuredDocument(envelope: StructuredDocumentEnvelope,
   return { valid: errors.length === 0, errors, missing }
 }
 
+/** @deprecated 无调用方，待清理 */
 export function serializeStructuredDocument(envelope: StructuredDocumentEnvelope) {
   const entries = Object.entries(envelope.fields).filter(([, value]) => String(value).trim())
   if (!entries.length) return envelope.body
