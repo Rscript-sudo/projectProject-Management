@@ -74,15 +74,6 @@ const DOC_TYPE_DIR_MAP = {
   '施工组织设计报审表': '通用/10_施工组织设计报审表',
   '总监理工程师任命书': '通用/11_总监理工程师任命书',
   '监理规划': '通用/21_监理规划',
-  '监理细则': '通用/21_监理规划',
-  // B3 新增 8 类 — 大部分走 fallback 生成（无独立模板）
-  '方案审核意见': null,
-  '索赔报告': null,
-  '巡视记录': null,
-  '安全检查记录': null,
-  '质量评估报告': null,
-  '付款审核意见': null,
-  '通用文档': null,
 }
 
 /**
@@ -102,11 +93,10 @@ function resolveTemplateDir(templatesDir, dirName) {
   return newPath
 }
 
-// 同一目录内存在多个相近文种时，不能依赖文件系统遍历顺序。
-// 例如“监理规划”和“监理细则”必须各自选用对应底稿。
+// 同一目录内曾存在多个相近底稿，不能依赖文件系统遍历顺序。
+// 当前仅保留已完成占位符配置的“监理规划”底稿。
 const DOC_TYPE_TEMPLATE_HINTS = {
-  '监理规划': ['监理规划模版.docx', '监理规划(模板).docx', '信息化项目监理规划通用模板.docx'],
-  '监理细则': ['监理实施细则模版.docx', '信息化项目监理实施细则通用模板.docx'],
+  '监理规划': ['监理规划模版.docx'],
 }
 
 function selectTemplateFile(files, docType, expectedExtension) {

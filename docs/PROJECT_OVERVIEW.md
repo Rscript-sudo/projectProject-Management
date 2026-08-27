@@ -9,7 +9,7 @@
 
 面向监理行业的**项目文档一体化管理桌面应用**。所有能力装在一个 Electron 应用里，本地运行，数据不出本机。
 
-- **核心能力**：AI 流式生成 26 类监理公文 + 全文检索 + 往来函件台账 + 隐患联动闭环 + 进度/投资/合同/照片管理 + 多项目驾驶舱 + 交付包生成 + 自动更新 + 项目备份
+- **核心能力**：AI 流式生成 18 类开箱即用监理公文，并支持用户自定义文种 + 全文检索 + 往来函件台账 + 隐患联动闭环 + 进度/投资/合同/照片管理 + 多项目驾驶舱 + 交付包生成 + 自动更新 + 项目备份
 - **栈**：Electron 42 + React 19 + TS 5 + Vite 6 + Ant Design 5 + better-sqlite3 + docxtemplater
 - **入口**：`electron/main.mjs`（主进程）· `src/main.tsx`（React 根）· `src/App.tsx`（路由）
 - **打包产物**：macOS arm64 dmg（开发机）· Windows nsis + portable（CI 出，详见 `RELEASE.md`）
@@ -202,10 +202,10 @@ npm run build             # macOS dmg（本机）
 
 | 模块 | 完成度 | 证据 |
 |---|---|---|
-| **AI 文档生成** | ✅ 完整 | 26 类内置 docType（`builtin-doc-types.json`）+ 自定义 docType + 流式 SSE + 7 层反编造防线 + 字数补足 + 字段清洗 |
+| **AI 文档生成** | ✅ 完整 | 18 类“模板 + 占位符 + AI 规则”完整内置 docType（`builtin-doc-types.json`）+ 自定义 docType + 流式 SSE + 7 层反编造防线 + 字数补足 + 字段清洗 |
 | **AI 多 Provider** | ✅ 完整 | `providerConfigs` 支持 deepseek / qwen 等；apiKey 主进程安全存储（v1.0.6 脱敏） |
 | **项目类型 SOP 路由** | ✅ 完整 | 7 类项目（土建/市政/房建/信息化/园林/钢结构/装饰）SOP JSON **全部已建**（`src/shared/sop/<type>/safety-notice.json`） |
-| **模板系统** | ✅ 完整（v1.3.4 编辑闭环） | 通用模板 20 个（内置）+ 企业/专业/私人模板库 + 项目级 override + 三条渲染分支。模板 AI 扩写编辑中心支持占位符增删、AI 重试/手动兜底及另存私人模板；v1.3.3 起专业模板改为用户上传 |
+| **模板系统** | ✅ 完整（v1.3.4 编辑闭环） | 18 个开箱即用内置模板 + 企业/专业/私人模板库 + 项目级 override + 三条渲染分支。模板 AI 扩写编辑中心支持占位符增删、AI 重试/手动兜底及另存私人模板；专业模板改为用户上传 |
 | **全文检索** | ✅ 完整 | FlexSearch 引擎，Docx/Xlsx 全文索引，跨项目搜索（`search:query/rebuild/status`） |
 | **往来函件台账** | ✅ 完整 | 6 类函件 + 5 维度检索 + 状态机（已发出/已回复/已复查/已关闭/超期）+ 自动归档 |
 | **隐患联动闭环** | ✅ 完整 | 巡检 → 隐患入台账 → 生成整改通知 → 回执关闭（`hazard` 表关联 `correspondence`） |
@@ -246,7 +246,7 @@ npm run build             # macOS dmg（本机）
 
 | 项 | 修正前 | 修正后 |
 |---|---|---|
-| 内置 docType 数 | 21 类 | 26 类 |
+| 内置 docType 数 | 21 类 | 18 类开箱即用文种 |
 | SOP 覆盖 | 仅 information，6 类延期 | 7 类全建 |
 | 自动更新 | 开发中 | 已实现（check + download） |
 | 备份/导出 | 未提及 | 已实现 |
