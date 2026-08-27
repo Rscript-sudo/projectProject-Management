@@ -49,6 +49,13 @@ function getTemplatesDir() {
   return path.join(__dirname, '..', '..', 'templates')
 }
 
+function isBundledTemplatePath(filePath) {
+  if (!filePath) return false
+  const templatesDir = path.resolve(getTemplatesDir())
+  const resolvedPath = path.resolve(filePath)
+  return resolvedPath.startsWith(`${templatesDir}${path.sep}`)
+}
+
 export function register(ipcMain, mainWindow) {
   ipcMain.handle('shell:openFile', async (_, filePath) => {
     if (!filePath || !isPathSafe(filePath)) {
@@ -109,7 +116,10 @@ export function register(ipcMain, mainWindow) {
 
   // 读取文件内容（供 AI 分析使用）
   ipcMain.handle('fs:readFileContent', safeCall(async (_, filePath) => {
-    if (!filePath || !isPathSafe(filePath)) {
+    // 打包后的系统模板位于 /Applications/.../Resources/templates，常规用户路径
+    // 安全策略会拒绝该目录。这里只额外放行应用自带 templates 根目录内的文件，
+    // 避免为了预览模板而扩大到任意系统路径。
+    if (!filePath || (!isPathSafe(filePath) && !isBundledTemplatePath(filePath))) {
       return { success: false, error: '路径不安全' }
     }
     if (!fs.existsSync(filePath)) {

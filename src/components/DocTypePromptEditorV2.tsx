@@ -79,6 +79,32 @@ function sanitizeTemplateHtml(html: string) {
   return documentNode.body.innerHTML
 }
 
+function injectMappedPlaceholder(html: string, placement: { field: string; anchor: string; position: 'before' | 'after' }, selectedField: string) {
+  const documentNode = new DOMParser().parseFromString(html, 'text/html')
+  const walker = documentNode.createTreeWalker(documentNode.body, NodeFilter.SHOW_TEXT)
+  let textNode: Text | null = walker.nextNode() as Text | null
+  while (textNode) {
+    const raw = textNode.nodeValue || ''
+    const index = raw.indexOf(placement.anchor)
+    if (index >= 0 && textNode.parentElement && !textNode.parentElement.closest('[data-field]')) {
+      const button = documentNode.createElement('button')
+      button.type = 'button'
+      button.className = `placeholder ai${placement.field === selectedField ? ' selected' : ''}`
+      button.dataset.field = placement.field
+      button.textContent = `{{${placement.field}}}`
+      const badge = documentNode.createElement('span')
+      badge.textContent = 'AI扩写'
+      button.appendChild(badge)
+      const splitAt = placement.position === 'before' ? index : index + placement.anchor.length
+      const after = textNode.splitText(splitAt)
+      after.parentNode?.insertBefore(button, after)
+      return documentNode.body.innerHTML
+    }
+    textNode = walker.nextNode() as Text | null
+  }
+  return html
+}
+
 function defaultFieldConfig(field: string): FieldConfig {
   const mode: FillMode = SYSTEM_FIELDS.includes(field) ? 'system' : PROJECT_FIELDS.includes(field) ? 'project' : 'ai'
   return {
@@ -116,7 +142,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
   const [promptOpen, setPromptOpen] = useState(false)
   const [newFieldName, setNewFieldName] = useState('')
   const [inlineAnchor, setInlineAnchor] = useState('')
-  const [pendingPlacements, setPendingPlacements] = useState<Array<{ field: string; anchor: string; position: 'after' }>>([])
+  const [pendingPlacements, setPendingPlacements] = useState<Array<{ field: string; anchor: string; position: 'before' | 'after' }>>([])
   const [analyzing, setAnalyzing] = useState(false)
   const [suggestedFields, setSuggestedFields] = useState<SuggestedField[]>([])
   const [analyzeOpen, setAnalyzeOpen] = useState(false)
@@ -192,13 +218,20 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       }
       setSelectedTemplateId(found.id)
       const isSystem = found.scope === 'system' || !!(found as any).readOnly
-      // 轻量扫描：用 getTemplateFields（pizzip+正则）替代 readFileContent（mammoth 重解析）
-      // 注意 getTemplateFields 仅支持 docx；xlsx 模板会返回 ok:false，用 found.fields 兜底
-      const scanResult = await window.electronAPI.getTemplateFields(found.path)
+      // 字段扫描与可视预览同时加载。任何来源的模板都使用同一套映射界面，
+      // 不再出现“文件已加载但内容区仍为空”的割裂状态。
+      const [scanResult, parsed] = await Promise.all([
+        window.electronAPI.getTemplateFields(found.path),
+        window.electronAPI.readFileContent(found.path),
+      ])
       const scannedFields = scanResult?.ok ? (scanResult.fields || []) : (found.fields || [])
       const fields = [...new Set([...(found.fields || []), ...scannedFields])]
+      const compactContent = parsed?.success ? (parsed.content || '')
+        .replace(/[ \t]+\n/g, '\n').replace(/\n[ \t]+/g, '\n').replace(/\n{3,}/g, '\n\n').trim() : ''
       setRecognitionError(fields.length ? '' : '没有识别到占位符。可手动设定字段，或让 AI 重新分析模板结构。')
-      setTemplate({ id: found.id, name: found.sourceName || activeItem.label, path: found.path, fields, content: '', html: '', isSystem })
+      setTemplate({ id: found.id, name: found.sourceName || activeItem.label, path: found.path, fields, content: compactContent, html: parsed?.success ? parsed.html || '' : '', isSystem })
+      setPendingPlacements([])
+      setInlineAnchor('')
       setInitialFields(fields)
       const next = { ...configs }
       for (const field of fields) if (!next[field]) next[field] = defaultFieldConfig(field)
@@ -214,7 +247,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     }
   }
 
-  // 预览懒加载：用户点"预览原始模板"才调 mammoth 解析完整内容
+  // 重新加载预览：用于解析器临时失败后的手动重试。
   const [previewLoading, setPreviewLoading] = useState(false)
   const loadPreview = async () => {
     if (!template?.path || template.content) return
@@ -319,14 +352,19 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       } }))
       newFields.push(f.name)
     }
-    // 回写 {{占位符}} 到模板内容（用函数式更新避免闭包旧值；content 为空时先触发懒加载）
+    const placements = picked
+      .filter(f => !fields.includes(f.name) && f.anchorText)
+      .map(f => ({ field: f.name, anchor: f.anchorText.trim(), position: (f.insertPosition === 'before' ? 'before' : 'after') as 'before' | 'after' }))
+    setPendingPlacements(prev => [
+      ...prev.filter(item => !placements.some(next => next.field === item.field)),
+      ...placements,
+    ])
+    // 纯文本预览同步插入，HTML 预览由 pendingPlacements 统一绘制可点击标记。
     let insertedCount = 0
     setTemplate(prev => {
       if (!prev) return prev
       let content = prev.content
-      // content 还没加载（懒加载），无法回写——提示用户先加载预览
       if (!content) {
-        message.warning('模板预览内容未加载，请先点"加载模板预览内容"再导入，或导入后到预览界面手动插入占位符')
         return { ...prev, fields: [...new Set([...(prev.fields || []), ...picked.map(f => f.name)])] }
       }
       for (const f of picked) {
@@ -528,11 +566,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
   const decoratedTemplateHtml = useMemo(() => {
     if (!template?.html) return ''
     let safe = sanitizeTemplateHtml(template.html)
-    for (const placement of pendingPlacements) {
-      const marker = `<button type="button" class="placeholder ai" data-field="${escapeHtmlAttribute(placement.field)}">{{${escapeHtmlAttribute(placement.field)}}}<span>待保存</span></button>`
-      safe = safe.replace(placement.anchor, `${placement.anchor}${marker}`)
-    }
-    return safe.replace(/\{\{([^}]+)\}\}/g, (_whole, rawField) => {
+    safe = safe.replace(/\{\{([^}]+)\}\}/g, (_whole, rawField) => {
       const field = String(rawField).trim()
       const mode = configs[field]?.mode || defaultFieldConfig(field).mode
       const selected = field === selectedField
@@ -540,6 +574,8 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       const escapedField = escapeHtmlAttribute(field)
       return `<button type="button" class="placeholder ${tone}${selected ? ' selected' : ''}" data-field="${escapedField}">{{${escapedField}}}${mode === 'ai' ? '<span>AI扩写</span>' : ''}</button>`
     })
+    for (const placement of pendingPlacements) safe = injectMappedPlaceholder(safe, placement, selectedField)
+    return safe
   }, [template?.html, configs, selectedField, pendingPlacements])
 
   const shell: React.CSSProperties = { background: '#fff' }
@@ -608,7 +644,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
         <section style={{ borderRight: '1px solid #edf0f3' }}>
           <div style={paneTitle}><span><EyeOutlined /> 原始模板映射</span><Button type="link" size="small" onClick={() => template?.path && window.electronAPI.openPath(template.path)}>打开原文件</Button></div>
           <div className="template-mapping-canvas" style={{ padding: '16px 22px', background: '#f6f7f9', minHeight: 0 }}>
-            <div style={{ background: '#fff', height: 560, overflow: 'auto', padding: '22px 30px', border: '1px solid #dfe4ea', boxShadow: '0 3px 12px rgba(0,0,0,.05)', whiteSpace: 'pre-wrap', lineHeight: 1.72, fontSize: 14, color: '#20242a' }}>
+            <div className="template-preview-scroll">
               <Text type="secondary" style={{ display: 'block', marginBottom: 14 }}>{template?.name || '未关联模板文件'}</Text>
               {decoratedTemplateHtml ? <div
                 className="docx-template-preview"

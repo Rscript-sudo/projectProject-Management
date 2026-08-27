@@ -52,13 +52,28 @@ html, body, #root {
 
 .template-editor-grid {
   display: grid;
-  grid-template-columns: minmax(210px, 260px) minmax(360px, 1fr) minmax(330px, 440px);
-  min-height: 650px;
+  grid-template-columns: minmax(180px, .68fr) minmax(300px, 1.55fr) minmax(270px, 1fr);
+  min-height: 0;
 }
 
 .template-mapping-canvas {
   position: relative;
   min-width: 0;
+}
+
+.template-preview-scroll {
+  width: 100%;
+  height: clamp(390px, calc(100dvh - 390px), 700px);
+  min-width: 0;
+  overflow: auto;
+  padding: clamp(12px, 2vw, 30px);
+  border: 1px solid #dfe4ea;
+  background: #fff;
+  box-shadow: 0 3px 12px rgba(0,0,0,.05);
+  white-space: pre-wrap;
+  line-height: 1.72;
+  font-size: clamp(12px, .9vw, 14px);
+  color: #20242a;
 }
 
 .template-inline-field-editor {
@@ -76,10 +91,10 @@ html, body, #root {
   box-shadow: 0 8px 24px rgba(15, 23, 42, .14);
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1500px) {
   .template-editor-header { grid-template-columns: 1fr; }
   .template-editor-actions { justify-content: flex-start; }
-  .template-editor-grid { grid-template-columns: 220px minmax(360px, 1fr); }
+  .template-editor-grid { grid-template-columns: minmax(190px, .65fr) minmax(320px, 1.35fr); }
   .template-editor-grid > section:last-child { grid-column: 1 / -1; border-top: 1px solid #edf0f3; }
 }
 
