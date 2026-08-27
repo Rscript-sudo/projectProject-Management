@@ -2,7 +2,7 @@
   "name": "工程款支付证书",
   "doc_type": "payment_certificate",
   "engine": "docx",
-  "template": "./工程款支付证书模版.docx",
+  "template": "./工程款支付证书模板.docx",
   "output": {
     "dir": "03_实施阶段/06_往来函件/06_支付证书/原始稿/",
     "naming": "{YYYYMMDD}_ZF-ZS_{PROJECT_CODE}_工程款支付证书.docx"

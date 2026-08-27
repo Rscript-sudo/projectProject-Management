@@ -2,7 +2,7 @@
   "name": "监理日志",
   "doc_type": "log",
   "engine": "docx",
-  "template": "./监理日志模版.docx",
+  "template": "./监理日志模板.docx",
   "output": {
     "dir": "03_实施阶段/01_监理日志/01_{YYYYMM}/",
     "naming": "{YYYYMMDD}_JL-RZ_{PROJECT_CODE}_监理日志.docx"

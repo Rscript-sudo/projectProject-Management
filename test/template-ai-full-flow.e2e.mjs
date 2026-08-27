@@ -55,7 +55,7 @@ async function main() {
   assert.match(recognizedImage.content, /配电箱门开启/)
 
   // 1. 模板中心：导入真实 DOCX，并同时验证字段扫描和 Word 表格预览数据。
-  const sourcePath = path.resolve('templates/通用/01_监理日志/监理日志模版.docx')
+  const sourcePath = path.resolve('templates/通用/01_监理日志/监理日志模板.docx')
   const imported = await call('fs:importTemplateToLibrary', {
     sourcePath, docType: '监理日志', scope: 'global', projectType: '通用', name: '端到端监理日志模板',
   })

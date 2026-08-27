@@ -2,7 +2,7 @@
   "name": "竣工通知",
   "doc_type": "completion_notice",
   "engine": "docx",
-  "template": "./竣工通知模版.docx",
+  "template": "./竣工通知模板.docx",
   "output": {
     "dir": "04_验收阶段/05_竣工移交/",
     "naming": "{YYYYMMDD}_JG-TZ_{PROJECT_CODE}_竣工验收通知.docx"

@@ -2,7 +2,7 @@
   "name": "监理联系单",
   "doc_type": "contact",
   "engine": "docx",
-  "template": "./监理联系单模版.docx",
+  "template": "./工程联系单模板.docx",
   "output": {
     "dir": "03_实施阶段/06_往来函件/03_工程联系单/原始稿/",
     "naming": "{YYYYMMDD}_LX-D_{PROJECT_CODE}_{SUBJECT_SNIPPET}.docx"

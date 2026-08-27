@@ -17,7 +17,7 @@ async function main() {
   registerAll(ipcMain, null)
   const root = path.join(runtimeDir, 'projects')
   const docType = '监理周报'
-  const sourcePath = path.resolve('templates/通用/02_监理周报/监理周报模版.docx')
+  const sourcePath = path.resolve('templates/通用/02_监理周报/监理周报模板.docx')
 
   const systemTemplates = await call('fs:listSystemTemplates')
   const systemWeekly = systemTemplates.find(template => template.docType === docType)

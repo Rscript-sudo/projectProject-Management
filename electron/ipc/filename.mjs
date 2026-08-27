@@ -55,7 +55,7 @@ export const DOC_CODE_MAP = {
 
 // ===== 扩展名映射（虚竹规则：.doc / .xlsx 区分） =====
 export const DOC_EXT_MAP = {
-  // 监理日志当前登记模板为 Word（templates/通用/01_监理日志/监理日志模版.docx），
+  // 监理日志当前登记模板为 Word（templates/通用/01_监理日志/监理日志模板.docx），
   // 不能把 DOCX 二进制错误命名成 .xlsx。
   '监理日志': '.docx',
   '监理月报': '.docx',

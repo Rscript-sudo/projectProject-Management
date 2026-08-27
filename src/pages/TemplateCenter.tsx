@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { App, Button, Form, Input, Layout, Modal, Select, Space, Tree, Typography } from 'antd'
-import { AppstoreOutlined, FolderOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, DeleteOutlined, FolderOpenOutlined, FolderOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import TemplateLibraryZone from '../components/TemplateLibraryZone'
 import DocTypePromptEditor from '../components/DocTypePromptEditorV2'
 import { PROJECT_TYPE_OPTIONS } from '../shared/projectProfile.mjs'
@@ -15,11 +15,12 @@ export default function TemplateCenter() {
   const navigate = useNavigate()
   const { message } = App.useApp()
   const customProjectTypes = useSettingsStore(state => state.customProjectTypes)
-  const coreProjectTypeCodes = ['information', 'communication', 'power', 'building', 'municipal']
+  const [hiddenProfessionalCodes, setHiddenProfessionalCodes] = useState<string[]>([])
+  const [templateRoot, setTemplateRoot] = useState('')
   const projectTypes = useMemo(() => [
-    ...PROJECT_TYPE_OPTIONS.filter(item => coreProjectTypeCodes.includes(item.code)),
+    ...PROJECT_TYPE_OPTIONS.filter(item => item.code !== 'unclassified'),
     ...customProjectTypes,
-  ], [customProjectTypes])
+  ].filter(item => !hiddenProfessionalCodes.includes(item.code)), [customProjectTypes, hiddenProfessionalCodes])
   const [section, setSection] = useState('general-templates')
   const [projectTypeCode, setProjectTypeCode] = useState(projectTypes[0]?.code || 'information')
   const [editingRule, setEditingRule] = useState<{ docType: string; templateId?: string } | null>(() => {
@@ -32,6 +33,40 @@ export default function TemplateCenter() {
   const requestedReturnTo = searchParams.get('returnTo') || ''
   const returnTo = requestedReturnTo.startsWith('/project/') ? requestedReturnTo : ''
   const leaveRuleEditor = () => returnTo ? navigate(returnTo) : setEditingRule(null)
+
+  useEffect(() => {
+    void Promise.all([window.electronAPI.getSettings(), window.electronAPI.getTemplateWorkspaceInfo()]).then(([settings, workspace]) => {
+      setHiddenProfessionalCodes(Array.isArray(settings.hiddenProfessionalTemplateTypes) ? settings.hiddenProfessionalTemplateTypes : [])
+      setTemplateRoot(workspace.root)
+    })
+  }, [])
+
+  const deleteSpecialty = () => {
+    if (!selectedProjectType) return
+    Modal.confirm({
+      title: `删除专业“${selectedProjectType.label}”？`,
+      content: '该专业目录及目录内全部模板文件将移到系统废纸篓，模板中心不再显示该专业。',
+      okText: '删除整个专业', cancelText: '取消', okButtonProps: { danger: true },
+      onOk: async () => {
+        const result = await window.electronAPI.deleteProfessionalTemplateCategory(selectedProjectType.label)
+        if (!result?.ok) throw new Error(result?.error || '删除专业失败')
+        const settings = await window.electronAPI.getSettings()
+        const isCustom = customProjectTypes.some(item => item.code === selectedProjectType.code)
+        const nextCustom = isCustom
+          ? (settings.customProjectTypes || []).filter((item: any) => item.code !== selectedProjectType.code)
+          : settings.customProjectTypes
+        const nextHidden = isCustom
+          ? (settings.hiddenProfessionalTemplateTypes || [])
+          : Array.from(new Set([...(settings.hiddenProfessionalTemplateTypes || []), selectedProjectType.code]))
+        const saved = await window.electronAPI.setSettings({ ...settings, customProjectTypes: nextCustom, hiddenProfessionalTemplateTypes: nextHidden })
+        if (!saved?.success) throw new Error(saved?.error || '专业配置更新失败')
+        await useSettingsStore.getState().loadCustomTypes()
+        setHiddenProfessionalCodes(nextHidden)
+        setProjectTypeCode(projectTypes.find(item => item.code !== selectedProjectType.code)?.code || '')
+        message.success(`已删除专业及 ${result.removedTemplates || 0} 个模板，目录已移到废纸篓`)
+      },
+    })
+  }
 
   const renderContent = () => {
     if (editingRule) {
@@ -60,6 +95,7 @@ export default function TemplateCenter() {
             options={projectTypes.map(item => ({ value: item.code, label: item.label }))}
           />
           <Button icon={<PlusOutlined />} onClick={() => setSpecialtyOpen(true)}>添加专业</Button>
+          <Button danger icon={<DeleteOutlined />} onClick={deleteSpecialty}>删除专业</Button>
         </Space>
         {selectedProjectType && (
           <TemplateLibraryZone
@@ -121,7 +157,8 @@ export default function TemplateCenter() {
       </Sider>}
       <Content style={{ padding: editingRule ? 0 : 16, overflow: 'auto', background: editingRule ? '#fff' : '#fafafa' }}>
         {!editingRule && (
-          <Space style={{ width: '100%', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 12 }}>
+            <Button icon={<FolderOpenOutlined />} onClick={() => window.electronAPI.openPath(templateRoot)} disabled={!templateRoot} title={templateRoot}>打开模板库目录</Button>
             <Button
               type="primary"
               icon={<ThunderboltOutlined />}
@@ -156,6 +193,8 @@ export default function TemplateCenter() {
           }]
           const result = await window.electronAPI.setSettings({ ...settings, customProjectTypes: next })
           if (!result?.success) throw new Error(result?.error || '添加失败')
+          const directory = await window.electronAPI.createProfessionalTemplateCategory(name)
+          if (!directory?.ok) throw new Error(directory?.error || '创建专业目录失败')
           await useSettingsStore.getState().loadCustomTypes()
           setProjectTypeCode(`specialty_${stamp}`)
           setSpecialtyOpen(false)

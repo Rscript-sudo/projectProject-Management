@@ -2,7 +2,7 @@
   "name": "停工令",
   "doc_type": "stop_work_order",
   "engine": "docx",
-  "template": "./停工令模版.docx",
+  "template": "./停工令模板.docx",
   "output": {
     "dir": "03_实施阶段/06_往来函件/05_停工令/原始稿/",
     "naming": "{YYYYMMDD}_TG-LM_{PROJECT_CODE}_停工令.docx"

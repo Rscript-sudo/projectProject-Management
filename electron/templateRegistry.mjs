@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { normalizeProjectType } from '../src/shared/projectProfile.mjs'
+import { getTemplateScopeDir, getTemplateWorkspaceRoot } from './templateWorkspace.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -13,8 +14,21 @@ const SUPPORTED_DOC_TYPES = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, '..', 'src', 'shared', 'builtin-doc-types.json'), 'utf8'),
 )
 
+const DOC_TYPE_NAME_FIXES = new Map([
+  ['工程安装质量检查检查表', '工程安装质量检查表'],
+  ['软件安装调试纪录', '软件安装调试记录'],
+])
+
+export function cleanTemplateDocType(value) {
+  let name = String(value || '').trim().replace(/[「」]/g, '').replace(/[_＿]+/g, '')
+  name = name.replace(/(?:模版|模板)$/, '').trim()
+  // 清除旧专业模板迁移时残留的短随机尾码，例如“记录DYk”；保留 BIM 等全大写业务缩写。
+  name = name.replace(/[A-Z][A-Za-z0-9]{0,5}[a-z][A-Za-z0-9]{0,3}$/, '').trim()
+  return DOC_TYPE_NAME_FIXES.get(name) || name || '未命名模板'
+}
+
 export function getTemplateRegistryPath(userDataPath) {
-  return path.join(userDataPath, 'template-library', REGISTRY_FILE)
+  return path.join(getTemplateWorkspaceRoot(userDataPath), REGISTRY_FILE)
 }
 
 function readRegistry(userDataPath) {
@@ -43,6 +57,99 @@ export function listTemplateLibrary(userDataPath) {
     const byUpdatedAt = String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
     return byUpdatedAt || String(b.id || '').localeCompare(String(a.id || ''))
   })
+}
+
+/** 把旧版散落路径、英文 ID 文件名和同文种变体收敛为一份中文正式模板。 */
+export function normalizeTemplateLibrary(userDataPath) {
+  const registry = readRegistry(userDataPath)
+  const root = getTemplateWorkspaceRoot(userDataPath)
+  const archiveDir = path.join(root, '清理归档')
+  const ordered = [...registry.templates].sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+  const kept = []
+  const seen = new Set()
+  const renamedDocTypes = {}
+
+  for (const entry of ordered) {
+    const originalDocType = String(entry.docType || entry.name || '未命名模板')
+    const cleanedDocType = cleanTemplateDocType(originalDocType)
+    if (originalDocType !== cleanedDocType) renamedDocTypes[originalDocType] = cleanedDocType
+    const projectLabel = entry.scope === 'professional' ? (entry.projectTypeLabel || entry.projectType || '未分类') : '通用'
+    const key = `${entry.scope}:${entry.projectTypeLabel || entry.projectType || '通用'}:${cleanedDocType}`
+    const sourcePath = entry.path && fs.existsSync(entry.path) ? entry.path : ''
+    if (seen.has(key)) {
+      if (sourcePath) {
+        fs.mkdirSync(archiveDir, { recursive: true })
+        const archived = path.join(archiveDir, `${cleanedDocType}_${entry.id}${path.extname(sourcePath)}`)
+        if (!fs.existsSync(archived)) fs.copyFileSync(sourcePath, archived)
+      }
+      continue
+    }
+    seen.add(key)
+    const extension = path.extname(sourcePath || entry.sourceName || '.docx').toLowerCase() || '.docx'
+    const safeDocType = cleanedDocType.replace(/[\\/:*?"<>|]/g, '_')
+    const targetDir = path.join(getTemplateScopeDir(userDataPath, entry.scope), projectLabel, safeDocType)
+    const targetPath = path.join(targetDir, `${safeDocType}模板${extension}`)
+    if (sourcePath && path.resolve(sourcePath) !== path.resolve(targetPath)) {
+      fs.mkdirSync(targetDir, { recursive: true })
+      if (!fs.existsSync(targetPath)) fs.copyFileSync(sourcePath, targetPath)
+    }
+    kept.push({
+      ...entry,
+      name: safeDocType,
+      docType: safeDocType,
+      path: fs.existsSync(targetPath) ? targetPath : entry.path,
+      sourceName: `${safeDocType}模板${extension}`,
+      projectTypeLabel: projectLabel,
+    })
+  }
+  registry.templates = kept
+  writeRegistry(userDataPath, registry)
+
+  // 旧库复制进统一工作区后，正式目录里可能还残留 tpl_xxx / “模版”变体文件。
+  // 只清理用户管理的三类目录；内置模板不在 registry 中，不能参与这一步。
+  const referenced = new Set(kept.map(item => path.resolve(item.path)).filter(Boolean))
+  let physicalArchived = 0
+  const archiveUnregistered = directory => {
+    if (!fs.existsSync(directory)) return
+    for (const dirent of fs.readdirSync(directory, { withFileTypes: true })) {
+      const fullPath = path.join(directory, dirent.name)
+      if (dirent.isDirectory()) {
+        archiveUnregistered(fullPath)
+        try { if (fs.readdirSync(fullPath).length === 0) fs.rmdirSync(fullPath) } catch {}
+        continue
+      }
+      if (!/\.(docx|xlsx)$/i.test(dirent.name) || referenced.has(path.resolve(fullPath))) continue
+      fs.mkdirSync(archiveDir, { recursive: true })
+      const extension = path.extname(dirent.name)
+      const stem = path.basename(dirent.name, extension).replace(/[\\/:*?"<>|]/g, '_')
+      let archivedPath = path.join(archiveDir, `${stem}${extension}`)
+      if (fs.existsSync(archivedPath)) archivedPath = path.join(archiveDir, `${stem}-${Date.now()}-${physicalArchived}${extension}`)
+      fs.renameSync(fullPath, archivedPath)
+      physicalArchived++
+    }
+  }
+  for (const scope of ['professional', 'personal', 'other']) archiveUnregistered(getTemplateScopeDir(userDataPath, scope))
+
+  return { total: kept.length, archived: ordered.length - kept.length + physicalArchived, root, renamedDocTypes }
+}
+
+/** 删除一个专业及其整个物理目录和全部模板登记。 */
+export async function deleteProfessionalCategory(userDataPath, projectType, { trashItem } = {}) {
+  const label = String(projectType || '').trim()
+  if (!label) return { ok: false, error: '专业名称不能为空' }
+  const registry = readRegistry(userDataPath)
+  const targetCode = normalizeProjectType(label)
+  const removed = registry.templates.filter(item => item.scope === 'professional' && (
+    item.projectTypeLabel === label || normalizeProjectType(item.projectType) === targetCode
+  ))
+  const categoryDir = path.join(getTemplateScopeDir(userDataPath, 'professional'), label)
+  if (fs.existsSync(categoryDir)) {
+    if (typeof trashItem !== 'function') return { ok: false, error: '系统废纸篓不可用' }
+    await trashItem(categoryDir)
+  }
+  registry.templates = registry.templates.filter(item => !removed.some(candidate => candidate.id === item.id))
+  writeRegistry(userDataPath, registry)
+  return { ok: true, removedTemplates: removed.length, trashed: fs.existsSync(categoryDir) === false }
 }
 
 /**
@@ -74,7 +181,7 @@ export async function deleteTemplateFromLibrary(userDataPath, id, { trashItem } 
   const idx = registry.templates.findIndex(t => t.id === id)
   if (idx < 0) return { ok: false, error: '模板不存在' }
   const removed = registry.templates[idx]
-  const libraryRoot = path.resolve(userDataPath, 'template-library')
+  const libraryRoot = path.resolve(getTemplateWorkspaceRoot(userDataPath))
   const templatePath = removed.path ? path.resolve(removed.path) : ''
   const relative = templatePath ? path.relative(libraryRoot, templatePath) : '..'
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
@@ -154,17 +261,29 @@ export async function importTemplateToLibrary({ userDataPath, sourcePath, docTyp
 
   const registry = readRegistry(userDataPath)
   const id = `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-  const safeName = path.basename(sourcePath).replace(/[^\w\u4e00-\u9fff.-]/g, '_')
-  const targetDir = path.join(userDataPath, 'template-library', scope, projectType || '通用', docType)
+  const extension = path.extname(sourcePath).toLowerCase()
+  const safeDocType = cleanTemplateDocType(docType).replace(/[\\/:*?"<>|]/g, '_')
+  const targetDir = path.join(getTemplateScopeDir(userDataPath, scope), scope === 'professional' ? (projectType || '未分类') : '通用', safeDocType)
   fs.mkdirSync(targetDir, { recursive: true })
-  const targetPath = path.join(targetDir, `${id}_${safeName}`)
+  // 同一分类、同一文种只保留一个正式模板，不再产生“变体 1/2”式名称。
+  const targetPath = path.join(targetDir, `${safeDocType}模板${extension}`)
+  const existing = registry.templates.filter(item => item.scope === scope && item.docType === docType && normalizeProjectType(item.projectType) === normalizeProjectType(projectType))
+  for (const duplicate of existing) {
+    if (duplicate.path && duplicate.path !== targetPath && fs.existsSync(duplicate.path)) {
+      const archiveDir = path.join(getTemplateWorkspaceRoot(userDataPath), '清理归档', new Date().toISOString().slice(0, 10))
+      fs.mkdirSync(archiveDir, { recursive: true })
+      const archivedName = `${safeDocType}_${duplicate.id}${path.extname(duplicate.path)}`
+      fs.renameSync(duplicate.path, path.join(archiveDir, archivedName))
+    }
+  }
+  registry.templates = registry.templates.filter(item => !existing.some(duplicate => duplicate.id === item.id))
   fs.copyFileSync(sourcePath, targetPath)
   // 在导入时即扫描占位符：用户无需研究模板语法，也能判断模板是否可直接生成。
   const { getTemplatePlaceholders } = await import('./templateService.mjs')
   const fields = await getTemplatePlaceholders(targetPath)
   const entry = {
     id,
-    name: name?.trim() || path.basename(sourcePath, '.docx'),
+    name: safeDocType,
     docType,
     scope,
     // v1.x：projectType 存 code 便于 normalizeProjectType 反查；
@@ -174,7 +293,7 @@ export async function importTemplateToLibrary({ userDataPath, sourcePath, docTyp
       : (normalizeProjectType(projectType) || 'unclassified'),
     projectTypeLabel: projectType,  // UI 显示用
     path: targetPath,
-    sourceName: path.basename(sourcePath),
+    sourceName: `${safeDocType}模板${extension}`,
     fields,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

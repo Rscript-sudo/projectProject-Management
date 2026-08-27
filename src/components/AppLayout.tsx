@@ -10,6 +10,9 @@ import {
   BookOutlined,
   SafetyCertificateOutlined,
   BarChartOutlined,
+  HomeOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
 } from '@ant-design/icons'
 import { useAppStore } from '../stores/useProjectStore'
 import GlobalSearch from './GlobalSearch'
@@ -43,6 +46,7 @@ export default function AppLayout() {
   const [loading, setLoading] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [operationCenterOpen, setOperationCenterOpen] = useState(false)
+  const [navCollapsed, setNavCollapsed] = useState(false)
 
   // 键盘快捷键 Cmd+K / Ctrl+K 打开搜索
   useEffect(() => {
@@ -93,82 +97,83 @@ export default function AppLayout() {
     <Layout style={{ height: '100dvh', width: '100%', minWidth: 0, overflow: 'hidden' }}>
       {/* 左侧栏 */}
       <Sider
-        width={56}
+        width={196}
+        collapsedWidth={56}
+        collapsed={navCollapsed}
         theme="light"
         style={{
           borderRight: '1px solid #f0f0f0',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
           zIndex: 10,
+          transition: 'all .2s ease',
         }}
       >
-        {/* 顶部图标 */}
-        <div style={{
-          height: 48,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '100%',
-          borderBottom: '1px solid #f0f0f0',
-          cursor: 'pointer',
-          color: '#1677ff',
-          fontSize: 20,
-        }} onClick={() => navigate('/')}>
-          <ProjectOutlined />
-        </div>
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ height: 52, display: 'flex', alignItems: 'center', padding: navCollapsed ? '0 8px' : '0 12px', borderBottom: '1px solid #f0f0f0', color: '#1677ff', gap: 10, flex: 'none' }}>
+            <ProjectOutlined style={{ fontSize: 20, flex: 'none' }} />
+            {!navCollapsed && <Text strong ellipsis style={{ flex: 1 }}>项目文档管理系统</Text>}
+            <Button type="text" size="small" icon={navCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setNavCollapsed(value => !value)} title={navCollapsed ? '展开菜单' : '收起为图标'} />
+          </div>
 
-        {/* 操作按钮 */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 0' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, padding: 8 }}>
           <Button
             type="text"
-            icon={<BarChartOutlined />}
-            onClick={() => navigate('/portfolio')}
-            style={{ fontSize: 18, width: 40, height: 40 }}
-            title="多项目驾驶舱"
-          />
-          <Button
-            type="text"
-            icon={<SafetyCertificateOutlined />}
-            onClick={() => setOperationCenterOpen(true)}
-            style={{ fontSize: 18, width: 40, height: 40 }}
-            title="运行与诊断中心"
-          />
+            icon={<HomeOutlined />}
+            onClick={() => navigate('/')}
+            style={{ height: 40, justifyContent: navCollapsed ? 'center' : 'flex-start' }}
+            title="主界面"
+          >{!navCollapsed && '主界面'}</Button>
           <Button
             type="text"
             icon={<BookOutlined />}
             onClick={() => navigate('/template-center')}
-            style={{ fontSize: 18, width: 40, height: 40 }}
+            style={{ height: 40, justifyContent: navCollapsed ? 'center' : 'flex-start' }}
             title="模板中心"
-          />
+          >{!navCollapsed && '模板中心'}</Button>
           <Button
             type="text"
             icon={<PlusOutlined />}
             onClick={() => setCreateModalOpen(true)}
-            style={{ fontSize: 18, width: 40, height: 40 }}
+            style={{ height: 40, justifyContent: navCollapsed ? 'center' : 'flex-start' }}
             title="新建项目"
-          />
-          <Button
-            type="text"
-            icon={<SearchOutlined />}
-            onClick={() => setSearchOpen(true)}
-            style={{ fontSize: 18, width: 40, height: 40 }}
-            title="搜索文档 (⌘K)"
-          />
-          <Button
-            type="text"
-            icon={<SettingOutlined />}
-            onClick={() => navigate('/settings')}
-            style={{ fontSize: 18, width: 40, height: 40 }}
-            title="系统设置"
-          />
+          >{!navCollapsed && '新建项目'}</Button>
           <Button
             type="text"
             icon={<FolderOpenOutlined />}
             onClick={() => navigate('/')}
-            style={{ fontSize: 18, width: 40, height: 40 }}
-            title="控制台"
-          />
+            style={{ height: 40, justifyContent: navCollapsed ? 'center' : 'flex-start' }}
+            title="项目列表"
+          >{!navCollapsed && '项目列表'}</Button>
+          <Button
+            type="text"
+            icon={<SearchOutlined />}
+            onClick={() => setSearchOpen(true)}
+            style={{ height: 40, justifyContent: navCollapsed ? 'center' : 'flex-start' }}
+            title="搜索文档 (⌘K)"
+          >{!navCollapsed && '搜索文档'}</Button>
+          <Button
+            type="text"
+            icon={<SettingOutlined />}
+            onClick={() => navigate('/settings')}
+            style={{ height: 40, justifyContent: navCollapsed ? 'center' : 'flex-start' }}
+            title="系统设置"
+          >{!navCollapsed && '系统设置'}</Button>
+
+          <div style={{ flex: 1 }} />
+          <Button
+            type="text"
+            icon={<BarChartOutlined />}
+            onClick={() => navigate('/portfolio')}
+            style={{ height: 40, justifyContent: navCollapsed ? 'center' : 'flex-start' }}
+            title="多项目驾驶舱"
+          >{!navCollapsed && '多项目驾驶舱'}</Button>
+          <Button
+            type="text"
+            icon={<SafetyCertificateOutlined />}
+            onClick={() => setOperationCenterOpen(true)}
+            style={{ height: 40, justifyContent: navCollapsed ? 'center' : 'flex-start' }}
+            title="运行与诊断中心"
+          >{!navCollapsed && '运行与诊断'}</Button>
+          </div>
         </div>
       </Sider>
 

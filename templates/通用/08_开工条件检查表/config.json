@@ -2,7 +2,7 @@
   "name": "开工条件检查表",
   "doc_type": "startup_check",
   "engine": "docx",
-  "template": "./开工条件检查表_模版.docx",
+  "template": "./开工条件检查表模板.docx",
   "output": {
     "dir": "02_准备阶段/04_开工报审/01_开工条件检查表/",
     "naming": "{YYYYMMDD}_KG-JC_{PROJECT_CODE}_开工条件检查表.docx"

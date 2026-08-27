@@ -5,9 +5,17 @@ import fs from 'fs'
 import path from 'path'
 import { safeCall } from './safe.mjs'
 import { app, shell } from 'electron'
-import { listTemplatesByProjectType, deleteTemplateFromLibrary, updateTemplateInLibrary, listTemplateLibrary, getTemplateRegistryPath, refreshTemplateLibraryEntry, markTemplateRuleConfigured } from '../templateRegistry.mjs'
+import { listTemplatesByProjectType, deleteTemplateFromLibrary, deleteProfessionalCategory, updateTemplateInLibrary, listTemplateLibrary, getTemplateRegistryPath, refreshTemplateLibraryEntry, markTemplateRuleConfigured } from '../templateRegistry.mjs'
 import { getTemplatePlaceholders, saveDocxTemplatePlaceholders, saveXlsxTemplatePlaceholders } from '../templateService.mjs'
 import { isPathSafe } from '../shared/pathSafety.mjs'
+import { ensureProfessionalCategory, getRuntimeSystemTemplatesDir, getTemplateScopeDir, getTemplateWorkspaceInfo } from '../templateWorkspace.mjs'
+
+function isRuntimeSystemTemplate(filePath) {
+  const root = getRuntimeSystemTemplatesDir()
+  if (!root || !filePath) return false
+  const relative = path.relative(path.resolve(root), path.resolve(filePath))
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+}
 
 export function register(ipcMain) {
   ipcMain.handle('template:listByProjectType', safeCall((_, params = {}) => {
@@ -38,6 +46,13 @@ export function register(ipcMain) {
     return deleteTemplateFromLibrary(userDataPath, id, { trashItem: filePath => shell.trashItem(filePath) })
   }))
 
+  ipcMain.handle('template:deleteProfessional', safeCall(async (_, { projectType }) => {
+    return deleteProfessionalCategory(app.getPath('userData'), projectType, { trashItem: target => shell.trashItem(target) })
+  }))
+
+  ipcMain.handle('template:workspaceInfo', safeCall(() => getTemplateWorkspaceInfo(app.getPath('userData'))))
+  ipcMain.handle('template:createProfessional', safeCall((_, { projectType }) => ensureProfessionalCategory(app.getPath('userData'), projectType)))
+
   // v1.x：更新企业模板（重命名 / 替换文件 / 重扫字段）
   ipcMain.handle('template:updateLibrary', safeCall(async (_, { id, name, sourcePath }) => {
     const userDataPath = app.getPath('userData')
@@ -55,6 +70,7 @@ export function register(ipcMain) {
     const { path: filePath, addFields, removeFields, renameMap, placements, docType, templateId, saveAsPersonal, name } = payload
     if (!filePath || typeof filePath !== 'string') return { ok: false, error: '缺少模板路径' }
     if (!fs.existsSync(filePath)) return { ok: false, error: '模板文件不存在' }
+    if (!isPathSafe(filePath) && !isRuntimeSystemTemplate(filePath)) return { ok: false, error: '模板路径不安全' }
 
     const ext = path.extname(filePath).toLowerCase()
     if (ext !== '.docx' && ext !== '.xlsx') {
@@ -66,13 +82,14 @@ export function register(ipcMain) {
     let clonedToLibrary = null
 
     // 系统模板或用户明确“另存为私人模板”时，始终复制到 personal，绝不改系统原件。
-    if (saveAsPersonal || !isPathSafe(filePath)) {
+    if (saveAsPersonal || isRuntimeSystemTemplate(filePath)) {
       const userDataPath = app.getPath('userData')
-      const targetDir = path.join(userDataPath, 'template-library', 'personal', '通用', docType || '通用模板')
+      const safeDocType = String(docType || '通用模板').replace(/[\\/:*?"<>|]/g, '_')
+      const targetDir = path.join(getTemplateScopeDir(userDataPath, 'personal'), '通用', safeDocType)
       fs.mkdirSync(targetDir, { recursive: true })
       const stamp = Date.now().toString(36)
       const baseName = path.basename(filePath).replace(/[^\w\u4e00-\u9fff.-]/g, '_')
-      const newName = `tpl_${stamp}_${baseName}`
+      const newName = `${safeDocType}模板${path.extname(baseName).toLowerCase()}`
       targetPath = path.join(targetDir, newName)
       fs.copyFileSync(filePath, targetPath)
       // 若原目录有 config.json（xlsx 模板），一并复制

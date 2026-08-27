@@ -13,12 +13,15 @@ import { getDocumentRuleMinWords } from '../../src/shared/documentRules.mjs'
 import { recordIssuedDocument, saveDocumentMasterSnapshot, getCurrentMasterProfile, validateDocumentEvidence, linkDocumentEvidence } from '../db/repo.mjs'
 // v1.2.0：主进程接入反编造铁律后处理（单一真相源：electron/shared/postProcess.mjs）
 import { postProcessTimeFields, postProcessFabricationGuard } from '../shared/postProcess.mjs'
+import { getRuntimeSystemTemplatesDir } from '../templateWorkspace.mjs'
 
 // ESM 模块无 __dirname，手动推导
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 function getTemplatesDir() {
+  const runtimeDir = getRuntimeSystemTemplatesDir()
+  if (runtimeDir) return runtimeDir
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'templates')
   }

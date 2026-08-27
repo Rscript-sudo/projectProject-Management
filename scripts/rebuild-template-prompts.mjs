@@ -8,7 +8,7 @@ const config = JSON.parse(fs.readFileSync(promptPath, 'utf8'))
 
 const docs = [
   ['监理日志', '01_监理日志'], ['监理周报', '02_监理周报'], ['监理月报', '03_监理月报'], ['会议纪要', '04_会议纪要'],
-  ['整改通知书', '05_监理整改通知书'], ['工程联系单', '06_监理联系单'], ['安全通知书', '07_节假日安全通知'], ['开工条件检查表', '08_开工条件检查表'],
+  ['整改通知书', '05_整改通知书'], ['工程联系单', '06_工程联系单'], ['安全通知书', '07_安全通知书'], ['开工条件检查表', '08_开工条件检查表'],
   ['承建资格报审表', '09_承建资格报审表'], ['施工组织设计报审表', '10_施工组织设计报审表'], ['总监理工程师任命书', '11_总监理工程师任命书'],
   ['工程变更单', '12_工程变更单'], ['开工通知', '13_开工通知'], ['竣工通知', '14_竣工通知'], ['停工令', '15_停工令'],
   ['工程款支付证书', '16_工程款支付证书'], ['进度分析报告', '17_进度分析报告'], ['监理规划', '21_监理规划'], ['监理细则', '21_监理规划'],
@@ -21,8 +21,8 @@ function actualFields(dir, docType) {
   const cfgPath = path.join(dir, 'config.json')
   const cfg = fs.existsSync(cfgPath) ? JSON.parse(fs.readFileSync(cfgPath, 'utf8')) : {}
   const files = fs.readdirSync(dir).filter(name => /\.(docx|xlsx)$/i.test(name) && !name.startsWith('~$'))
-  const hints = docType === '监理细则' ? ['监理实施细则模版.docx', '信息化项目监理实施细则通用模板.docx']
-    : docType === '监理规划' ? ['监理规划模版.docx', '监理规划(模板).docx'] : []
+  const hints = docType === '监理细则' ? ['监理实施细则模板.docx', '信息化项目监理实施细则通用模板.docx']
+    : docType === '监理规划' ? ['监理规划模板.docx'] : []
   const file = hints.find(name => files.includes(name)) || files.find(name => name === path.basename(cfg.template || '')) || files[0]
   if (!file) return { fields: [], sources: {}, file: '' }
   const sources = Object.fromEntries(Object.entries(cfg.placeholders || {}).map(([key, value]) => [key.replace(/^\{\{|\}\}$/g, ''), value.source]))

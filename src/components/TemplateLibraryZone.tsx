@@ -262,7 +262,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
     else message.error('恢复文种失败')
   }
 
-  const openEdit = (tpl: Tpl) => { setEditTpl(tpl); setEditName(tpl.name); }
+  const openEdit = (tpl: Tpl) => { setEditTpl(tpl); setEditName(tpl.docType); }
 
   const handleEditSubmit = async () => {
     if (!editTpl) return
@@ -276,13 +276,13 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
               docType: editTpl.docType,
               scope,
               projectType: scope === 'professional' ? projectType : '通用',
-              name: editName.trim() || editTpl.docType,
+              name: editTpl.docType,
             })
           : await window.electronAPI.cloneSystemTemplateToLibrary({
               docType: editTpl.docType,
               scope: scope === 'professional' ? 'professional' : scope === 'personal' ? 'personal' : 'global',
               projectType: scope === 'professional' ? projectType : '通用',
-              name: editName.trim() || editTpl.docType,
+              name: editTpl.docType,
             })
         if (!result?.success) throw new Error(result?.error || '更新失败')
         if (editTpl.readOnly) {
@@ -296,7 +296,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
       // 可选：替换文件
       let sourcePath: string | undefined
       if (editReplace) { sourcePath = editReplace; }
-      const result = await window.electronAPI.updateLibraryTemplate({ id: editTpl.id, name: editName, sourcePath })
+      const result = await window.electronAPI.updateLibraryTemplate({ id: editTpl.id, name: editTpl.docType, sourcePath })
       if (!result?.ok) throw new Error(result?.error || '更新失败')
       message.success('已更新（重扫字段）')
       setEditTpl(null); setEditReplace(null)
@@ -313,14 +313,9 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
     {
       title: '模板名称', dataIndex: 'name', width: 260, ellipsis: true,
       render: (_n: string, r: Tpl) => {
-        const variants = templates.filter(item => item.docType === r.docType)
-        const variantIndex = variants.findIndex(item => item.id === r.id) + 1
         return <div style={{ minWidth: 0 }}>
-          <Space size={6} style={{ maxWidth: '100%' }}>
-            <Text strong ellipsis title={r.name || r.docType}>{scope === 'global' ? r.docType : (r.name || r.docType)}</Text>
-            {scope === 'professional' && variants.length > 1 && <Tag color="geekblue" style={{ margin: 0, flex: 'none' }}>变体 {variantIndex}/{variants.length}</Tag>}
-          </Space>
-          {scope === 'professional' && r.sourceName && <Text type="secondary" ellipsis title={r.sourceName} style={{ display: 'block', maxWidth: 230, fontSize: 11 }}>{r.sourceName}</Text>}
+          <Text strong ellipsis title={r.docType}>{r.docType}</Text>
+          {r.sourceName && <Text type="secondary" ellipsis title={r.sourceName} style={{ display: 'block', maxWidth: 230, fontSize: 11 }}>{r.sourceName}</Text>}
         </div>
       },
     },
@@ -468,7 +463,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <div>
             <Text type="secondary" style={{ fontSize: 12 }}>模板名称</Text>
-            <Input value={scope === 'global' ? (editTpl?.docType || '') : editName} onChange={event => setEditName(event.target.value)} disabled={scope === 'global'} placeholder="模板名称" />
+            <Input value={editTpl?.docType || editName} disabled placeholder="模板名称与文种保持一致" />
           </div>
           <div>
             <Text type="secondary" style={{ fontSize: 12 }}>{editTpl?.missing ? '添加模板文件（必选）' : '替换模板文件（可选）'}</Text>

@@ -2,7 +2,7 @@
   "name": "监理周报",
   "doc_type": "weekly",
   "engine": "docx",
-  "template": "./监理周报模版.docx",
+  "template": "./监理周报模板.docx",
   "output": {
     "dir": "03_实施阶段/02_监理周报/",
     "naming": "{YYYYMMDD}_JL-ZB_{PROJECT_CODE}_{week_number}监理周报.docx"

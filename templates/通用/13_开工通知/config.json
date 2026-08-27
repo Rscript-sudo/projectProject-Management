@@ -2,7 +2,7 @@
   "name": "开工通知",
   "doc_type": "startup_notice",
   "engine": "docx",
-  "template": "./开工通知模版.docx",
+  "template": "./开工通知模板.docx",
   "output": {
     "dir": "02_准备阶段/04_开工报审/",
     "naming": "{YYYYMMDD}_KG-TZ_{PROJECT_CODE}_开工通知.docx"

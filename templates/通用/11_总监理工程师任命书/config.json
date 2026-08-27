@@ -2,7 +2,7 @@
   "name": "总监理工程师任命书",
   "doc_type": "chief_appointment",
   "engine": "xlsx",
-  "template": "./总监理工程师任命书_模版.xlsx",
+  "template": "./总监理工程师任命书模板.xlsx",
   "output": {
     "dir": "02_准备阶段/04_开工报审/04_总监任命书/",
     "naming": "{YYYYMMDD}_ZJ-RM_{PROJECT_CODE}_总监理工程师任命书.xlsx"

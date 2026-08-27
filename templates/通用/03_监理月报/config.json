@@ -2,7 +2,7 @@
   "name": "监理月报",
   "doc_type": "monthly",
   "engine": "docx",
-  "template": "./监理月报模版.docx",
+  "template": "./监理月报模板.docx",
   "output": {
     "dir": "03_实施阶段/03_监理月报/",
     "naming": "{YYYYMMDD}_JL-YB_{PROJECT_CODE}_监理月报.docx"

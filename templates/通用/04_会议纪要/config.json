@@ -2,7 +2,7 @@
   "name": "会议纪要",
   "doc_type": "minutes",
   "engine": "docx",
-  "template": "./会议纪要模版.docx",
+  "template": "./会议纪要模板.docx",
   "output": {
     "dir": "03_实施阶段/04_会议纪要/",
     "naming": "{YYYYMMDD}_HY-JY_{PROJECT_CODE}_会议纪要.docx"

@@ -5,7 +5,8 @@ import { fileURLToPath } from 'url'
 import { registerAll, bootstrapCustomTypes } from './ipc/register.mjs'
 import { getDb, closeDb } from './db/database.mjs'
 import { runMigrations } from './db/migrations.mjs'
-import { migrateBuiltinProfessionalTemplates } from './templateRegistry.mjs'
+import { migrateBuiltinProfessionalTemplates, normalizeTemplateLibrary } from './templateRegistry.mjs'
+import { archiveLegacyTemplateLibrary, configureTemplateWorkspace } from './templateWorkspace.mjs'
 import { getSettings, saveSettings } from './ipc/shared.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -190,14 +191,37 @@ app.whenReady().then(async () => {
   }
 
   // 3. 正常路径：注册所有 IPC + 创建主窗口
+  const bundledTemplatesDir = app.isPackaged
+    ? path.join(process.resourcesPath, 'templates')
+    : path.join(__dirname, '..', 'templates')
+  configureTemplateWorkspace({
+    userDataPath: app.getPath('userData'),
+    documentsPath: app.getPath('documents'),
+    bundledTemplatesDir,
+  })
+  const templateCleanup = normalizeTemplateLibrary(app.getPath('userData'))
+  if (Object.keys(templateCleanup.renamedDocTypes || {}).length) {
+    const settings = getSettings()
+    const rename = value => templateCleanup.renamedDocTypes[value] || value
+    const promptOverrides = { ...(settings.docTypePromptOverrides || {}) }
+    for (const [oldName, newName] of Object.entries(templateCleanup.renamedDocTypes)) {
+      if (promptOverrides[oldName] && !promptOverrides[newName]) promptOverrides[newName] = promptOverrides[oldName]
+      delete promptOverrides[oldName]
+    }
+    saveSettings({
+      ...settings,
+      customDocTypes: (settings.customDocTypes || []).map(item => ({ ...item, label: rename(item.label) })),
+      docTypePromptOverrides: promptOverrides,
+    })
+  }
+  archiveLegacyTemplateLibrary()
+
   mainWindow = createWindow()
   registerAll(ipcMain, mainWindow)
 
   // v1.3.2：模板做减法 — 迁移 templates/专业/ 到企业模板库（仅首次，幂等）
   try {
-    const templatesDir = app.isPackaged
-      ? path.join(process.resourcesPath, 'templates')
-      : path.join(__dirname, '..', '..', 'templates')
+    const templatesDir = bundledTemplatesDir
     await migrateBuiltinProfessionalTemplates({
       userDataPath: app.getPath('userData'),
       templatesDir,

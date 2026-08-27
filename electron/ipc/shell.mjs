@@ -8,6 +8,7 @@ import { DATA_TOOLS } from '../dataTools.mjs'
 import { parseMaterial } from './material.mjs'
 import { registerTaskCancellation, updateTask, appendDiagnostic } from '../operationCenter.mjs'
 import { isPathSafe } from '../shared/pathSafety.mjs'
+import { getRuntimeSystemTemplatesDir } from '../templateWorkspace.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -43,6 +44,8 @@ function resolveAIUrl(options, settings) {
 }
 
 function getTemplatesDir() {
+  const runtimeDir = getRuntimeSystemTemplatesDir()
+  if (runtimeDir) return runtimeDir
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'templates')
   }

@@ -56,9 +56,9 @@ function expandAliases(canonical) {
 // v1.x：内置模板物理重组为 templates/通用/{dir}，值为「通用/目录名」；
 // findTemplate 找不到新路径时回退扁平旧路径（兼容迁移前的目录布局）。
 const DOC_TYPE_DIR_MAP = {
-  '整改通知书': '通用/05_监理整改通知书',
-  '安全通知书': '通用/07_节假日安全通知',
-  '工程联系单': '通用/06_监理联系单',
+  '整改通知书': '通用/05_整改通知书',
+  '安全通知书': '通用/07_安全通知书',
+  '工程联系单': '通用/06_工程联系单',
   '停工令': '通用/15_停工令',
   '会议纪要': '通用/04_会议纪要',
   '监理周报': '通用/02_监理周报',
@@ -96,7 +96,7 @@ function resolveTemplateDir(templatesDir, dirName) {
 // 同一目录内曾存在多个相近底稿，不能依赖文件系统遍历顺序。
 // 当前仅保留已完成占位符配置的“监理规划”底稿。
 const DOC_TYPE_TEMPLATE_HINTS = {
-  '监理规划': ['监理规划模版.docx'],
+  '监理规划': ['监理规划模板.docx'],
 }
 
 function selectTemplateFile(files, docType, expectedExtension) {

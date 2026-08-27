@@ -10,6 +10,7 @@ import { normalizeProjectProfile } from '../../src/shared/projectProfile.mjs'
 import { normalizeDocumentRules } from '../../src/shared/documentRules.mjs'
 import { assertSafeProjectName, getCurrentMasterProfile } from '../db/repo.mjs'
 import { isPathSafe } from '../shared/pathSafety.mjs'
+import { getRuntimeSystemTemplatesDir } from '../templateWorkspace.mjs'
 
 const PROJECT_LEDGER_FILES = new Set([
   '合同台账.json',
@@ -225,9 +226,9 @@ export function register(ipcMain) {
   ipcMain.handle('fs:getProjectTemplateContract', async (_, projectPath, docType) => {
     try {
       const { config } = projectTemplateConfig(projectPath)
-      const templatesDir = app.isPackaged
+      const templatesDir = getRuntimeSystemTemplatesDir() || (app.isPackaged
         ? path.join(process.resourcesPath, 'templates')
-        : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'templates')
+        : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'templates'))
       const { findTemplate, getTemplatePlaceholders } = await import('../templateService.mjs')
       const { resolveLibraryTemplate } = await import('../templateRegistry.mjs')
       const libraryTemplate = resolveLibraryTemplate(app.getPath('userData'), {
@@ -290,9 +291,9 @@ export function register(ipcMain) {
   })
 
   ipcMain.handle('fs:listSystemTemplates', async () => {
-    const templatesDir = app.isPackaged
+    const templatesDir = getRuntimeSystemTemplatesDir() || (app.isPackaged
       ? path.join(process.resourcesPath, 'templates')
-      : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'templates')
+      : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'templates'))
     const { listSystemTemplates } = await import('../templateService.mjs')
     return listSystemTemplates(templatesDir)
   })
@@ -303,9 +304,9 @@ export function register(ipcMain) {
   }))
 
   ipcMain.handle('fs:cloneSystemTemplateToLibrary', safeCall(async (_, { docType, scope = 'global', projectType = '通用', name }) => {
-    const templatesDir = app.isPackaged
+    const templatesDir = getRuntimeSystemTemplatesDir() || (app.isPackaged
       ? path.join(process.resourcesPath, 'templates')
-      : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'templates')
+      : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'templates'))
     const { listSystemTemplates } = await import('../templateService.mjs')
     const source = (await listSystemTemplates(templatesDir)).find(item => item.docType === docType)
     if (!source) return { success: false, error: `未找到${docType}系统预置模板` }

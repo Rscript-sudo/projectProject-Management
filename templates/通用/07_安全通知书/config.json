@@ -2,7 +2,7 @@
   "name": "节假日监理安全通知书",
   "doc_type": "holiday",
   "engine": "docx",
-  "template": "./节假日监理安全通知书模版.docx",
+  "template": "./安全通知书模板.docx",
   "output": {
     "dir": "03_实施阶段/06_往来函件/02_监理安全通知书/原始稿/",
     "naming": "{YYYYMMDD}_JL-TZ_{PROJECT_CODE}_{SUBJECT_SNIPPET}.docx"

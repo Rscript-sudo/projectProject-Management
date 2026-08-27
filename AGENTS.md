@@ -65,5 +65,5 @@ npm run build:win         # Windows 构建——本地 macOS 跑会卡住，只�
 - **字段真相源**在 `src/shared/`：`field-aliases.json` / `project-type-router.json` / `doc-type-min-words.json` / `sop/**`。不要在别处重复定义。
 - **项目类型 SOP 路由**：`PROJECT_TYPE_ROUTER` 按 7 类项目加载不同 SOP，**禁止跨类型混用术语**（信息化项目禁用塔吊/扬尘/木工等土建术语），`sanitizeForbiddenTerms` 做兜底。
 - **占位符白名单**：`placeholderScan.mjs` 管三套（合法残留 / 12 项必填 / FieldRegistry alias），不在白名单的 `{{xxx}}` → 阻止保存。
-- **模板策略（v1.3.3 减法后）**：只内置 `templates/通用/` 20 个通用模板；专业模板靠用户上传到企业模板库（`templateRegistry.mjs`）。`templates/专业/` 已废弃，首次启动由 `migrateBuiltinProfessionalTemplates` 自动迁移到企业库后删除。`buildTemplateCatalog` 只扫描通用目录。
+- **模板策略（v1.3.4 统一工作区）**：仓库只以 `templates/通用/` 维护内置种子；安装后运行时统一复制/迁移到用户“文档/项目文档管理系统/模板库”，按 `内置模板/专业模板/私人模板/其他模板` 分类。文件统一命名为“文种名称模板.ext”，同分类同文种只保留一份正式模板；专业模板由用户在模板中心维护。
 - **发布默认不做**（除非老板特别说明）：修 bug / 完成新功能后只做 `npm run build` 本地构建 + `git commit` 代码提交，**不 push、不打 tag、不 `./release.sh`、不建 Release**。推 GitHub / 出 Windows EXE 一律等老板明确指示。

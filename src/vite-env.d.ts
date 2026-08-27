@@ -200,6 +200,7 @@ interface AppSettings {
   globalRulesOverrides?: Record<string, any> | null
   hiddenSystemTemplateIds?: string[]
   hiddenCommonDocTypes?: string[]
+  hiddenProfessionalTemplateTypes?: string[]
 }
 
 export interface ElectronAPI {
@@ -441,6 +442,9 @@ export interface ElectronAPI {
   removeCustomSop: (params: { code: string }) => Promise<{ ok: boolean; error?: string }>
   getTemplateFields: (filePath: string) => Promise<{ ok: boolean; fields?: string[]; error?: string }>
   deleteLibraryTemplate: (id: string) => Promise<{ ok: boolean; error?: string }>
+  deleteProfessionalTemplateCategory: (projectType: string) => Promise<{ ok: boolean; removedTemplates?: number; error?: string }>
+  getTemplateWorkspaceInfo: () => Promise<{ root: string; categories: Record<string, string> }>
+  createProfessionalTemplateCategory: (projectType: string) => Promise<{ ok: boolean; directory?: string; error?: string }>
   updateLibraryTemplate: (payload: { id: string; name?: string; sourcePath?: string }) => Promise<{ ok: boolean; template?: any; error?: string }>
   markTemplateRuleConfigured: (id: string) => Promise<{ ok: boolean; template?: any; error?: string }>
   saveTemplateContent: (payload: { path: string; addFields?: string[]; removeFields?: string[]; renameMap?: Record<string, string>; placements?: Array<{ field: string; anchor?: string; position?: 'before' | 'after'; tableIndex?: number; rowIndex?: number; cellIndex?: number }>; docType?: string; templateId?: string; saveAsPersonal?: boolean; name?: string }) => Promise<{ ok: boolean; path?: string; fields?: string[]; clonedToLibrary?: any; error?: string }>
