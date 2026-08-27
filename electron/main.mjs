@@ -5,6 +5,8 @@ import { fileURLToPath } from 'url'
 import { registerAll, bootstrapCustomTypes } from './ipc/register.mjs'
 import { getDb, closeDb } from './db/database.mjs'
 import { runMigrations } from './db/migrations.mjs'
+import { migrateBuiltinProfessionalTemplates } from './templateRegistry.mjs'
+import { getSettings, saveSettings } from './ipc/shared.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -190,6 +192,22 @@ app.whenReady().then(() => {
   // 3. 正常路径：注册所有 IPC + 创建主窗口
   mainWindow = createWindow()
   registerAll(ipcMain, mainWindow)
+
+  // v1.3.2：模板做减法 — 迁移 templates/专业/ 到企业模板库（仅首次，幂等）
+  try {
+    const templatesDir = app.isPackaged
+      ? path.join(process.resourcesPath, 'templates')
+      : path.join(__dirname, '..', '..', 'templates')
+    await migrateBuiltinProfessionalTemplates({
+      userDataPath: app.getPath('userData'),
+      templatesDir,
+      getSettings,
+      saveSettings,
+    })
+  } catch (e) {
+    console.warn('[Main] Professional template migration failed:', e.message)
+  }
+
   // v1.x：自定义专业/文种注入运行时 + 推送给渲染进程
   bootstrapCustomTypes(mainWindow)
 

@@ -5,6 +5,22 @@
 
 ---
 
+## v1.3.3 · 2026-08-27 · ⚠️ 未打 tag
+
+> 模板做减法：移除 `templates/专业/` 9 类预置专业模板，专业模板改为用户上传 + 分析 + 扩写规则。
+
+### 模板做减法
+- feat: 新增 `migrateBuiltinProfessionalTemplates`（`templateRegistry.mjs`），首次启动检测 `templates/专业/` 存在时，递归遍历 81 个 docx（电力 8 + 通信 46 + 信息化 27），按文件名推断 docType（匹配内置 26 类则用内置，否则建自定义文种），批量导入企业模板库（scope=professional），删源目录，写 `.professional-migrated` 标记防重复
+- feat: `main.mjs` 启动入口 `app.whenReady` 挂载迁移调用（在 `bootstrapCustomTypes` 之前），失败仅 warn 不阻塞启动
+- refactor: `buildTemplateCatalog`（`templateService.mjs`）精简为只扫描 `templates/通用/`，移除专业扫描分支 + 旧扁平布局回退（约 50 行）
+- 设计: 前端 TemplateCenter 保留「专业模板」树节点作为用户上传入口，不再展示系统预置专业模板
+
+### 文档
+- docs: PROJECT_OVERVIEW.md 模板系统完成度更新（101 docx → 20 通用 + 企业库用户上传）+ 二次开发建议移除已完成的「模板做减法」项
+- docs: AGENTS.md 加模板策略说明（只内置通用，专业靠用户上传）
+
+---
+
 ## v1.3.2 · 2026-08-27 · ⚠️ 未打 tag
 
 > 结构化模板白名单「设计陷阱」修复 + 7 类项目 SOP 内容深度对齐。

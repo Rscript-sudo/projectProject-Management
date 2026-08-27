@@ -189,4 +189,115 @@ export function resolveLibraryTemplate(userDataPath, { docType, projectType, sel
   ) || templates.find(item => item.scope === 'global') || null
 }
 
+/**
+ * v1.3.2：模板做减法 — 将 templates/专业/ 下的预置专业模板批量迁移到企业模板库。
+ *
+ * 触发条件：templates/专业/ 目录存在（旧版本升级或首次安装带该目录）。
+ * 迁移逻辑：
+ *   1. 递归遍历 templates/专业/<专业名>/.../*.docx
+ *   2. docType 从文件名推断（去后缀/去"模版"/去"「」"），匹配内置则用内置，否则建自定义文种
+ *   3. scope=professional, projectType=专业名（一级目录名）
+ *   4. 导入完删除 templates/专业/ 整个目录，写迁移标记防重复
+ *
+ * 幂等：迁移标记文件 .professional-migrated 存在则跳过。
+ */
+export async function migrateBuiltinProfessionalTemplates({ userDataPath, templatesDir, getSettings, saveSettings }) {
+  const markerPath = path.join(userDataPath, '.professional-migrated')
+  if (fs.existsSync(markerPath)) return { skipped: true, reason: 'already-migrated' }
+
+  const specialtyDir = path.join(templatesDir, '专业')
+  if (!fs.existsSync(specialtyDir)) {
+    // 无源目录也写标记，避免每次启动都检查
+    try { fs.writeFileSync(markerPath, new Date().toISOString(), 'utf8') } catch {}
+    return { skipped: true, reason: 'no-specialty-dir' }
+  }
+
+  const results = { imported: 0, customTypesCreated: 0, errors: [] }
+  const settings = getSettings()
+  let customDocTypes = Array.isArray(settings.customDocTypes) ? [...settings.customDocTypes] : []
+  const customLabels = new Set(customDocTypes.map(item => item.label))
+
+  // 递归找所有 docx
+  const walk = (dir) => {
+    const out = []
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith('.') || entry.name.startsWith('_')) continue
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) out.push(...walk(full))
+      else if (entry.name.toLowerCase().endsWith('.docx')) out.push(full)
+    }
+    return out
+  }
+
+  // 推断 docType：取文件名，去 .docx / _模版 / 模版 / 「」 / 工程前缀
+  const inferDocType = (fileName) => {
+    let n = fileName.replace(/\.docx$/i, '')
+    n = n.replace(/_模版$/, '').replace(/模版$/, '')
+    n = n.replace(/[「」]/g, '')
+    // 去 "通信工程_" / "电力工程_" 等专业前缀
+    n = n.replace(/^(电力|通信|信息化|房建|钢结构|市政|土建|园林|装饰)工程[_]/, '')
+    // 去版本号前缀如 "E-ZDW-01-"
+    n = n.replace(/^[A-Z]+-[A-Z]+-\d+-/, '')
+    return n.trim()
+  }
+
+  for (const professionName of fs.readdirSync(specialtyDir, { withFileTypes: true })) {
+    if (!professionName.isDirectory()) continue
+    if (professionName.name.startsWith('.')) continue
+    const profDir = path.join(specialtyDir, professionName.name)
+    const docxFiles = walk(profDir)
+    for (const docxPath of docxFiles) {
+      try {
+        const fileName = path.basename(docxPath)
+        let docType = inferDocType(fileName)
+        // 匹配内置则用内置，否则建自定义文种
+        if (!SUPPORTED_DOC_TYPES.includes(docType) && !customLabels.has(docType)) {
+          const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 5)
+          customDocTypes.push({
+            code: `prof_${stamp}`,
+            label: docType,
+            fileCode: `ZY${stamp.slice(-6).toUpperCase()}`,
+            projectType: professionName.name,
+            minWords: 400,
+            inStructuredWhitelist: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
+          customLabels.add(docType)
+          results.customTypesCreated++
+        }
+        // 导入到企业库（scope=professional）
+        await importTemplateToLibrary({
+          userDataPath,
+          sourcePath: docxPath,
+          docType,
+          scope: 'professional',
+          projectType: professionName.name,
+          name: docType,
+        })
+        results.imported++
+      } catch (e) {
+        results.errors.push({ file: docxPath, error: e.message })
+        console.warn('[templateRegistry] migrate failed:', docxPath, e.message)
+      }
+    }
+  }
+
+  // 保存自定义文种到 settings
+  if (results.customTypesCreated > 0) {
+    saveSettings({ ...settings, customDocTypes })
+  }
+
+  // 删除源目录 + 写迁移标记
+  try {
+    fs.rmSync(specialtyDir, { recursive: true, force: true })
+    fs.writeFileSync(markerPath, new Date().toISOString(), 'utf8')
+  } catch (e) {
+    console.warn('[templateRegistry] cleanup specialty dir failed:', e.message)
+  }
+
+  console.log(`[templateRegistry] Migrated ${results.imported} professional templates, created ${results.customTypesCreated} custom docTypes, ${results.errors.length} errors`)
+  return results
+}
+
 export { SUPPORTED_DOC_TYPES }

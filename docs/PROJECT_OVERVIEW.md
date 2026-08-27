@@ -205,7 +205,7 @@ npm run build             # macOS dmg（本机）
 | **AI 文档生成** | ✅ 完整 | 26 类内置 docType（`builtin-doc-types.json`）+ 自定义 docType + 流式 SSE + 7 层反编造防线 + 字数补足 + 字段清洗 |
 | **AI 多 Provider** | ✅ 完整 | `providerConfigs` 支持 deepseek / qwen 等；apiKey 主进程安全存储（v1.0.6 脱敏） |
 | **项目类型 SOP 路由** | ✅ 完整 | 7 类项目（土建/市政/房建/信息化/园林/钢结构/装饰）SOP JSON **全部已建**（`src/shared/sop/<type>/safety-notice.json`） |
-| **模板系统** | ✅ 完整 | 101 个 docx 模板 + 9 个专业类（电力/房建/钢结构/市政/通信/土建/信息化/园林/装饰）+ 项目级 override + 企业模板库 + 三条渲染分支（xlsx/结构化/docxtemplater） |
+| **模板系统** | ✅ 完整（v1.3.3 减法） | 通用模板 20 个 docx（内置）+ 企业模板库（用户上传/导入）+ 项目级 override + 三条渲染分支（xlsx/结构化/docxtemplater）。v1.3.3 起移除 `templates/专业/` 9 类预置，首次启动自动迁移 81 个专业 docx 到企业库，专业模板改用户上传 |
 | **全文检索** | ✅ 完整 | FlexSearch 引擎，Docx/Xlsx 全文索引，跨项目搜索（`search:query/rebuild/status`） |
 | **往来函件台账** | ✅ 完整 | 6 类函件 + 5 维度检索 + 状态机（已发出/已回复/已复查/已关闭/超期）+ 自动归档 |
 | **隐患联动闭环** | ✅ 完整 | 巡检 → 隐患入台账 → 生成整改通知 → 回执关闭（`hazard` 表关联 `correspondence`） |
@@ -256,4 +256,3 @@ npm run build             # macOS dmg（本机）
 1. **P0 代码签名**：申请 EV 证书，CI 加 `CSC_LINK` 配置，消除 SmartScreen 拦截（老板拍板后续再做）
 2. **P1 静默自动升级**：接入 `electron-updater` + `generic` provider，启用 `latest.yml` 链路
 3. **P2 多项目并发**：评估多窗口或多标签架构，支持同时打开多个项目
-4. **P2 模板做减法**：移除 `templates/专业/` 9 类预置模板，专业模板改用户上传+分析+扩写规则（下一轮）

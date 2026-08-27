@@ -1058,94 +1058,30 @@ function buildTemplateTree(dirPath, options = {}) {
 
   return items
 }
-
 /**
- * 构建模板资源目录 — 扫描 templates/ 返回结构化树
+ * 构建模板资源目录 — 扫描 templates/通用/ 返回结构化树
  *
- * v1.x 物理重组后结构：
- *   templates/通用/{docType 目录}   → 归入根分类「通用类型模板」
- *   templates/专业/{专业}/{表式}    → 归入根分类「专业」，子目录即各专业（含空专业）
- *
- * 兼容旧扁平布局：若 templates/通用 或 templates/专业 不存在（旧装机），
- * 回退到扫描根目录、用 SPECIALTY 式启发区分（含 is_professional 标记的专业表式独立展示）。
+ * v1.3.2 模板做减法后：只扫描 templates/通用/，专业模板由用户上传到企业模板库
+ * （templates/专业/ 已在首次启动时由 migrateBuiltinProfessionalTemplates 迁移到企业库）。
  * 排除 format-spec/ 目录和非模板文件。
  */
 export function buildTemplateCatalog(templatesDir) {
   if (!fs.existsSync(templatesDir)) return []
 
-  const items = []
   const generalDir = path.join(templatesDir, '通用')
-  const specialtyDir = path.join(templatesDir, '专业')
+  if (!fs.existsSync(generalDir)) return []
 
-  // ---- 新结构：通用/ + 专业/ ----
-  if (fs.existsSync(generalDir) || fs.existsSync(specialtyDir)) {
-    const generalItems = buildTemplateTree(generalDir, { keepEmpty: false })
-    if (generalItems.length > 0) {
-      items.push({
-        name: '00_通用类型模板',
-        path: generalDir,
-        type: 'category',
-        displayName: '通用类型模板',
-        children: generalItems,
-        docxCount: countDocx(generalItems),
-      })
-    }
-    // 专业根：子目录即各专业（keepEmpty 保留空专业，展示「暂无模板」）
-    const specialtyChildren = buildTemplateTree(specialtyDir, { keepEmpty: true })
-    if (specialtyChildren.length > 0) {
-      items.push({
-        name: '01_专业模板',
-        path: specialtyDir,
-        type: 'category',
-        displayName: '专业模板',
-        children: specialtyChildren,
-        docxCount: countDocx(specialtyChildren),
-      })
-    }
-    return items
-  }
+  const generalItems = buildTemplateTree(generalDir, { keepEmpty: false })
+  if (generalItems.length === 0) return []
 
-  // ---- 旧扁平布局回退 ----
-  const generalItems = []
-  const entries = fs.readdirSync(templatesDir, { withFileTypes: true })
-    .filter(e => !e.name.startsWith('.') && e.isDirectory() && e.name !== 'format-spec')
-    .sort((a, b) => {
-      const numA = parseInt(a.name.match(/^(\d+)/)?.[1] || '99')
-      const numB = parseInt(b.name.match(/^(\d+)/)?.[1] || '99')
-      if (numA !== numB) return numA - numB
-      return a.name.localeCompare(b.name)
-    })
-
-  for (const entry of entries) {
-    const entryPath = path.join(templatesDir, entry.name)
-    const children = buildTemplateTree(entryPath)
-    if (children.length === 0) continue
-    const node = {
-      name: entry.name,
-      path: entryPath,
-      type: 'category',
-      displayName: stripNumberPrefix(entry.name),
-      children,
-      docxCount: countDocx(children),
-    }
-    // 旧扁平布局下，含 is_professional 标记的专业表式独立展示，其余归通用
-    const hasProfessionalMarker = children.some(c => c.config?.is_professional) ||
-      entryPath.includes('_') && /(工程|专业)/.test(entry.name)
-    if (hasProfessionalMarker) items.push(node)
-    else generalItems.push(node)
-  }
-
-  if (generalItems.length > 0) {
-    items.unshift({
-      name: '00_通用类型模板',
-      path: templatesDir,
-      type: 'category',
-      displayName: '通用类型模板',
-      children: generalItems,
-      docxCount: countDocx(generalItems),
-    })
-  }
-  return items
+  return [{
+    name: '00_通用类型模板',
+    path: generalDir,
+    type: 'category',
+    displayName: '通用类型模板',
+    children: generalItems,
+    docxCount: countDocx(generalItems),
+  }]
 }
 
 function countDocx(items) {
