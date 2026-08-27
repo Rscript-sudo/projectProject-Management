@@ -449,10 +449,14 @@ export default function ProjectView() {
         window.electronAPI.listSystemTemplates(),
       ])
       setTemplateCatalog(catalog || [])
-      const libraryDocTypes = new Set((library || []).map(item => item.docType))
+      // 只有用户添加的“通用模板”才覆盖同文种系统模板。
+      // 专业/项目/私人模板属于独立资源树节点，不能让系统内置项从通用模板中消失。
+      const globalLibraryDocTypes = new Set(
+        (library || []).filter(item => item.scope === 'global').map(item => item.docType),
+      )
       setGenerationTemplates([
         ...(library || []),
-        ...(system || []).filter(item => !libraryDocTypes.has(item.docType)),
+        ...(system || []).filter(item => !globalLibraryDocTypes.has(item.docType)),
       ] as GenerationTemplate[])
     } catch (e) {
       console.error('[ProjectView] Failed to load template catalog:', e)
