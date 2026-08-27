@@ -13,7 +13,7 @@
 - **栈**：Electron 42 + React 19 + TS 5 + Vite 6 + Ant Design 5 + better-sqlite3 + docxtemplater
 - **入口**：`electron/main.mjs`（主进程）· `src/main.tsx`（React 根）· `src/App.tsx`（路由）
 - **打包产物**：macOS arm64 dmg（开发机）· Windows nsis + portable（CI 出，详见 `RELEASE.md`）
-- **当前版本**：v1.4.0（见 `package.json`，详见 `CHANGELOG.md`）
+- **当前版本**：v1.3.2（见 `package.json`，详见 `CHANGELOG.md`）
 
 ---
 
