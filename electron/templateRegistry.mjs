@@ -69,20 +69,29 @@ export function listTemplatesByProjectType(userDataPath, { projectType, docType,
  * v1.x：删除企业模板库中的一条模板（清 registry + 删物理文件）
  * 只删除位于 template-library 目录内的文件，避免误删系统/其他文件
  */
-export function deleteTemplateFromLibrary(userDataPath, id) {
+export async function deleteTemplateFromLibrary(userDataPath, id, { trashItem } = {}) {
   const registry = readRegistry(userDataPath)
   const idx = registry.templates.findIndex(t => t.id === id)
   if (idx < 0) return { ok: false, error: '模板不存在' }
-  const [removed] = registry.templates.splice(idx, 1)
-  try {
-    if (removed.path && removed.path.includes('template-library') && fs.existsSync(removed.path)) {
-      fs.unlinkSync(removed.path)
-    }
-  } catch (e) {
-    console.warn('[templateRegistry] delete file failed:', e.message)
+  const removed = registry.templates[idx]
+  const libraryRoot = path.resolve(userDataPath, 'template-library')
+  const templatePath = removed.path ? path.resolve(removed.path) : ''
+  const relative = templatePath ? path.relative(libraryRoot, templatePath) : '..'
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    return { ok: false, error: '只允许删除用户模板库中的文件' }
   }
+  if (templatePath && fs.existsSync(templatePath)) {
+    if (typeof trashItem !== 'function') return { ok: false, error: '系统废纸篓不可用' }
+    try {
+      await trashItem(templatePath)
+    } catch (e) {
+      console.warn('[templateRegistry] trash file failed:', e.message)
+      return { ok: false, error: `移到废纸篓失败：${e.message}` }
+    }
+  }
+  registry.templates.splice(idx, 1)
   writeRegistry(userDataPath, registry)
-  return { ok: true }
+  return { ok: true, trashed: Boolean(templatePath) }
 }
 
 /**

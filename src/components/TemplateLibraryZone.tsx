@@ -2,7 +2,7 @@
 // 列全：企业模板（可编辑/删除/替换）+ 系统预置模板（只读）
 // 支持批量导入、字段识别、打开、配置扩写规则
 import { useEffect, useState, useCallback } from 'react'
-import { AutoComplete, Card, Table, Button, Space, Tag, Empty, App, Typography, Popconfirm, Tooltip, Modal, Input, Alert } from 'antd'
+import { AutoComplete, Card, Table, Button, Space, Tag, Empty, App, Typography, Popconfirm, Tooltip, Modal, Input, Alert, Menu } from 'antd'
 import { InboxOutlined, ReloadOutlined, EyeOutlined, DeleteOutlined, EditOutlined, MinusCircleOutlined, PlusOutlined, ScanOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useSettingsStore } from '../stores/useSettingsStore'
@@ -43,6 +43,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
   const [hiddenCommonDocTypes, setHiddenCommonDocTypes] = useState<string[]>([])
   const [addTypeOpen, setAddTypeOpen] = useState(false)
   const [newTypeName, setNewTypeName] = useState('')
+  const [contextMenu, setContextMenu] = useState<{ template: Tpl; x: number; y: number } | null>(null)
 
   // 编辑弹窗
   const [editTpl, setEditTpl] = useState<Tpl | null>(null)
@@ -109,6 +110,13 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
   }, [scope, projectType, display, message, customDocTypes])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (!contextMenu) return
+    const close = () => setContextMenu(null)
+    window.addEventListener('click', close)
+    window.addEventListener('blur', close)
+    return () => { window.removeEventListener('click', close); window.removeEventListener('blur', close) }
+  }, [contextMenu])
 
   const doImport = async (sourcePath: string, docType: string) => {
     const audit = await window.electronAPI.auditTemplate(sourcePath)
@@ -174,12 +182,12 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
         ...settings,
         hiddenSystemTemplateIds: Array.from(new Set([...hiddenIds, tpl.id])),
       })
-      if (result?.success) { message.success('已从通用模板中删除'); load() }
+      if (result?.success) { message.success('已隐藏内置模板，可通过“恢复默认模板”找回'); load() }
       else message.error('删除失败：' + (result?.error || '未知错误'))
       return
     }
     const result = await window.electronAPI.deleteLibraryTemplate(tpl.id)
-    if (result?.ok) { message.success('已删除'); load() }
+    if (result?.ok) { message.success('模板文件已移到系统废纸篓，可从废纸篓恢复'); load() }
     else message.error('删除失败：' + (result?.error || '未知错误'))
   }
 
@@ -303,12 +311,18 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
 
   const columns: ColumnsType<Tpl> = [
     {
-      title: '模板名称', dataIndex: 'name', width: 220, ellipsis: true,
-      render: (_n: string, r: Tpl) => (
-        <Space size={6}>
-          <Text strong>{scope === 'global' ? r.docType : (r.name || r.docType)}</Text>
-        </Space>
-      ),
+      title: '模板名称', dataIndex: 'name', width: 260, ellipsis: true,
+      render: (_n: string, r: Tpl) => {
+        const variants = templates.filter(item => item.docType === r.docType)
+        const variantIndex = variants.findIndex(item => item.id === r.id) + 1
+        return <div style={{ minWidth: 0 }}>
+          <Space size={6} style={{ maxWidth: '100%' }}>
+            <Text strong ellipsis title={r.name || r.docType}>{scope === 'global' ? r.docType : (r.name || r.docType)}</Text>
+            {scope === 'professional' && variants.length > 1 && <Tag color="geekblue" style={{ margin: 0, flex: 'none' }}>变体 {variantIndex}/{variants.length}</Tag>}
+          </Space>
+          {scope === 'professional' && r.sourceName && <Text type="secondary" ellipsis title={r.sourceName} style={{ display: 'block', maxWidth: 230, fontSize: 11 }}>{r.sourceName}</Text>}
+        </div>
+      },
     },
     { title: '文种', dataIndex: 'docType', width: 180, align: 'left', render: (d: string) => <Text>{d}</Text> },
     {
@@ -405,12 +419,41 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
           description="监理日志、监理周报、监理月报、整改通知书、安全通知书、工程联系单、进度分析报告这 7 类文种默认用系统内置版式生成，即便存在预置模板文件也不会自动套用。如需使用自定义模板，请在对应行点「编辑」导入您的模板到企业模板库。"
         />
       )}
+      {(scope === 'professional' || scope === 'personal' || scope === 'other') && <Text type="secondary" style={{ display: 'block', marginBottom: 10 }}>提示：右击任意模板可打开操作菜单；删除会移到系统废纸篓，可恢复。</Text>}
       <Table
         size="small" rowKey="id" loading={loading} columns={columns} dataSource={templates}
         locale={{ emptyText: <Empty description="暂无模板，点上方「批量导入」" /> }}
         pagination={false}
         scroll={{ x: 1020 }}
+        onRow={record => ({
+          onContextMenu: event => {
+            event.preventDefault()
+            setContextMenu({ template: record, x: event.clientX, y: event.clientY })
+          },
+        })}
       />
+      {contextMenu && <div style={{ position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 3000, minWidth: 190, borderRadius: 8, overflow: 'hidden', boxShadow: '0 8px 28px rgba(0,0,0,.18)' }} onClick={event => event.stopPropagation()}>
+        <Menu
+          selectable={false}
+          items={[
+            { key: 'open', label: '打开模板文件', icon: <EyeOutlined />, disabled: contextMenu.template.missing },
+            ...(onGoRules ? [{ key: 'rules', label: '编辑 AI 扩写规则', icon: <ThunderboltOutlined />, disabled: contextMenu.template.missing }] : []),
+            { key: 'edit', label: '编辑 / 替换模板', icon: <EditOutlined /> },
+            { key: 'scan', label: '重新扫描占位符', icon: <ScanOutlined />, disabled: contextMenu.template.missing },
+            { type: 'divider' as const },
+            { key: 'delete', label: contextMenu.template.readOnly ? '隐藏内置模板' : '移到系统废纸篓', icon: <DeleteOutlined />, danger: true, disabled: contextMenu.template.missing },
+          ]}
+          onClick={({ key }) => {
+            const tpl = contextMenu.template
+            setContextMenu(null)
+            if (key === 'open') void window.electronAPI.openFile(tpl.path)
+            else if (key === 'rules') onGoRules?.(tpl.docType, tpl.id)
+            else if (key === 'edit') openEdit(tpl)
+            else if (key === 'scan') void handleScanFields(tpl)
+            else if (key === 'delete') void handleDelete(tpl)
+          }}
+        />
+      </div>}
 
       {/* 编辑 / 替换弹窗 */}
       <Modal

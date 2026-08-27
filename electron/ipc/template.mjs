@@ -4,7 +4,7 @@
 import fs from 'fs'
 import path from 'path'
 import { safeCall } from './safe.mjs'
-import { app } from 'electron'
+import { app, shell } from 'electron'
 import { listTemplatesByProjectType, deleteTemplateFromLibrary, updateTemplateInLibrary, listTemplateLibrary, getTemplateRegistryPath, refreshTemplateLibraryEntry } from '../templateRegistry.mjs'
 import { getTemplatePlaceholders, saveDocxTemplatePlaceholders, saveXlsxTemplatePlaceholders } from '../templateService.mjs'
 import { isPathSafe } from '../shared/pathSafety.mjs'
@@ -33,9 +33,9 @@ export function register(ipcMain) {
   }))
 
   // v1.x：删除企业模板（清 registry + 删物理文件）
-  ipcMain.handle('template:deleteLibrary', safeCall((_, { id }) => {
+  ipcMain.handle('template:deleteLibrary', safeCall(async (_, { id }) => {
     const userDataPath = app.getPath('userData')
-    return deleteTemplateFromLibrary(userDataPath, id)
+    return deleteTemplateFromLibrary(userDataPath, id, { trashItem: filePath => shell.trashItem(filePath) })
   }))
 
   // v1.x：更新企业模板（重命名 / 替换文件 / 重扫字段）

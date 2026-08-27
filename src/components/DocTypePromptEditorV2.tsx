@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert, App, Button, Collapse, Empty, Input, InputNumber, Modal, Segmented,
   Select, Space, Spin, Switch, Tag, Typography,
@@ -142,7 +142,9 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
   const [promptOpen, setPromptOpen] = useState(false)
   const [newFieldName, setNewFieldName] = useState('')
   const [inlineAnchor, setInlineAnchor] = useState('')
+  const [inlineEditorPosition, setInlineEditorPosition] = useState<{ left: number; top: number } | null>(null)
   const [pendingPlacements, setPendingPlacements] = useState<Array<{ field: string; anchor: string; position: 'before' | 'after' }>>([])
+  const [deletedFields, setDeletedFields] = useState<Array<{ field: string; config: FieldConfig; placement?: { field: string; anchor: string; position: 'before' | 'after' } }>>([])
   const [analyzing, setAnalyzing] = useState(false)
   const [suggestedFields, setSuggestedFields] = useState<SuggestedField[]>([])
   const [analyzeOpen, setAnalyzeOpen] = useState(false)
@@ -150,6 +152,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
   const [recognitionError, setRecognitionError] = useState('')
   const [saveAsOpen, setSaveAsOpen] = useState(false)
   const [personalTemplateName, setPersonalTemplateName] = useState('')
+  const previewRef = useRef<HTMLDivElement>(null)
 
   const activeItem = docTypes.find(item => item.key === activeKey)
   const activeIndex = docTypes.findIndex(item => item.key === activeKey)
@@ -231,7 +234,9 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       setRecognitionError(fields.length ? '' : '没有识别到占位符。可手动设定字段，或让 AI 重新分析模板结构。')
       setTemplate({ id: found.id, name: found.sourceName || activeItem.label, path: found.path, fields, content: compactContent, html: parsed?.success ? parsed.html || '' : '', isSystem })
       setPendingPlacements([])
+      setDeletedFields([])
       setInlineAnchor('')
+      setInlineEditorPosition(null)
       setInitialFields(fields)
       const next = { ...configs }
       for (const field of fields) if (!next[field]) next[field] = defaultFieldConfig(field)
@@ -291,18 +296,38 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     setConfigs(prev => ({ ...prev, [name]: defaultFieldConfig(name) }))
     if (template) setTemplate(prev => prev ? { ...prev, fields: [...(prev.fields || []), name] } : prev)
     if (inlineAnchor) setPendingPlacements(prev => [...prev.filter(item => item.field !== name), { field: name, anchor: inlineAnchor, position: 'after' }])
+    setDeletedFields(prev => prev.filter(item => item.field !== name))
     setSelectedField(name)
     setNewFieldName('')
     setInlineAnchor('')
+    setInlineEditorPosition(null)
     message.success(`已在所选位置添加字段「${name}」`)
   }
 
-  // 删除自定义字段
+  // 删除后保留本次编辑会话内的恢复记录，避免误删后只能重新扫描。
   const removeField = (field: string) => {
+    const placement = pendingPlacements.find(item => item.field === field)
+    setDeletedFields(prev => [...prev.filter(item => item.field !== field), {
+      field,
+      config: configs[field] || defaultFieldConfig(field),
+      placement,
+    }])
     setConfigs(prev => { const next = { ...prev }; delete next[field]; return next })
     if (template) setTemplate(prev => prev ? { ...prev, fields: (prev.fields || []).filter(f => f !== field) } : prev)
     setPendingPlacements(prev => prev.filter(item => item.field !== field))
-    if (selectedField === field) setSelectedField(fields[0] || '')
+    if (selectedField === field) setSelectedField(fields.find(item => item !== field) || '')
+    message.success(`已删除占位符「${field}」，保存前可撤销恢复`)
+  }
+
+  const restoreLastDeletedField = () => {
+    const removed = deletedFields[deletedFields.length - 1]
+    if (!removed) return
+    setConfigs(prev => ({ ...prev, [removed.field]: removed.config }))
+    setTemplate(prev => prev ? { ...prev, fields: [...new Set([...(prev.fields || []), removed.field])] } : prev)
+    if (removed.placement) setPendingPlacements(prev => [...prev.filter(item => item.field !== removed.field), removed.placement!])
+    setDeletedFields(prev => prev.slice(0, -1))
+    setSelectedField(removed.field)
+    message.success(`已恢复占位符「${removed.field}」`)
   }
 
   // AI 分析模板结构：先加载内容，再调 AI 识别可填充位置 + 建议占位符
@@ -558,6 +583,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       const match = part.match(/^\{\{([^}]+)\}\}$/)
       if (!match) return <span key={index}>{part}</span>
       const field = match[1].trim()
+      if (!fields.includes(field)) return null
       const selected = field === selectedField
       return <button key={`${field}-${index}`} onClick={() => setSelectedField(field)} style={{ border: selected ? '1px solid #1677ff' : '1px solid #f0b04f', background: selected ? '#e8f3ff' : '#fff7e8', color: selected ? '#0958d9' : '#ad6800', borderRadius: 5, padding: '1px 5px', margin: '1px 2px', cursor: 'pointer', fontWeight: 600 }}>{part}</button>
     })
@@ -568,6 +594,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     let safe = sanitizeTemplateHtml(template.html)
     safe = safe.replace(/\{\{([^}]+)\}\}/g, (_whole, rawField) => {
       const field = String(rawField).trim()
+      if (!fields.includes(field)) return ''
       const mode = configs[field]?.mode || defaultFieldConfig(field).mode
       const selected = field === selectedField
       const tone = mode === 'ai' ? 'ai' : mode === 'keep' ? 'keep' : 'auto'
@@ -576,7 +603,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     })
     for (const placement of pendingPlacements) safe = injectMappedPlaceholder(safe, placement, selectedField)
     return safe
-  }, [template?.html, configs, selectedField, pendingPlacements])
+  }, [template?.html, configs, selectedField, pendingPlacements, fields])
 
   const shell: React.CSSProperties = { background: '#fff' }
   const paneTitle: React.CSSProperties = { padding: '13px 16px', borderBottom: '1px solid #edf0f3', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }
@@ -622,7 +649,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     <Spin spinning={loadingTemplate}>
       <div className="template-editor-grid">
         <section style={{ borderRight: '1px solid #edf0f3', background: '#fbfcfe' }}>
-          <div style={paneTitle}><span><ApartmentOutlined /> 占位符结构</span><Space size={6}><Tag color="blue">{fields.length} 个</Tag><Button size="small" type="link" icon={<PlusOutlined />} onClick={() => message.info('请直接点击右侧模板中的目标位置')}>定位添加</Button></Space></div>
+          <div style={paneTitle}><span><ApartmentOutlined /> 占位符结构</span><Space size={6}><Tag color="blue">{fields.length} 个</Tag>{deletedFields.length > 0 && <Button size="small" type="link" onClick={restoreLastDeletedField}>撤销删除（{deletedFields.length}）</Button>}<Button size="small" type="link" icon={<PlusOutlined />} onClick={() => message.info('请直接点击右侧模板中的目标段落或单元格')}>定位添加</Button></Space></div>
           <div style={{ padding: 12 }}>
             {Object.entries(grouped).map(([group, items]) => items.length > 0 && <div key={group} style={{ marginBottom: 15 }}>
               <Text type="secondary" style={{ fontSize: 12, fontWeight: 700 }}>{group}</Text>
@@ -644,7 +671,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
         <section style={{ borderRight: '1px solid #edf0f3' }}>
           <div style={paneTitle}><span><EyeOutlined /> 原始模板映射</span><Button type="link" size="small" onClick={() => template?.path && window.electronAPI.openPath(template.path)}>打开原文件</Button></div>
           <div className="template-mapping-canvas" style={{ padding: '16px 22px', background: '#f6f7f9', minHeight: 0 }}>
-            <div className="template-preview-scroll">
+            <div className="template-preview-scroll" ref={previewRef}>
               <Text type="secondary" style={{ display: 'block', marginBottom: 14 }}>{template?.name || '未关联模板文件'}</Text>
               {decoratedTemplateHtml ? <div
                 className="docx-template-preview"
@@ -654,17 +681,26 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
                   if (target?.dataset.field) { setSelectedField(target.dataset.field); return }
                   const anchorElement = clicked.closest<HTMLElement>('td,th,p')
                   const anchor = (anchorElement?.innerText || clicked.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60)
-                  if (anchor) { setInlineAnchor(anchor); setNewFieldName('') }
+                  if (anchor) {
+                    const preview = previewRef.current
+                    const targetRect = (anchorElement || clicked).getBoundingClientRect()
+                    const previewRect = preview?.getBoundingClientRect()
+                    setInlineAnchor(anchor)
+                    setNewFieldName('')
+                    if (preview && previewRect) setInlineEditorPosition({
+                      left: Math.max(12, Math.min(targetRect.left - previewRect.left + preview.scrollLeft, preview.scrollWidth - 310)),
+                      top: targetRect.bottom - previewRect.top + preview.scrollTop + 6,
+                    })
+                  }
                 }}
                 dangerouslySetInnerHTML={{ __html: decoratedTemplateHtml }}
               /> : renderContent()}
+              {inlineAnchor && inlineEditorPosition && <div className="template-inline-field-popover" style={{ left: inlineEditorPosition.left, top: inlineEditorPosition.top }}>
+                <Input size="small" autoFocus value={newFieldName} onChange={event => setNewFieldName(event.target.value)} onPressEnter={addField} placeholder="占位符名称，回车添加" />
+                <Button size="small" type="primary" onClick={addField}>添加</Button>
+                <Button size="small" type="text" onClick={() => { setInlineAnchor(''); setInlineEditorPosition(null); setNewFieldName('') }}>取消</Button>
+              </div>}
             </div>
-            {inlineAnchor && <div className="template-inline-field-editor">
-              <Text type="secondary" ellipsis title={inlineAnchor} style={{ maxWidth: 150 }}>位置：{inlineAnchor}</Text>
-              <Input size="small" autoFocus value={newFieldName} onChange={event => setNewFieldName(event.target.value)} onPressEnter={addField} placeholder="输入占位符名称" />
-              <Button size="small" type="primary" onClick={addField}>添加</Button>
-              <Button size="small" onClick={() => { setInlineAnchor(''); setNewFieldName('') }}>取消</Button>
-            </div>}
           </div>
         </section>
 
