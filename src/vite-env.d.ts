@@ -442,7 +442,7 @@ export interface ElectronAPI {
   removeCustomSop: (params: { code: string }) => Promise<{ ok: boolean; error?: string }>
   getTemplateFields: (filePath: string) => Promise<{ ok: boolean; fields?: string[]; error?: string }>
   deleteLibraryTemplate: (id: string) => Promise<{ ok: boolean; error?: string }>
-  deleteProfessionalTemplateCategory: (projectType: string) => Promise<{ ok: boolean; removedTemplates?: number; error?: string }>
+  deleteProfessionalTemplateCategory: (projectType: string, projectTypeCode: string) => Promise<{ ok: boolean; removedTemplates?: number; customProjectTypes?: any[]; hiddenProfessionalTemplateTypes?: string[]; error?: string }>
   getTemplateWorkspaceInfo: () => Promise<{ root: string; categories: Record<string, string> }>
   createProfessionalTemplateCategory: (projectType: string) => Promise<{ ok: boolean; directory?: string; error?: string }>
   updateLibraryTemplate: (payload: { id: string; name?: string; sourcePath?: string }) => Promise<{ ok: boolean; template?: any; error?: string }>

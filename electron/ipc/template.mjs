@@ -9,6 +9,9 @@ import { listTemplatesByProjectType, deleteTemplateFromLibrary, deleteProfession
 import { getTemplatePlaceholders, saveDocxTemplatePlaceholders, saveXlsxTemplatePlaceholders } from '../templateService.mjs'
 import { isPathSafe } from '../shared/pathSafety.mjs'
 import { ensureProfessionalCategory, getRuntimeSystemTemplatesDir, getTemplateScopeDir, getTemplateWorkspaceInfo } from '../templateWorkspace.mjs'
+import { removeProfessionalCategoryFromSettings } from '../professionalCategory.mjs'
+import { getSettings, saveSettings } from './shared.mjs'
+import { setCustomProjectTypes } from '../../src/shared/projectProfile.mjs'
 
 function isRuntimeSystemTemplate(filePath) {
   const root = getRuntimeSystemTemplatesDir()
@@ -46,8 +49,22 @@ export function register(ipcMain) {
     return deleteTemplateFromLibrary(userDataPath, id, { trashItem: filePath => shell.trashItem(filePath) })
   }))
 
-  ipcMain.handle('template:deleteProfessional', safeCall(async (_, { projectType }) => {
-    return deleteProfessionalCategory(app.getPath('userData'), projectType, { trashItem: target => shell.trashItem(target) })
+  ipcMain.handle('template:deleteProfessional', safeCall(async (_, { projectType, projectTypeCode }) => {
+    const deleted = await deleteProfessionalCategory(app.getPath('userData'), projectType, { trashItem: target => shell.trashItem(target) })
+    if (!deleted?.ok) return deleted
+
+    // 删除必须是一条完整链路：不能只删目录/registry，却把专业名称留在设置里。
+    const nextSettings = removeProfessionalCategoryFromSettings(getSettings(), { projectType, projectTypeCode })
+    const saved = saveSettings(nextSettings)
+    if (!saved?.success) {
+      return { ok: false, error: saved?.error || '专业配置更新失败' }
+    }
+    setCustomProjectTypes(nextSettings.customProjectTypes || [])
+    return {
+      ...deleted,
+      customProjectTypes: nextSettings.customProjectTypes || [],
+      hiddenProfessionalTemplateTypes: nextSettings.hiddenProfessionalTemplateTypes || [],
+    }
   }))
 
   ipcMain.handle('template:workspaceInfo', safeCall(() => getTemplateWorkspaceInfo(app.getPath('userData'))))

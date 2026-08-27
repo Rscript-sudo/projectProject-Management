@@ -48,22 +48,17 @@ export default function TemplateCenter() {
       content: '该专业目录及目录内全部模板文件将移到系统废纸篓，模板中心不再显示该专业。',
       okText: '删除整个专业', cancelText: '取消', okButtonProps: { danger: true },
       onOk: async () => {
-        const result = await window.electronAPI.deleteProfessionalTemplateCategory(selectedProjectType.label)
-        if (!result?.ok) throw new Error(result?.error || '删除专业失败')
-        const settings = await window.electronAPI.getSettings()
-        const isCustom = customProjectTypes.some(item => item.code === selectedProjectType.code)
-        const nextCustom = isCustom
-          ? (settings.customProjectTypes || []).filter((item: any) => item.code !== selectedProjectType.code)
-          : settings.customProjectTypes
-        const nextHidden = isCustom
-          ? (settings.hiddenProfessionalTemplateTypes || [])
-          : Array.from(new Set([...(settings.hiddenProfessionalTemplateTypes || []), selectedProjectType.code]))
-        const saved = await window.electronAPI.setSettings({ ...settings, customProjectTypes: nextCustom, hiddenProfessionalTemplateTypes: nextHidden })
-        if (!saved?.success) throw new Error(saved?.error || '专业配置更新失败')
-        await useSettingsStore.getState().loadCustomTypes()
-        setHiddenProfessionalCodes(nextHidden)
-        setProjectTypeCode(projectTypes.find(item => item.code !== selectedProjectType.code)?.code || '')
-        message.success(`已删除专业及 ${result.removedTemplates || 0} 个模板，目录已移到废纸篓`)
+        try {
+          const result = await window.electronAPI.deleteProfessionalTemplateCategory(selectedProjectType.label, selectedProjectType.code)
+          if (!result?.ok) throw new Error(result?.error || '删除专业失败')
+          await useSettingsStore.getState().loadCustomTypes()
+          setHiddenProfessionalCodes(result.hiddenProfessionalTemplateTypes || [])
+          setProjectTypeCode(projectTypes.find(item => item.code !== selectedProjectType.code)?.code || '')
+          message.success(`已删除专业及 ${result.removedTemplates || 0} 个模板，目录已移到废纸篓`)
+        } catch (error: any) {
+          message.error(error?.message || '删除专业失败')
+          throw error
+        }
       },
     })
   }
