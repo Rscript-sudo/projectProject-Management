@@ -114,8 +114,9 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
   const [generating, setGenerating] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [promptOpen, setPromptOpen] = useState(false)
-  const [addFieldOpen, setAddFieldOpen] = useState(false)
   const [newFieldName, setNewFieldName] = useState('')
+  const [inlineAnchor, setInlineAnchor] = useState('')
+  const [pendingPlacements, setPendingPlacements] = useState<Array<{ field: string; anchor: string; position: 'after' }>>([])
   const [analyzing, setAnalyzing] = useState(false)
   const [suggestedFields, setSuggestedFields] = useState<SuggestedField[]>([])
   const [analyzeOpen, setAnalyzeOpen] = useState(false)
@@ -249,23 +250,25 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     setConfigs(prev => ({ ...prev, [selectedField]: { ...(prev[selectedField] || defaultFieldConfig(selectedField)), ...patch } }))
   }
 
-  // 手动添加字段：用户自定义字段名，不依赖扫描
+  // 映射区就地添加字段：先点模板位置，再直接输入字段名。
   const addField = () => {
     const name = newFieldName.trim()
     if (!name) { message.warning('请输入字段名'); return }
     if (fields.includes(name)) { message.warning('该字段已存在'); return }
     setConfigs(prev => ({ ...prev, [name]: defaultFieldConfig(name) }))
     if (template) setTemplate(prev => prev ? { ...prev, fields: [...(prev.fields || []), name] } : prev)
+    if (inlineAnchor) setPendingPlacements(prev => [...prev.filter(item => item.field !== name), { field: name, anchor: inlineAnchor, position: 'after' }])
     setSelectedField(name)
     setNewFieldName('')
-    setAddFieldOpen(false)
-    message.success(`已添加字段「${name}」`)
+    setInlineAnchor('')
+    message.success(`已在所选位置添加字段「${name}」`)
   }
 
   // 删除自定义字段
   const removeField = (field: string) => {
     setConfigs(prev => { const next = { ...prev }; delete next[field]; return next })
     if (template) setTemplate(prev => prev ? { ...prev, fields: (prev.fields || []).filter(f => f !== field) } : prev)
+    setPendingPlacements(prev => prev.filter(item => item.field !== field))
     if (selectedField === field) setSelectedField(fields[0] || '')
   }
 
@@ -368,28 +371,6 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     setAnalyzeOpen(false)
   }
 
-  // 手动在预览内容里插入占位符：用户选中一段文本作为锚点，插在该文本后
-  const [manualAnchor, setManualAnchor] = useState('')
-  const [manualFieldName, setManualFieldName] = useState('')
-  const [manualInsertOpen, setManualInsertOpen] = useState(false)
-  const insertManualPlaceholder = () => {
-    const name = manualFieldName.trim()
-    const anchor = manualAnchor.trim()
-    if (!name) { message.warning('请输入字段名'); return }
-    if (!anchor) { message.warning('请输入或选中锚点文本（模板里存在的文字）'); return }
-    if (!template?.content) { message.warning('请先加载模板预览'); return }
-    const placeholder = `{{${name}}}`
-    if (template.content.includes(placeholder)) { message.warning('该占位符已存在'); return }
-    const idx = template.content.indexOf(anchor)
-    if (idx < 0) { message.warning('锚点文本在模板里没找到，请检查'); return }
-    const newContent = template.content.slice(0, idx + anchor.length) + placeholder + template.content.slice(idx + anchor.length)
-    setTemplate(prev => prev ? { ...prev, content: newContent, fields: [...new Set([...(prev.fields || []), name])] } : prev)
-    if (!configs[name]) setConfigs(prev => ({ ...prev, [name]: defaultFieldConfig(name) }))
-    setSelectedField(name)
-    setManualAnchor(''); setManualFieldName(''); setManualInsertOpen(false)
-    message.success(`已在「${anchor}」后插入 {{${name}}}`)
-  }
-
   const switchDoc = (offset: number) => {
     if (!docTypes.length) return
     setActiveKey(docTypes[(Math.max(activeIndex, 0) + offset + docTypes.length) % docTypes.length].key)
@@ -454,6 +435,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
               path: template.path,
               addFields,
               removeFields,
+              placements: pendingPlacements.filter(item => addFields.includes(item.field)),
               docType: activeItem?.label || activeKey,
               templateId: template.id,
               saveAsPersonal: saveAsPersonal || template.isSystem,
@@ -470,6 +452,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
               }
               // 更新初始字段快照为保存后的字段
               if (saveRes.fields) setInitialFields(saveRes.fields)
+              setPendingPlacements([])
             } else {
               message.warning(`模板文件保存失败：${saveRes?.error || '未知错误'}（规则已保存，但模板文件未更新）`)
             }
@@ -544,7 +527,11 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
 
   const decoratedTemplateHtml = useMemo(() => {
     if (!template?.html) return ''
-    const safe = sanitizeTemplateHtml(template.html)
+    let safe = sanitizeTemplateHtml(template.html)
+    for (const placement of pendingPlacements) {
+      const marker = `<button type="button" class="placeholder ai" data-field="${escapeHtmlAttribute(placement.field)}">{{${escapeHtmlAttribute(placement.field)}}}<span>待保存</span></button>`
+      safe = safe.replace(placement.anchor, `${placement.anchor}${marker}`)
+    }
     return safe.replace(/\{\{([^}]+)\}\}/g, (_whole, rawField) => {
       const field = String(rawField).trim()
       const mode = configs[field]?.mode || defaultFieldConfig(field).mode
@@ -553,21 +540,21 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       const escapedField = escapeHtmlAttribute(field)
       return `<button type="button" class="placeholder ${tone}${selected ? ' selected' : ''}" data-field="${escapedField}">{{${escapedField}}}${mode === 'ai' ? '<span>AI扩写</span>' : ''}</button>`
     })
-  }, [template?.html, configs, selectedField])
+  }, [template?.html, configs, selectedField, pendingPlacements])
 
   const shell: React.CSSProperties = { background: '#fff' }
   const paneTitle: React.CSSProperties = { padding: '13px 16px', borderBottom: '1px solid #edf0f3', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }
 
   return <div style={{ ...shell, overflow: 'auto', minWidth: 0, minHeight: '100%' }}>
-    <div style={{ minHeight: 58, padding: '10px 22px', borderBottom: '1px solid #e6eaf0', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-      <Space size={12} wrap>
+    <div className="template-editor-header">
+      <Space size={12} wrap style={{ minWidth: 0 }}>
         {onBack && <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack} />}
         <span style={{ width: 30, height: 30, display: 'inline-grid', placeItems: 'center', borderRadius: 7, color: '#fff', background: '#1677ff' }}><FileSearchOutlined /></span>
-        <Title level={4} style={{ margin: 0 }}>{activeItem?.label || '模板'} · AI扩写规则</Title>
+        <Title level={4} className="template-editor-title" style={{ margin: 0 }} title={`${activeItem?.label || '模板'} · AI扩写规则`}>{activeItem?.label || '模板'} · AI扩写规则</Title>
         <Select showSearch value={activeKey || undefined} onChange={setActiveKey} optionFilterProp="label" variant="borderless" style={{ width: 150 }} options={docTypes.map(item => ({ value: item.key, label: item.label }))} />
         {availableTemplates.length > 0 && <Select value={selectedTemplateId || undefined} onChange={(id) => { setSelectedTemplateId(id); void loadTemplate(id) }} variant="borderless" style={{ width: 220 }} options={availableTemplates.map(t => ({ value: t.id, label: t.name }))} placeholder="选择模板来源" />}
       </Space>
-      <Space wrap>
+      <Space wrap className="template-editor-actions">
         <Button icon={<FolderOpenOutlined />} disabled={!template?.path} onClick={() => template?.path && window.electronAPI.openPath(template.path)}>打开原文件</Button>
         <Button type="primary" ghost icon={<ThunderboltFilled />} loading={analyzing} onClick={analyzeTemplate}>AI 分析模板结构</Button>
         <Button icon={<ReloadOutlined />} onClick={() => loadTemplate(selectedTemplateId)}>重新扫描</Button>
@@ -593,13 +580,13 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     {recognitionError && <Alert
       type="warning" showIcon closable style={{ margin: '12px 22px 0' }}
       message="模板识别未完成"
-      description={<Space wrap><Text>{recognitionError}</Text><Button size="small" icon={<PlusOutlined />} onClick={() => setAddFieldOpen(true)}>自定义占位符</Button><Button size="small" type="primary" ghost icon={<ReloadOutlined />} loading={analyzing} onClick={analyzeTemplate}>重试 AI 模板识别</Button></Space>}
+      description={<Space wrap><Text>{recognitionError}</Text><Button size="small" icon={<PlusOutlined />} onClick={() => message.info('请在下方“原始模板映射”中点击要插入的位置')}>自定义占位符</Button><Button size="small" type="primary" ghost icon={<ReloadOutlined />} loading={analyzing} onClick={analyzeTemplate}>重试 AI 模板识别</Button></Space>}
       onClose={() => setRecognitionError('')}
     />}
     <Spin spinning={loadingTemplate}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 270px) minmax(0, 1fr) minmax(360px, 500px)', minHeight: 650 }}>
+      <div className="template-editor-grid">
         <section style={{ borderRight: '1px solid #edf0f3', background: '#fbfcfe' }}>
-          <div style={paneTitle}><span><ApartmentOutlined /> 占位符结构</span><Space size={6}><Tag color="blue">{fields.length} 个</Tag><Button size="small" type="link" icon={<PlusOutlined />} onClick={() => setAddFieldOpen(true)}>添加字段</Button></Space></div>
+          <div style={paneTitle}><span><ApartmentOutlined /> 占位符结构</span><Space size={6}><Tag color="blue">{fields.length} 个</Tag><Button size="small" type="link" icon={<PlusOutlined />} onClick={() => message.info('请直接点击右侧模板中的目标位置')}>定位添加</Button></Space></div>
           <div style={{ padding: 12 }}>
             {Object.entries(grouped).map(([group, items]) => items.length > 0 && <div key={group} style={{ marginBottom: 15 }}>
               <Text type="secondary" style={{ fontSize: 12, fontWeight: 700 }}>{group}</Text>
@@ -620,18 +607,28 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
 
         <section style={{ borderRight: '1px solid #edf0f3' }}>
           <div style={paneTitle}><span><EyeOutlined /> 原始模板映射</span><Button type="link" size="small" onClick={() => template?.path && window.electronAPI.openPath(template.path)}>打开原文件</Button></div>
-          <div style={{ padding: '16px 22px', background: '#f6f7f9', minHeight: 0 }}>
+          <div className="template-mapping-canvas" style={{ padding: '16px 22px', background: '#f6f7f9', minHeight: 0 }}>
             <div style={{ background: '#fff', height: 560, overflow: 'auto', padding: '22px 30px', border: '1px solid #dfe4ea', boxShadow: '0 3px 12px rgba(0,0,0,.05)', whiteSpace: 'pre-wrap', lineHeight: 1.72, fontSize: 14, color: '#20242a' }}>
               <Text type="secondary" style={{ display: 'block', marginBottom: 14 }}>{template?.name || '未关联模板文件'}</Text>
               {decoratedTemplateHtml ? <div
                 className="docx-template-preview"
                 onClick={event => {
-                  const target = (event.target as HTMLElement).closest<HTMLElement>('[data-field]')
-                  if (target?.dataset.field) setSelectedField(target.dataset.field)
+                  const clicked = event.target as HTMLElement
+                  const target = clicked.closest<HTMLElement>('[data-field]')
+                  if (target?.dataset.field) { setSelectedField(target.dataset.field); return }
+                  const anchorElement = clicked.closest<HTMLElement>('td,th,p')
+                  const anchor = (anchorElement?.innerText || clicked.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60)
+                  if (anchor) { setInlineAnchor(anchor); setNewFieldName('') }
                 }}
                 dangerouslySetInnerHTML={{ __html: decoratedTemplateHtml }}
               /> : renderContent()}
             </div>
+            {inlineAnchor && <div className="template-inline-field-editor">
+              <Text type="secondary" ellipsis title={inlineAnchor} style={{ maxWidth: 150 }}>位置：{inlineAnchor}</Text>
+              <Input size="small" autoFocus value={newFieldName} onChange={event => setNewFieldName(event.target.value)} onPressEnter={addField} placeholder="输入占位符名称" />
+              <Button size="small" type="primary" onClick={addField}>添加</Button>
+              <Button size="small" onClick={() => { setInlineAnchor(''); setNewFieldName('') }}>取消</Button>
+            </div>}
           </div>
         </section>
 
@@ -668,9 +665,9 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       </div>
     </div>
 
-    <Modal title="模板字段校验" width={860} open={previewOpen} onCancel={() => setPreviewOpen(false)} footer={<Space><Button onClick={() => setManualInsertOpen(true)} icon={<PlusOutlined />}>手动插入占位符</Button><Button type="primary" onClick={() => { setPreviewOpen(false); setStep(3) }}>校验完成</Button></Space>}>
+    <Modal title="模板字段校验" width={860} open={previewOpen} onCancel={() => setPreviewOpen(false)} footer={<Button type="primary" onClick={() => { setPreviewOpen(false); setStep(3) }}>校验完成</Button>}>
       <p>模板字段：{fields.length} 个；AI 扩写字段：{fields.filter(field => configs[field]?.mode === 'ai').length} 个。</p>
-      <p style={{ color: '#666', fontSize: 13 }}>下方预览显示模板原文，<span style={{ color: '#1677ff', fontWeight: 600 }}>蓝色高亮</span>为已插入的 <code>{'{{占位符}}'}</code>。可点"手动插入占位符"在指定位置添加。</p>
+      <p style={{ color: '#666', fontSize: 13 }}>下方预览显示模板原文，<span style={{ color: '#1677ff', fontWeight: 600 }}>蓝色高亮</span>为已插入的 <code>{'{{占位符}}'}</code>。新增字段请回到“原始模板映射”中直接点击目标位置。</p>
       {!template?.content && <Button type="link" size="small" icon={<EyeOutlined />} loading={previewLoading} onClick={loadPreview}>加载模板预览内容</Button>}
       {template?.content && <div style={{ maxHeight: 420, overflow: 'auto', border: '1px solid #f0f0f0', borderRadius: 8, padding: 14, background: '#fafbfc', whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.8 }}>
         {template.content.split(/(\{\{[^}]+\}\})/g).map((seg, i) => seg.startsWith('{{') && seg.endsWith('}}')
@@ -678,16 +675,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
           : <span key={i}>{seg}</span>)}
       </div>}
     </Modal>
-    <Modal title="手动插入占位符" open={manualInsertOpen} onCancel={() => setManualInsertOpen(false)} onOk={insertManualPlaceholder} okText="插入" cancelText="取消">
-      <div style={{ marginBottom: 10, color: '#666', fontSize: 13 }}>在模板里选一段文字作为锚点，占位符会插在该文字后面。锚点必须是模板里真实存在的连续文字。</div>
-      <div style={{ marginBottom: 8 }}><Text strong>锚点文本</Text><Input placeholder="例如：工程名称：" value={manualAnchor} onChange={e => setManualAnchor(e.target.value)} style={{ marginTop: 4 }} /></div>
-      <div><Text strong>占位符字段名</Text><Input placeholder="例如：工程名称" value={manualFieldName} onChange={e => setManualFieldName(e.target.value)} style={{ marginTop: 4 }} /></div>
-    </Modal>
     <Modal title="完整提示词预览" width={820} open={promptOpen} onCancel={() => setPromptOpen(false)} footer={null}><pre style={{ whiteSpace: 'pre-wrap', maxHeight: 560, overflow: 'auto', background: '#f6f8fa', padding: 16 }}>{`【系统提示词】\n${draft?.systemTemplate || ''}\n\n【用户侧要求】\n${draft?.userTemplate || ''}`}</pre></Modal>
-    <Modal title="手动添加字段" open={addFieldOpen} onCancel={() => setAddFieldOpen(false)} onOk={addField} okText="添加" cancelText="取消">
-      <div style={{ marginBottom: 8, color: '#666', fontSize: 13 }}>输入字段名（与模板里的 <code>{'{{字段名}}'}</code> 占位符一致），添加后可配置扩写规则。适用于扫描未识别或自定义字段。</div>
-      <Input placeholder="例如：现场负责人、验收结论" value={newFieldName} onChange={e => setNewFieldName(e.target.value)} onPressEnter={addField} autoFocus />
-    </Modal>
     <Modal title="另存为私人模板" open={saveAsOpen} confirmLoading={saving} onCancel={() => setSaveAsOpen(false)} onOk={() => save(true)} okText="另存" cancelText="取消">
       <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>保存为独立副本，不修改系统、通用或专业模板。当前占位符和扩写规则会一起保留。</Text>
       <Input value={personalTemplateName} onChange={event => setPersonalTemplateName(event.target.value)} placeholder="私人模板名称" onPressEnter={() => save(true)} />

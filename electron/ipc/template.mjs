@@ -48,7 +48,7 @@ export function register(ipcMain) {
   // 系统预置模板（路径在应用包内，isPathSafe 不通过）会先复制到 userData 企业库再写回
   // 返回 { ok, path, fields, clonedToLibrary? } —— path 是实际写入的路径（可能是新克隆的）
   ipcMain.handle('template:saveContent', safeCall(async (_, payload = {}) => {
-    const { path: filePath, addFields, removeFields, renameMap, docType, templateId, saveAsPersonal, name } = payload
+    const { path: filePath, addFields, removeFields, renameMap, placements, docType, templateId, saveAsPersonal, name } = payload
     if (!filePath || typeof filePath !== 'string') return { ok: false, error: '缺少模板路径' }
     if (!fs.existsSync(filePath)) return { ok: false, error: '模板文件不存在' }
 
@@ -112,7 +112,7 @@ export function register(ipcMain) {
     // 写回
     let fields
     if (ext === '.docx') {
-      fields = await saveDocxTemplatePlaceholders(targetPath, { addFields: addFields || [], removeFields: removeFields || [], renameMap: renameMap || {} })
+      fields = await saveDocxTemplatePlaceholders(targetPath, { addFields: addFields || [], removeFields: removeFields || [], renameMap: renameMap || {}, placements: placements || [] })
     } else {
       fields = await saveXlsxTemplatePlaceholders(targetPath, configPath, { addFields: addFields || [], removeFields: removeFields || [], renameMap: renameMap || {} })
     }

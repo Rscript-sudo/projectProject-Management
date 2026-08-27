@@ -90,7 +90,7 @@ export default function AppLayout() {
   }
 
   return (
-    <Layout style={{ height: '100vh' }}>
+    <Layout style={{ height: '100dvh', width: '100%', minWidth: 0, overflow: 'hidden' }}>
       {/* 左侧栏 */}
       <Sider
         width={56}
@@ -226,7 +226,7 @@ export default function AppLayout() {
       </Modal>
 
       {/* 主内容区 */}
-      <Layout>
+      <Layout style={{ minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
         <Content style={{
           overflow: 'auto',
           background: '#fff',

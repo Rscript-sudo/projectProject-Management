@@ -1912,15 +1912,15 @@ export default function ProjectView() {
                     const groups = [
                       { key: 'personal', label: '私人模板库', items: visible.filter(item => item.scope === 'personal') },
                       { key: 'general', label: '通用模板', items: visible.filter(item => item.scope === 'global' || item.scope === 'system') },
-                      { key: 'professional', label: `${currentType || '当前专业'}模板`, items: visible.filter(item => item.scope === 'professional') },
+                      { key: 'professional', label: `当前项目模板库${currentType ? ` · ${currentType}` : ''}`, items: visible.filter(item => item.scope === 'professional') },
                       { key: 'other', label: '其他模板', items: visible.filter(item => item.scope === 'other') },
-                    ].filter(group => group.items.length)
+                    ].filter(group => group.key === 'personal' || group.items.length)
                     if (!groups.length) return <div style={{ padding: 28, textAlign: 'center', color: '#999', fontSize: 12 }}>没有匹配的模板</div>
                     const treeData = groups.map(group => ({
                       key: `group:${group.key}`,
                       selectable: false,
                       title: <Space size={6}><Text strong style={{ fontSize: 12 }}>{group.label}</Text><Text type="secondary" style={{ fontSize: 10 }}>{group.items.length}</Text></Space>,
-                      children: group.items.map(template => ({
+                      children: group.items.length ? group.items.map(template => ({
                         key: template.id,
                         isLeaf: true,
                         title: <Dropdown
@@ -1939,12 +1939,12 @@ export default function ProjectView() {
                             <Text type="secondary" style={{ marginLeft: 8, flexShrink: 0, fontSize: 10 }}>{template.docType}{template.fields?.length ? ` · ${template.fields.length}` : ''}</Text>
                           </div>
                         </Dropdown>,
-                      })),
+                      })) : [{ key: `empty:${group.key}`, selectable: false, disabled: true, isLeaf: true, title: <Text type="secondary" style={{ fontSize: 11 }}>暂无私人模板，可在模板中心另存</Text> }],
                     }))
                     return <Tree
                       blockNode
                       showLine={{ showLeafIcon: false }}
-                      defaultExpandedKeys={['group:general']}
+                      defaultExpandedKeys={['group:personal', 'group:general', 'group:professional']}
                       selectedKeys={selectedGenerationTemplateId ? [selectedGenerationTemplateId] : []}
                       treeData={treeData}
                       onSelect={keys => {

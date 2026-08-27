@@ -226,7 +226,7 @@ export async function getTemplatePlaceholders(templatePath) {
  * 不做"纯文本→docx XML 全量重建"，避免破坏原模板的样式/表格/页眉页脚。
  * 新增占位符以独立段落追加，用户可在 Word 里自行调整位置。
  */
-export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [], removeFields = [] } = {}) {
+export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [], removeFields = [], placements = [] } = {}) {
   const PizZip = (await import('pizzip')).default
   const raw = fs.readFileSync(templatePath)
   const zip = new PizZip(raw)
@@ -251,8 +251,24 @@ export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [
     xml = xml.replace(/(?<=<w:t[^>]*>)\}\}/g, '')
   }
 
-  // 2. 新增占位符：在文档末尾（</w:body> 前）追加独立段落
-  const addFieldsClean = [...new Set(addFields.map(f => String(f).trim()).filter(Boolean))]
+  // 2. 用户在映射区点选位置时，优先把占位符写到对应锚点后。
+  const placed = new Set()
+  for (const placement of placements) {
+    const name = String(placement?.field || '').trim()
+    const anchor = String(placement?.anchor || '').trim()
+    if (!name || !anchor) continue
+    const escapedName = name.replace(/[&<>\"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' })[ch])
+    const escapedAnchor = anchor.replace(/[&<>\"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' })[ch])
+    const index = xml.indexOf(escapedAnchor)
+    if (index < 0) continue
+    const insertion = `{{${escapedName}}}`
+    const at = placement.position === 'before' ? index : index + escapedAnchor.length
+    xml = xml.slice(0, at) + insertion + xml.slice(at)
+    placed.add(name)
+  }
+
+  // 3. 没有可靠锚点的新增字段才追加到文档末尾，保证字段不会丢失。
+  const addFieldsClean = [...new Set(addFields.map(f => String(f).trim()).filter(Boolean))].filter(name => !placed.has(name))
   if (addFieldsClean.length) {
     const paragraphs = addFieldsClean.map(name => {
       const escaped = name.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch])
@@ -267,12 +283,12 @@ export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [
     }
   }
 
-  // 3. 写回 zip
+  // 4. 写回 zip
   zip.file(docXmlPath, xml)
   const buffer = zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' })
   fs.writeFileSync(templatePath, buffer)
 
-  // 4. 重扫字段返回
+  // 5. 重扫字段返回
   return await getTemplatePlaceholders(templatePath)
 }
 

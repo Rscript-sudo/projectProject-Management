@@ -441,7 +441,7 @@ export interface ElectronAPI {
   getTemplateFields: (filePath: string) => Promise<{ ok: boolean; fields?: string[]; error?: string }>
   deleteLibraryTemplate: (id: string) => Promise<{ ok: boolean; error?: string }>
   updateLibraryTemplate: (payload: { id: string; name?: string; sourcePath?: string }) => Promise<{ ok: boolean; template?: any; error?: string }>
-  saveTemplateContent: (payload: { path: string; addFields?: string[]; removeFields?: string[]; renameMap?: Record<string, string>; docType?: string; templateId?: string; saveAsPersonal?: boolean; name?: string }) => Promise<{ ok: boolean; path?: string; fields?: string[]; clonedToLibrary?: any; error?: string }>
+  saveTemplateContent: (payload: { path: string; addFields?: string[]; removeFields?: string[]; renameMap?: Record<string, string>; placements?: Array<{ field: string; anchor: string; position?: 'before' | 'after' }>; docType?: string; templateId?: string; saveAsPersonal?: boolean; name?: string }) => Promise<{ ok: boolean; path?: string; fields?: string[]; clonedToLibrary?: any; error?: string }>
   listSystemTemplates: () => Promise<any[]>
   listTemplatesByProjectType: (params: { projectType?: string; docType?: string; scope?: string }) => Promise<any[]>
   onCustomTypesChanged: (cb: (data: any) => void) => () => void

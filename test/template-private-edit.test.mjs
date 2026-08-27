@@ -15,13 +15,18 @@ test('模板占位符可新增、删除并真实写回 DOCX', async t => {
   const original = await getTemplatePlaceholders(target)
   assert.ok(original.includes('天气'))
   const fields = await saveDocxTemplatePlaceholders(target, {
-    addFields: ['自定义验收结论'],
+    addFields: ['自定义验收结论', '现场负责人'],
     removeFields: ['天气'],
+    placements: [{ field: '现场负责人', anchor: '施工部位：', position: 'after' }],
   })
 
   assert.ok(fields.includes('自定义验收结论'))
+  assert.ok(fields.includes('现场负责人'))
   assert.ok(!fields.includes('天气'))
   assert.deepEqual(await getTemplatePlaceholders(target), fields)
+  const { default: PizZip } = await import('pizzip')
+  const xml = new PizZip(fs.readFileSync(target)).file('word/document.xml').asText()
+  assert.match(xml, /施工部位：\{\{现场负责人\}\}/, '点选位置新增的占位符应写在锚点后，而不是文末')
 })
 
 test('私人模板优先于专业和通用模板参与生成解析', async t => {
