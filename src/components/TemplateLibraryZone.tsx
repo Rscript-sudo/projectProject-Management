@@ -2,7 +2,7 @@
 // 列全：企业模板（可编辑/删除/替换）+ 系统预置模板（只读）
 // 支持批量导入、字段识别、打开、配置扩写规则
 import { useEffect, useState, useCallback } from 'react'
-import { AutoComplete, Card, Table, Button, Space, Tag, Empty, App, Typography, Popconfirm, Tooltip, Modal, Input } from 'antd'
+import { AutoComplete, Card, Table, Button, Space, Tag, Empty, App, Typography, Popconfirm, Tooltip, Modal, Input, Alert } from 'antd'
 import { InboxOutlined, ReloadOutlined, EyeOutlined, DeleteOutlined, EditOutlined, MinusCircleOutlined, PlusOutlined, ScanOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useSettingsStore } from '../stores/useSettingsStore'
@@ -10,6 +10,12 @@ import { getAllProjectTypes } from '../shared/projectProfile.mjs'
 import { BUILTIN_DOC_TYPES } from '../shared/builtinDocTypes'
 
 const { Text } = Typography
+
+// 结构化系统版式白名单（与 electron/templateService.mjs STRUCTURED_SYSTEM_DOC_TYPES 同源）
+// 这 7 类文种默认用系统版式渲染，系统预置 docx 模板不会自动生效，需导入企业模板库才用真模板
+const STRUCTURED_SYSTEM_DOC_TYPES = new Set([
+  '监理日志', '监理周报', '监理月报', '整改通知书', '安全通知书', '工程联系单', '进度分析报告',
+])
 
 interface Props {
   scope: 'global' | 'professional' | 'other'
@@ -302,9 +308,18 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
     { title: '文种', dataIndex: 'docType', width: 180, align: 'left', render: (d: string) => <Text>{d}</Text> },
     {
       title: '模板文件', dataIndex: 'path', width: 130, align: 'center',
-      render: (_: string, r: Tpl) => r.missing
-        ? <Tag color="error">缺失</Tag>
-        : <Tag color="success">已关联</Tag>,
+      render: (_: string, r: Tpl) => {
+        if (r.missing) return <Tag color="error">缺失</Tag>
+        // 白名单内文种 + 系统预置（readOnly）= 默认走系统版式，真模板不生效
+        if (r.readOnly && STRUCTURED_SYSTEM_DOC_TYPES.has(r.docType)) {
+          return (
+            <Tooltip title="该文种默认用系统版式渲染。要用自己的模板，请点右侧「编辑」导入企业模板库。">
+              <Tag color="purple">系统版式</Tag>
+            </Tooltip>
+          )
+        }
+        return <Tag color="success">已关联</Tag>
+      },
     },
     {
       title: '字段', dataIndex: 'fields', width: 190,
@@ -377,6 +392,14 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
         {scope === 'professional' && projectType && <Text type="secondary">导入到专业：{projectType}</Text>}
         <Text type="secondary" style={{ fontSize: 12 }}>支持多选 .docx，自动识别字段</Text>
       </Space>}
+      {scope === 'global' && display === 'all' && (
+        <Alert
+          type="info" showIcon
+          style={{ marginBottom: 12 }}
+          message="部分文种默认使用系统版式渲染"
+          description="监理日志、监理周报、监理月报、整改通知书、安全通知书、工程联系单、进度分析报告这 7 类文种默认用系统内置版式生成，即便存在预置模板文件也不会自动套用。如需使用自定义模板，请在对应行点「编辑」导入您的模板到企业模板库。"
+        />
+      )}
       <Table
         size="small" rowKey="id" loading={loading} columns={columns} dataSource={templates}
         locale={{ emptyText: <Empty description="暂无模板，点上方「批量导入」" /> }}

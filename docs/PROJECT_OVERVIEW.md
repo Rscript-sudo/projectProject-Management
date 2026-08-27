@@ -13,7 +13,7 @@
 - **栈**：Electron 42 + React 19 + TS 5 + Vite 6 + Ant Design 5 + better-sqlite3 + docxtemplater
 - **入口**：`electron/main.mjs`（主进程）· `src/main.tsx`（React 根）· `src/App.tsx`（路由）
 - **打包产物**：macOS arm64 dmg（开发机）· Windows nsis + portable（CI 出，详见 `RELEASE.md`）
-- **当前版本**：v1.3.1（见 `package.json`，详见 `CHANGELOG.md`）
+- **当前版本**：v1.3.2（见 `package.json`，详见 `CHANGELOG.md`）
 
 ---
 
@@ -237,8 +237,8 @@ npm run build             # macOS dmg（本机）
 | **移动端预览** | ⚠️ 半成品 | `ProjectView.css` 有 `@media` 响应式断点，但无完整移动端适配 | 桌面端为主，移动端不可用 |
 | **latest.yml 自动升级** | ⚠️ 未启用 | CI 已生成 `latest.yml`，但 `--publish never`，未配 `generic` provider | 自动升级链路断 |
 | **CHANGELOG 同步** | ✅ 已修（v1.3.1） | `CHANGELOG.md` 已补齐 v1.1.0~v1.3.1，版本可追溯 |
-| **SOP 内容深度** | ⚠️ 待补 | 7 类 SOP JSON 已建但内容详略不一，信息化最全，其他类较薄 | 跨类型生成质量不均 |
-| **结构化模板白名单** | ⚠️ 设计陷阱 | 白名单 7 类文种的系统预置 docx 模板默认不生效，必须配 override 或企业库 | 用户困惑"为什么有模板却没用" |
+| **SOP 内容深度** | ✅ 已对齐（v1.3.2） | 7 类 SOP JSON 全部补齐到信息化深度：8 节 / 45-47 要点 / 标题+适用工艺+禁用术语齐全 / 字数下限 5 类文种 | 跨类型生成质量一致 |
+| **结构化模板白名单** | ✅ 已加提示（v1.3.2） | 白名单 7 类文种在模板中心显示「系统版式」徽标 + Alert 说明"要用自己的模板请导入企业模板库" | 用户知情，不再困惑 |
 
 ### 文档与代码的偏差（已修正）
 
@@ -253,8 +253,7 @@ npm run build             # macOS dmg（本机）
 
 ### 二次开发建议优先级
 
-1. **P0 代码签名**：申请 EV 证书，CI 加 `CSC_LINK` 配置，消除 SmartScreen 拦截
+1. **P0 代码签名**：申请 EV 证书，CI 加 `CSC_LINK` 配置，消除 SmartScreen 拦截（老板拍板后续再做）
 2. **P1 静默自动升级**：接入 `electron-updater` + `generic` provider，启用 `latest.yml` 链路
-3. **P1 SOP 内容补全**：对齐 7 类 SOP 的字段深度，统一 `_禁用条款` / `sections` 结构
-4. **P2 多项目并发**：评估多窗口或多标签架构，支持同时打开多个项目
-5. **P2 结构化白名单文档**：在设置页明确提示"需配 override 才能用真模板"，或调整默认行为
+3. **P2 多项目并发**：评估多窗口或多标签架构，支持同时打开多个项目
+4. **P2 模板做减法**：移除 `templates/专业/` 9 类预置模板，专业模板改用户上传+分析+扩写规则（下一轮）
