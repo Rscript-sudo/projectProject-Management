@@ -8,6 +8,8 @@ import { normalizeProjectType, normalizeTags } from '../shared/projectProfile.mj
 import { countEffectiveWords, getMinWordCount } from '../shared/docTypeMinWords'
 import { getDocumentRuleMinWords } from '../shared/documentRules.mjs'
 import { stripThinkingContent } from '../shared/aiOutput.mjs'
+import { hasUsableDocTypePrompt } from '../shared/docTypePrompts'
+import { useSettingsStore } from '../stores/useSettingsStore'
 import { normalizeStructuredDocument, validateStructuredDocument } from '../shared/structuredGeneration'
 import type { SessionMode } from '../services/aiService'
 import DirTree from '../components/DirTree'
@@ -40,6 +42,8 @@ interface GenerationTemplate {
   projectType?: string
   projectTypeLabel?: string
   path: string
+  sourceName?: string
+  aiRuleConfiguredAt?: string
   fields?: string[]
   readOnly?: boolean
 }
@@ -427,6 +431,9 @@ export default function ProjectView() {
   useEffect(() => {
     const docType = searchParams.get('docType')
     const prefill = searchParams.get('input')
+    const generationTemplateId = searchParams.get('generationTemplateId')
+    if (docType) setActiveDocumentType(docType)
+    if (generationTemplateId) setSelectedGenerationTemplateId(generationTemplateId)
     if (prefill) {
       setInput(prefill)
     } else if (docType) {
@@ -575,6 +582,43 @@ export default function ProjectView() {
     if (!trimmedInput || loading) return
     autoFollowOutputRef.current = true
 
+    // 先完成文种与模板规则门禁，再检查 AI 服务，避免无规则模板先发起网络请求。
+    const identified = identifyMode(trimmedInput)
+    let { mode, docType, dataToolIds } = identified
+    if (activeDocumentType && (mode === 'CHAT' || (mode === 'DOC' && docType === '通用文档'))) {
+      mode = 'DOC'
+      docType = activeDocumentType
+      dataToolIds = []
+    }
+    const effectiveDocType = docType || activeDocumentType
+    const needsReportPeriod = effectiveDocType === '监理周报' || effectiveDocType === '监理月报'
+    if (needsReportPeriod && !reportPeriod) {
+      message.warning('请先选择报告期；周报和月报只能使用报告期内已确认的数据。')
+      return
+    }
+    if ((mode === 'DOC' || mode === 'HYBRID') && effectiveDocType) {
+      const settingsState = useSettingsStore.getState()
+      const promptKey = settingsState.customDocTypes.find(item => item.label === effectiveDocType)?.code || effectiveDocType
+      const selectedTemplate = generationTemplates.find(item => item.id === selectedGenerationTemplateId)
+      const hasDocTypeRule = hasUsableDocTypePrompt(promptKey, settingsState.docTypePromptOverrides)
+      const hasTemplateRule = !selectedTemplate || selectedTemplate.scope === 'system' || Boolean(selectedTemplate.aiRuleConfiguredAt)
+      if (!hasDocTypeRule || !hasTemplateRule) {
+        const returnParams = new URLSearchParams(location.search)
+        returnParams.set('docType', effectiveDocType)
+        returnParams.set('input', trimmedInput)
+        if (selectedTemplate?.id) returnParams.set('generationTemplateId', selectedTemplate.id)
+        const returnTo = `${location.pathname}?${returnParams.toString()}`
+        Modal.confirm({
+          title: '模板尚未配置 AI 扩写规则',
+          content: `“${selectedTemplate?.name || effectiveDocType}”尚未完成这份模板的 AI 扩写规则配置。请先确认字段和扩写规则，保存后系统会返回当前项目继续生成。`,
+          okText: '去配置规则',
+          cancelText: '暂不生成',
+          onOk: () => navigate(`/template-center?rules=${encodeURIComponent(effectiveDocType)}${selectedTemplate?.id ? `&templateId=${encodeURIComponent(selectedTemplate.id)}` : ''}&returnTo=${encodeURIComponent(returnTo)}`),
+        })
+        return
+      }
+    }
+
     const currentSettings = useAppStore.getState().settings
     // 注意：settings 是脱敏版（主进程持有真实 apiKey），前端用 hasApiKey 判断
     // 别再用 currentSettings.apiKey — 它永远 undefined
@@ -635,21 +679,7 @@ export default function ProjectView() {
       return
     }
 
-    // ==== 意图分类 ====
-      const identified = identifyMode(trimmedInput)
-      let { mode, docType, dataToolIds } = identified
-      // 选定文种后，即使用户只输入现场事实，也必须按当前文种生成。
-      if (activeDocumentType && (mode === 'CHAT' || (mode === 'DOC' && docType === '通用文档'))) {
-        mode = 'DOC'
-        docType = activeDocumentType
-        dataToolIds = []
-      }
-      const effectiveDocType = docType || activeDocumentType
-      const needsReportPeriod = effectiveDocType === '监理周报' || effectiveDocType === '监理月报'
-      if (needsReportPeriod && !reportPeriod) {
-        message.warning('请先选择报告期；周报和月报只能使用报告期内已确认的数据。')
-        return
-      }
+    // ==== 意图分类已在 AI 服务检查前完成 ====
     if (docType) setActiveDocumentType(docType)
     setLastInput(trimmedInput)
 
@@ -1077,7 +1107,7 @@ export default function ProjectView() {
 
     setAttachedItems([])
     setLoading(false)
-  }, [input, loading, apiReady, currentProject, projectConfig, messages, activeDocumentType, attachedItems, reportPeriod])
+  }, [input, loading, apiReady, currentProject, projectConfig, messages, activeDocumentType, attachedItems, reportPeriod, generationTemplates, selectedGenerationTemplateId, location.pathname, location.search, navigate])
 
   // 保存文档
   const handleSave = async () => {
@@ -1528,7 +1558,7 @@ export default function ProjectView() {
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 26, paddingBottom: 4, borderBottom: '1px solid #f0f2f5' }}>
               <Text type="secondary" style={{ fontSize: 11 }}><PictureOutlined style={{ marginRight: 4 }} />可拖入图片识别；写文书时请选择文种</Text>
-              <Button size="small" type="text" onClick={() => setRightPanelTab('templates')} style={{ borderRadius: 6, fontSize: 11, height: 25, color: '#1677ff' }}>
+              <Button size="small" type="text" onClick={() => { setRightPanelTab('templates'); setRightPanelCollapsed(false) }} style={{ borderRadius: 6, fontSize: 11, height: 25, color: '#1677ff' }}>
                 {activeDocumentType ? `当前模板：${activeDocumentType}` : '从右侧选择模板'}
               </Button>
             </div>
@@ -1935,7 +1965,7 @@ export default function ProjectView() {
                             ...(template.scope !== 'system' ? [{ key: 'delete', label: '移到系统废纸篓', icon: <DeleteOutlined />, danger: true }] : []),
                           ], onClick: ({ key, domEvent }) => {
                             domEvent.stopPropagation()
-                            if (key === 'preview') window.electronAPI.openFile(template.path)
+                            if (key === 'preview') window.electronAPI.openTemplatePreview(template.path, template.sourceName || template.name)
                             if (key === 'rules') navigate(`/template-center?rules=${encodeURIComponent(template.docType)}&templateId=${encodeURIComponent(template.id)}`)
                             if (key === 'delete') void window.electronAPI.deleteLibraryTemplate(template.id).then(async result => {
                               if (!result.ok) return message.error(result.error || '删除模板失败')
@@ -1955,7 +1985,7 @@ export default function ProjectView() {
                     return <Tree
                       blockNode
                       showLine={{ showLeafIcon: false }}
-                      defaultExpandedKeys={['group:personal', 'group:general', 'group:professional']}
+                      defaultExpandedKeys={[]}
                       selectedKeys={selectedGenerationTemplateId ? [selectedGenerationTemplateId] : []}
                       treeData={treeData}
                       onSelect={keys => {

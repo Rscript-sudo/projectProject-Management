@@ -69,6 +69,29 @@ export function register(ipcMain, mainWindow) {
     return { success: true }
   })
 
+  // 模板预览必须隐藏企业库内部的 tpl_xxx_ 存储前缀，并避免用户在预览时
+  // 直接修改模板原件。复制到独立临时目录后，以原始模板文件名交给 Word/WPS。
+  ipcMain.handle('shell:openTemplatePreview', async (_, filePath, displayName) => {
+    if (!filePath || (!isPathSafe(filePath) && !isBundledTemplatePath(filePath))) {
+      return { success: false, error: '路径不安全' }
+    }
+    if (!fs.existsSync(filePath)) return { success: false, error: '模板文件不存在' }
+    const sourceExt = path.extname(filePath).toLowerCase()
+    const requestedBase = path.basename(String(displayName || path.basename(filePath)))
+    const requestedExt = path.extname(requestedBase).toLowerCase()
+    const safeStem = path.basename(requestedBase, requestedExt || undefined)
+      .replace(/[\\/:*?"<>|]/g, '_').trim() || '模板文件'
+    const previewBase = `${safeStem}${requestedExt === sourceExt ? requestedExt : sourceExt}`
+    const previewRoot = path.join(app.getPath('temp'), '项目文档管理系统模板预览')
+    fs.mkdirSync(previewRoot, { recursive: true })
+    const previewDir = fs.mkdtempSync(path.join(previewRoot, 'preview-'))
+    const previewPath = path.join(previewDir, previewBase)
+    fs.copyFileSync(filePath, previewPath)
+    const err = await shell.openPath(previewPath)
+    if (err) return { success: false, error: err }
+    return { success: true, path: previewPath }
+  })
+
   ipcMain.handle('shell:openPath', async (_, dirPath) => {
     if (!dirPath || !isPathSafe(dirPath)) {
       return { success: false, error: '路径不安全' }

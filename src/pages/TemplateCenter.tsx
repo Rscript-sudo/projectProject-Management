@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { App, Button, Form, Input, Layout, Modal, Select, Space, Tree, Typography } from 'antd'
 import { AppstoreOutlined, FolderOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import TemplateLibraryZone from '../components/TemplateLibraryZone'
@@ -12,6 +12,7 @@ const { Text } = Typography
 
 export default function TemplateCenter() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const { message } = App.useApp()
   const customProjectTypes = useSettingsStore(state => state.customProjectTypes)
   const coreProjectTypeCodes = ['information', 'communication', 'power', 'building', 'municipal']
@@ -28,10 +29,13 @@ export default function TemplateCenter() {
   const [specialtyOpen, setSpecialtyOpen] = useState(false)
   const [specialtyForm] = Form.useForm<{ label: string }>()
   const selectedProjectType = projectTypes.find(item => item.code === projectTypeCode) || projectTypes[0]
+  const requestedReturnTo = searchParams.get('returnTo') || ''
+  const returnTo = requestedReturnTo.startsWith('/project/') ? requestedReturnTo : ''
+  const leaveRuleEditor = () => returnTo ? navigate(returnTo) : setEditingRule(null)
 
   const renderContent = () => {
     if (editingRule) {
-      return <DocTypePromptEditor key={`${editingRule.docType}:${editingRule.templateId || ''}`} initialDocType={editingRule.docType} templateId={editingRule.templateId} onBack={() => setEditingRule(null)} />
+      return <DocTypePromptEditor key={`${editingRule.docType}:${editingRule.templateId || ''}`} initialDocType={editingRule.docType} templateId={editingRule.templateId} onBack={leaveRuleEditor} onSaved={returnTo ? () => navigate(returnTo) : undefined} />
     }
     if (section === 'general-rules') {
       return <DocTypePromptEditor key="general-rules" onBack={() => setSection('general-templates')} />

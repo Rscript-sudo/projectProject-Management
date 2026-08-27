@@ -351,7 +351,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
       render: (_, r) => (
         <Space size={0}>
           <Tooltip title={r.missing ? '缺少模板文件' : '打开模板文件'}>
-            <Button size="small" type="text" disabled={r.missing} icon={<EyeOutlined />} onClick={() => window.electronAPI.openFile(r.path)} />
+            <Button size="small" type="text" disabled={r.missing} icon={<EyeOutlined />} onClick={() => window.electronAPI.openTemplatePreview(r.path, r.sourceName || r.name)} />
           </Tooltip>
           {onGoRules && (
             <Tooltip title="到扩写规则配置该文种提示词">
@@ -446,7 +446,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
           onClick={({ key }) => {
             const tpl = contextMenu.template
             setContextMenu(null)
-            if (key === 'open') void window.electronAPI.openFile(tpl.path)
+            if (key === 'open') void window.electronAPI.openTemplatePreview(tpl.path, tpl.sourceName || tpl.name)
             else if (key === 'rules') onGoRules?.(tpl.docType, tpl.id)
             else if (key === 'edit') openEdit(tpl)
             else if (key === 'scan') void handleScanFields(tpl)

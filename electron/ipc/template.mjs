@@ -5,7 +5,7 @@ import fs from 'fs'
 import path from 'path'
 import { safeCall } from './safe.mjs'
 import { app, shell } from 'electron'
-import { listTemplatesByProjectType, deleteTemplateFromLibrary, updateTemplateInLibrary, listTemplateLibrary, getTemplateRegistryPath, refreshTemplateLibraryEntry } from '../templateRegistry.mjs'
+import { listTemplatesByProjectType, deleteTemplateFromLibrary, updateTemplateInLibrary, listTemplateLibrary, getTemplateRegistryPath, refreshTemplateLibraryEntry, markTemplateRuleConfigured } from '../templateRegistry.mjs'
 import { getTemplatePlaceholders, saveDocxTemplatePlaceholders, saveXlsxTemplatePlaceholders } from '../templateService.mjs'
 import { isPathSafe } from '../shared/pathSafety.mjs'
 
@@ -42,6 +42,10 @@ export function register(ipcMain) {
   ipcMain.handle('template:updateLibrary', safeCall(async (_, { id, name, sourcePath }) => {
     const userDataPath = app.getPath('userData')
     return updateTemplateInLibrary(userDataPath, id, { name, sourcePath })
+  }))
+
+  ipcMain.handle('template:markRuleConfigured', safeCall(async (_, { id }) => {
+    return markTemplateRuleConfigured(app.getPath('userData'), id)
   }))
 
   // v1.3.4（2026-08-27）：把占位符变更写回原模板文件（docx / xlsx）

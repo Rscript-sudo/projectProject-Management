@@ -13,6 +13,7 @@
 //   - ${...} 由调用方在 buildDocPrompt 阶段替换为运行时变量（dateRange/weekNum 等）
 //   - {{...}} / [待填写：...______] 是 AI 反编造铁律的保留位，不替换
 import defaultConfig from './docTypePrompts.default.json'
+import { hasUsablePromptConfig } from './promptReadiness.mjs'
 
 export interface DocTypeField {
   key: string
@@ -61,6 +62,19 @@ export interface DocTypePromptsConfig {
 /** 加载默认配置（编译期静态） */
 export function getDefaultPrompts(): DocTypePromptsConfig {
   return defaultConfig as unknown as DocTypePromptsConfig
+}
+
+/**
+ * 判断文种是否已有可执行的 AI 扩写规则。
+ * 内置文种使用默认规则并叠加用户覆盖；自定义文种必须由用户保存覆盖规则。
+ */
+export function hasUsableDocTypePrompt(
+  docType: string,
+  userOverrides?: Record<string, Partial<DocTypeConfig>> | null,
+): boolean {
+  const config = getDefaultPrompts()
+  const defaultDoc = config.docTypes[docType]
+  return hasUsablePromptConfig(defaultDoc, userOverrides?.[docType])
 }
 
 /**

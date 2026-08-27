@@ -140,7 +140,7 @@ function defaultFieldConfig(field: string): FieldConfig {
   }
 }
 
-export default function DocTypePromptEditorV2({ initialDocType, templateId, onBack }: { initialDocType?: string; templateId?: string; onBack?: () => void }) {
+export default function DocTypePromptEditorV2({ initialDocType, templateId, onBack, onSaved }: { initialDocType?: string; templateId?: string; onBack?: () => void; onSaved?: () => void }) {
   const { message } = App.useApp()
   const { docTypePromptOverrides, globalRulesOverrides, applyCustomTypes, customDocTypes } = useSettingsStore()
   const defaults = useMemo(() => getDefaultPrompts(), [])
@@ -513,6 +513,10 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       const overrides = await window.electronAPI.listDocTypePromptOverrides()
       applyCustomTypes(await window.electronAPI.listCustomProjectTypes(), await window.electronAPI.listCustomDocTypes(), overrides?.docTypes || null, overrides?.globalRules || null)
       setDraft(nextDraft)
+      if (template?.id && !template.isSystem) {
+        const marked = await window.electronAPI.markTemplateRuleConfigured(template.id)
+        if (!marked?.ok) throw new Error(marked?.error || '模板规则状态保存失败')
+      }
 
       // v1.3.4：把占位符增删写回原模板文件（docx/xlsx）
       // 对比 initialFields（初始扫描）与当前 fields，计算 add/remove 差异
@@ -535,6 +539,8 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
             if (saveRes?.ok) {
               // 系统模板会被克隆到企业库，更新 template 指向新路径
               if (saveRes.clonedToLibrary) {
+                const marked = await window.electronAPI.markTemplateRuleConfigured(saveRes.clonedToLibrary.id)
+                if (!marked?.ok) throw new Error(marked?.error || '私人模板规则状态保存失败')
                 setTemplate(prev => prev ? { ...prev, path: saveRes.path!, id: saveRes.clonedToLibrary.id, isSystem: false } : prev)
                 setSelectedTemplateId(saveRes.clonedToLibrary.id)
                 message.success(saveAsPersonal ? '已另存为私人模板' : '系统模板只读，已复制到私人模板库并保存')
@@ -559,6 +565,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       if (!template?.path || !(fields.filter(f => !initialFields.includes(f)).length || initialFields.filter(f => !fields.includes(f)).length)) {
         message.success('规则已保存，并已接入 AI 扩写')
       }
+      if (!saveAsPersonal) onSaved?.()
     } catch (error: any) {
       message.error(`保存失败：${error?.message || error}`)
     } finally { setSaving(false) }
@@ -652,7 +659,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
         <Button icon={<ReloadOutlined />} onClick={() => loadTemplate(selectedTemplateId)}>重新扫描</Button>
         <Button icon={<PlayCircleOutlined />} onClick={() => setPreviewOpen(true)}>测试生成</Button>
         <Button icon={<SaveOutlined />} loading={saving} disabled={!template?.path} onClick={() => { setPersonalTemplateName(`${activeItem?.label || activeKey}私人模板`); setSaveAsOpen(true) }}>另存为私人模板</Button>
-        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => save(false)}>保存并启用</Button>
+        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => save(false)}>{onSaved ? '保存并返回扩写' : '保存并启用'}</Button>
       </Space>
     </div>
     <div style={{ padding: '12px 24px 11px', borderBottom: '1px solid #edf0f3' }}>

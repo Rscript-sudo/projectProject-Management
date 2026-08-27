@@ -108,8 +108,21 @@ export async function updateTemplateInLibrary(userDataPath, id, { name, sourcePa
     const { getTemplatePlaceholders } = await import('./templateService.mjs')
     entry.fields = await getTemplatePlaceholders(entry.path)
     entry.sourceName = path.basename(sourcePath)
+    // 文件内容已替换，旧模板上的规则确认不能沿用。
+    delete entry.aiRuleConfiguredAt
   }
   entry.updatedAt = new Date().toISOString()
+  writeRegistry(userDataPath, registry)
+  return { ok: true, template: entry }
+}
+
+/** 标记某一份用户模板已经在 AI 扩写编辑中心完成规则保存。 */
+export function markTemplateRuleConfigured(userDataPath, id) {
+  const registry = readRegistry(userDataPath)
+  const entry = registry.templates.find(item => item.id === id)
+  if (!entry) return { ok: false, error: '模板不存在' }
+  entry.aiRuleConfiguredAt = new Date().toISOString()
+  entry.updatedAt = entry.aiRuleConfiguredAt
   writeRegistry(userDataPath, registry)
   return { ok: true, template: entry }
 }
