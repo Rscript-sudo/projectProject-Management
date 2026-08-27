@@ -83,6 +83,15 @@ function writeChatStore(dataDir, historyPath, store) {
   fs.writeFileSync(temporary, JSON.stringify({ ...store, version: 3, updatedAt: new Date().toISOString() }, null, 2), 'utf8'); fs.renameSync(temporary, historyPath)
 }
 
+/**
+ * 原子写 JSON：先写 .tmp 再 rename，避免中途崩溃留下半截文件导致下次 JSON.parse 失败
+ */
+function atomicWriteJson(filePath, data) {
+  const temporary = `${filePath}.${process.pid}.${Date.now()}.tmp`
+  fs.writeFileSync(temporary, JSON.stringify(data, null, 2), 'utf8')
+  fs.renameSync(temporary, filePath)
+}
+
 export function register(ipcMain) {
   ipcMain.handle('fs:getRoot', () => {
     try {
@@ -141,7 +150,7 @@ export function register(ipcMain) {
     const dataDir = getProjectDataPath(path.basename(projectPath))
     ensureDir(dataDir)
     const configPath = path.join(dataDir, 'project.config.json')
-    fs.writeFileSync(configPath, JSON.stringify({ ...config, ...normalizeProjectProfile(config), documentRules: normalizeDocumentRules(config.documentRules) }, null, 2), 'utf8')
+    atomicWriteJson(configPath, { ...config, ...normalizeProjectProfile(config), documentRules: normalizeDocumentRules(config.documentRules) })
     return { success: true }
   }))
 
@@ -198,7 +207,7 @@ export function register(ipcMain) {
     const { dataDir, configPath, config } = projectTemplateConfig(projectPath)
     ensureDir(dataDir)
     config.templateOverrides = { ...(config.templateOverrides || {}), [docType]: { path: targetPath, sourceName: path.basename(sourcePath), updatedAt: new Date().toISOString() } }
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+    atomicWriteJson(configPath, config)
     return { success: true, path: targetPath, templateOverride: config.templateOverrides[docType] }
   }))
 
@@ -209,7 +218,7 @@ export function register(ipcMain) {
     const overrides = { ...(config.templateOverrides || {}) }
     delete overrides[docType]
     config.templateOverrides = overrides
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+    atomicWriteJson(configPath, config)
     return { success: true }
   }))
 
@@ -271,7 +280,7 @@ export function register(ipcMain) {
     assertIndexedProjectPath(projectPath, readProjectIndex())
     const projectName = path.basename(projectPath)
     const ledgerPath = path.join(getProjectDataPath(projectName), ledgerName)
-    fs.writeFileSync(ledgerPath, JSON.stringify(data, null, 2), 'utf8')
+    atomicWriteJson(ledgerPath, data)
     return { success: true }
   }))
 
@@ -313,7 +322,7 @@ export function register(ipcMain) {
     const { dataDir, configPath, config } = projectTemplateConfig(projectPath)
     ensureDir(dataDir)
     config.templateSelections = { ...(config.templateSelections || {}), [docType]: templateId || null }
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+    atomicWriteJson(configPath, config)
     return { success: true, templateId: config.templateSelections[docType] }
   }))
 
@@ -323,7 +332,7 @@ export function register(ipcMain) {
     const { dataDir, configPath, config } = projectTemplateConfig(projectPath)
     ensureDir(dataDir)
     config.documentRules = normalizeDocumentRules(documentRules)
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+    atomicWriteJson(configPath, config)
     return { success: true, documentRules: config.documentRules }
   }))
 

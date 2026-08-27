@@ -321,7 +321,7 @@ ${dataContext}
     const operationId = String(options.operationId || '')
     const unregisterCancellation = operationId ? registerTaskCancellation(operationId, () => controller.abort('cancelled')) : () => {}
     if (operationId) {
-      try { updateTask(operationId, { status: 'running', stage: 'requesting', progress: 30, attempts: Number(options.attempt || 1), requestId }) } catch {}
+      try { updateTask(operationId, { status: 'running', stage: 'requesting', progress: 30, attempts: Number(options.attempt || 1), requestId }) } catch (e) { console.warn('[ai:stream] updateTask 失败:', e.message) }
     }
 
     // 监听渲染进程主动中断
@@ -404,7 +404,7 @@ ${dataContext}
           if (sender.isDestroyed()) { try { await reader.cancel() } catch {}; return }
           const { done, value } = await reader.read()
           if (done) break
-          if (operationId) { try { updateTask(operationId, { status: 'running', stage: 'streaming', progress: 65 }) } catch {} }
+          if (operationId) { try { updateTask(operationId, { status: 'running', stage: 'streaming', progress: 65 }) } catch (e) { console.warn('[ai:stream] updateTask(streaming) 失败:', e.message) } }
           buffer += decoder.decode(value, { stream: true })
           const events = buffer.split(/\r?\n\r?\n/)
           buffer = events.pop() || ''

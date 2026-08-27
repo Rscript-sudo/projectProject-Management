@@ -154,7 +154,7 @@ function getProjectCode(projectName) {
   const configPath = path.join(getProjectDataPath(projectName), 'project.config.json')
   let configured = ''
   if (fs.existsSync(configPath)) {
-    try { configured = JSON.parse(fs.readFileSync(configPath, 'utf8')).projectCode || '' } catch {}
+    try { configured = JSON.parse(fs.readFileSync(configPath, 'utf8')).projectCode || '' } catch (e) { console.warn('[numbering] project.config.json 解析失败，用 fallback:', e.message) }
   }
   const fallback = String(projectName || 'PROJECT').replace(/[^A-Za-z0-9\u4e00-\u9fff]/g, '').slice(0, 16)
   return String(configured || fallback || 'PROJECT').replace(/[^A-Za-z0-9\u4e00-\u9fff-]/g, '').toUpperCase()

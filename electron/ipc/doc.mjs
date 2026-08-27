@@ -70,7 +70,7 @@ export function register(ipcMain) {
     let preSaveConfig = {}
     const preSaveConfigPath = path.join(getProjectDataPath(projectName), 'project.config.json')
     if (fs.existsSync(preSaveConfigPath)) {
-      try { preSaveConfig = JSON.parse(fs.readFileSync(preSaveConfigPath, 'utf8')) } catch {}
+      try { preSaveConfig = JSON.parse(fs.readFileSync(preSaveConfigPath, 'utf8')) } catch (e) { console.warn('[doc] project.config.json 解析失败，反编造术语校验降级:', e.message) }
     }
     const forbiddenTerms = findProfessionalForbiddenTerms(preSaveConfig.projectTypeCode, content)
     if (!preview && forbiddenTerms.length) {
