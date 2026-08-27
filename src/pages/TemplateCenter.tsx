@@ -28,6 +28,8 @@ export default function TemplateCenter() {
     return docType ? { docType, templateId: searchParams.get('templateId') || undefined } : null
   })
   const [specialtyOpen, setSpecialtyOpen] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [deletingSpecialty, setDeletingSpecialty] = useState(false)
   const [specialtyForm] = Form.useForm<{ label: string }>()
   const selectedProjectType = projectTypes.find(item => item.code === projectTypeCode) || projectTypes[0]
   const requestedReturnTo = searchParams.get('returnTo') || ''
@@ -41,26 +43,22 @@ export default function TemplateCenter() {
     })
   }, [])
 
-  const deleteSpecialty = () => {
+  const deleteSpecialty = async () => {
     if (!selectedProjectType) return
-    Modal.confirm({
-      title: `删除专业“${selectedProjectType.label}”？`,
-      content: '该专业目录及目录内全部模板文件将移到系统废纸篓，模板中心不再显示该专业。',
-      okText: '删除整个专业', cancelText: '取消', okButtonProps: { danger: true },
-      onOk: async () => {
-        try {
-          const result = await window.electronAPI.deleteProfessionalTemplateCategory(selectedProjectType.label, selectedProjectType.code)
-          if (!result?.ok) throw new Error(result?.error || '删除专业失败')
-          await useSettingsStore.getState().loadCustomTypes()
-          setHiddenProfessionalCodes(result.hiddenProfessionalTemplateTypes || [])
-          setProjectTypeCode(projectTypes.find(item => item.code !== selectedProjectType.code)?.code || '')
-          message.success(`已删除专业及 ${result.removedTemplates || 0} 个模板，目录已移到废纸篓`)
-        } catch (error: any) {
-          message.error(error?.message || '删除专业失败')
-          throw error
-        }
-      },
-    })
+    setDeletingSpecialty(true)
+    try {
+      const result = await window.electronAPI.deleteProfessionalTemplateCategory(selectedProjectType.label, selectedProjectType.code)
+      if (!result?.ok) throw new Error(result?.error || '删除专业失败')
+      await useSettingsStore.getState().loadCustomTypes()
+      setHiddenProfessionalCodes(result.hiddenProfessionalTemplateTypes || [])
+      setProjectTypeCode(projectTypes.find(item => item.code !== selectedProjectType.code)?.code || '')
+      setDeleteConfirmOpen(false)
+      message.success(`已删除专业及 ${result.removedTemplates || 0} 个模板，目录已移到废纸篓`)
+    } catch (error: any) {
+      message.error(error?.message || '删除专业失败')
+    } finally {
+      setDeletingSpecialty(false)
+    }
   }
 
   const renderContent = () => {
@@ -90,7 +88,7 @@ export default function TemplateCenter() {
             options={projectTypes.map(item => ({ value: item.code, label: item.label }))}
           />
           <Button icon={<PlusOutlined />} onClick={() => setSpecialtyOpen(true)}>添加专业</Button>
-          <Button danger icon={<DeleteOutlined />} onClick={deleteSpecialty}>删除专业</Button>
+          <Button danger icon={<DeleteOutlined />} onClick={() => setDeleteConfirmOpen(true)}>删除专业</Button>
         </Space>
         {selectedProjectType && (
           <TemplateLibraryZone
@@ -165,6 +163,20 @@ export default function TemplateCenter() {
         )}
         {renderContent()}
       </Content>
+      <Modal
+        title={selectedProjectType ? `删除专业“${selectedProjectType.label}”？` : '删除专业？'}
+        open={deleteConfirmOpen}
+        okText="删除整个专业"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+        confirmLoading={deletingSpecialty}
+        closable={!deletingSpecialty}
+        maskClosable={!deletingSpecialty}
+        onCancel={() => { if (!deletingSpecialty) setDeleteConfirmOpen(false) }}
+        onOk={deleteSpecialty}
+      >
+        <Text>该专业目录及目录内全部模板文件将移到系统废纸篓，模板中心不再显示该专业。</Text>
+      </Modal>
       <Modal
         title="添加专业"
         open={specialtyOpen}
