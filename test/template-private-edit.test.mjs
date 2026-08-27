@@ -29,6 +29,24 @@ test('模板占位符可新增、删除并真实写回 DOCX', async t => {
   assert.match(xml, /施工部位：\{\{现场负责人\}\}/, '点选位置新增的占位符应写在锚点后，而不是文末')
 })
 
+test('空白表格单元格可按表格坐标写入占位符', async t => {
+  const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-template-cell-edit-'))
+  t.after(() => fs.rmSync(runtimeDir, { recursive: true, force: true }))
+  const target = path.join(runtimeDir, 'cell-editable.docx')
+  fs.copyFileSync(path.resolve('templates/通用/01_监理日志/监理日志模版.docx'), target)
+
+  await saveDocxTemplatePlaceholders(target, {
+    addFields: ['空白单元格字段'],
+    placements: [{ field: '空白单元格字段', position: 'after', tableIndex: 0, rowIndex: 0, cellIndex: 0 }],
+  })
+
+  const { default: PizZip } = await import('pizzip')
+  const xml = new PizZip(fs.readFileSync(target)).file('word/document.xml').asText()
+  const firstTable = xml.match(/<w:tbl\b[\s\S]*?<\/w:tbl>/)?.[0] || ''
+  const firstCell = firstTable.match(/<w:tc\b[\s\S]*?<\/w:tc>/)?.[0] || ''
+  assert.match(firstCell, /\{\{空白单元格字段\}\}/)
+})
+
 test('私人模板优先于专业和通用模板参与生成解析', async t => {
   const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-private-template-'))
   t.after(() => fs.rmSync(userDataPath, { recursive: true, force: true }))

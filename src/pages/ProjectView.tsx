@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Typography, Input, Button, Space, Spin, Tag, App, Dropdown, Tooltip, DatePicker, Select, Tree, Modal, List } from 'antd'
-import { SendOutlined, RobotOutlined, FileTextOutlined, SaveOutlined, ReloadOutlined, FilePdfOutlined, FolderOpenOutlined, HomeOutlined, EditOutlined, CloseOutlined, SearchOutlined, BookOutlined, EyeOutlined, PictureOutlined, InboxOutlined, HistoryOutlined, PlusOutlined } from '@ant-design/icons'
+import { SendOutlined, RobotOutlined, FileTextOutlined, SaveOutlined, ReloadOutlined, FilePdfOutlined, FolderOpenOutlined, HomeOutlined, EditOutlined, CloseOutlined, SearchOutlined, BookOutlined, EyeOutlined, PictureOutlined, InboxOutlined, HistoryOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
 import { identifyDocType, identifyMode, buildChatPrompt, inferDataTools, postProcessTimeFields, postProcessFabricationGuard, sanitizeUnsupportedLogParticipants, generateFileName, getDocSavePath, providerConfigs, buildDocPrompt, callAI, extractSubject, stripCalibrationStatement, sanitizeFieldValue, sanitizeLetterStyle, parseStructuredContent } from '../services/aiService'
@@ -1928,10 +1928,17 @@ export default function ProjectView() {
                           menu={{ items: [
                             { key: 'preview', label: '打开模板预览', icon: <EyeOutlined /> },
                             { key: 'rules', label: '进入 AI 扩写规则', icon: <RobotOutlined /> },
+                            ...(template.scope !== 'system' ? [{ key: 'delete', label: '移到系统废纸篓', icon: <DeleteOutlined />, danger: true }] : []),
                           ], onClick: ({ key, domEvent }) => {
                             domEvent.stopPropagation()
                             if (key === 'preview') window.electronAPI.openFile(template.path)
                             if (key === 'rules') navigate(`/template-center?rules=${encodeURIComponent(template.docType)}&templateId=${encodeURIComponent(template.id)}`)
+                            if (key === 'delete') void window.electronAPI.deleteLibraryTemplate(template.id).then(async result => {
+                              if (!result.ok) return message.error(result.error || '删除模板失败')
+                              if (selectedGenerationTemplateId === template.id) setSelectedGenerationTemplateId('')
+                              message.success('模板文件已移到系统废纸篓，可从废纸篓恢复')
+                              await loadTemplateCatalog()
+                            })
                           } }}
                         >
                           <div onContextMenu={event => event.stopPropagation()} style={{ display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 }}>

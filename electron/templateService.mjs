@@ -253,18 +253,48 @@ export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [
 
   // 2. 用户在映射区点选位置时，优先把占位符写到对应锚点后。
   const placed = new Set()
+  const replaceIndexedBlock = (source, pattern, targetIndex, transform) => {
+    const matches = [...source.matchAll(pattern)]
+    const match = matches[targetIndex]
+    if (!match || match.index == null) return { value: source, changed: false }
+    const replacement = transform(match[0])
+    return {
+      value: source.slice(0, match.index) + replacement + source.slice(match.index + match[0].length),
+      changed: replacement !== match[0],
+    }
+  }
+  const insertAtTableCell = (source, placement, token) => {
+    if (![placement.tableIndex, placement.rowIndex, placement.cellIndex].every(Number.isInteger)) return { value: source, changed: false }
+    return replaceIndexedBlock(source, /<w:tbl\b[\s\S]*?<\/w:tbl>/g, placement.tableIndex, tableXml => {
+      return replaceIndexedBlock(tableXml, /<w:tr\b[\s\S]*?<\/w:tr>/g, placement.rowIndex, rowXml => {
+        return replaceIndexedBlock(rowXml, /<w:tc\b[\s\S]*?<\/w:tc>/g, placement.cellIndex, cellXml => {
+          const run = `<w:r><w:t xml:space="preserve">${token}</w:t></w:r>`
+          if (cellXml.includes('</w:p>')) return cellXml.replace('</w:p>', `${run}</w:p>`)
+          return cellXml.replace('</w:tc>', `<w:p>${run}</w:p></w:tc>`)
+        }).value
+      }).value
+    })
+  }
   for (const placement of placements) {
     const name = String(placement?.field || '').trim()
     const anchor = String(placement?.anchor || '').trim()
-    if (!name || !anchor) continue
+    if (!name) continue
     const escapedName = name.replace(/[&<>\"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' })[ch])
-    const escapedAnchor = anchor.replace(/[&<>\"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' })[ch])
-    const index = xml.indexOf(escapedAnchor)
-    if (index < 0) continue
     const insertion = `{{${escapedName}}}`
-    const at = placement.position === 'before' ? index : index + escapedAnchor.length
-    xml = xml.slice(0, at) + insertion + xml.slice(at)
-    placed.add(name)
+    const cellResult = insertAtTableCell(xml, placement, insertion)
+    if (cellResult.changed) {
+      xml = cellResult.value
+      placed.add(name)
+      continue
+    }
+    if (anchor) {
+      const escapedAnchor = anchor.replace(/[&<>\"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' })[ch])
+      const index = xml.indexOf(escapedAnchor)
+      if (index < 0) continue
+      const at = placement.position === 'before' ? index : index + escapedAnchor.length
+      xml = xml.slice(0, at) + insertion + xml.slice(at)
+      placed.add(name)
+    }
   }
 
   // 3. 没有可靠锚点的新增字段才追加到文档末尾，保证字段不会丢失。

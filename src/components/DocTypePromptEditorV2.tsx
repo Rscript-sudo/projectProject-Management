@@ -28,6 +28,15 @@ type FieldConfig = {
   antiFabrication: boolean
 }
 
+type PlaceholderPlacement = {
+  field: string
+  anchor?: string
+  position: 'before' | 'after'
+  tableIndex?: number
+  rowIndex?: number
+  cellIndex?: number
+}
+
 const SYSTEM_FIELDS = ['日期', '星期几', '天气', '气温', '当前时间', '编制日期']
 // 项目通用字段：新建项目时已写入项目基本信息，生成时直接从项目资料读取，不调 AI
 const PROJECT_FIELDS = [
@@ -79,23 +88,39 @@ function sanitizeTemplateHtml(html: string) {
   return documentNode.body.innerHTML
 }
 
-function injectMappedPlaceholder(html: string, placement: { field: string; anchor: string; position: 'before' | 'after' }, selectedField: string) {
+function injectMappedPlaceholder(html: string, placement: PlaceholderPlacement, selectedField: string) {
   const documentNode = new DOMParser().parseFromString(html, 'text/html')
+  const createButton = () => {
+    const button = documentNode.createElement('button')
+    button.type = 'button'
+    button.className = `placeholder ai${placement.field === selectedField ? ' selected' : ''}`
+    button.dataset.field = placement.field
+    button.textContent = `{{${placement.field}}}`
+    const badge = documentNode.createElement('span')
+    badge.textContent = 'AI扩写'
+    button.appendChild(badge)
+    return button
+  }
+  if (Number.isInteger(placement.tableIndex) && Number.isInteger(placement.rowIndex) && Number.isInteger(placement.cellIndex)) {
+    const table = documentNode.body.querySelectorAll('table')[placement.tableIndex!] as HTMLTableElement | undefined
+    const row = table?.rows[placement.rowIndex!]
+    const cell = row?.cells[placement.cellIndex!]
+    if (cell) {
+      const paragraph = cell.querySelector('p') || cell
+      paragraph.appendChild(createButton())
+      return documentNode.body.innerHTML
+    }
+  }
+  const anchor = String(placement.anchor || '').trim()
+  if (!anchor) return html
   const walker = documentNode.createTreeWalker(documentNode.body, NodeFilter.SHOW_TEXT)
   let textNode: Text | null = walker.nextNode() as Text | null
   while (textNode) {
     const raw = textNode.nodeValue || ''
-    const index = raw.indexOf(placement.anchor)
+    const index = raw.indexOf(anchor)
     if (index >= 0 && textNode.parentElement && !textNode.parentElement.closest('[data-field]')) {
-      const button = documentNode.createElement('button')
-      button.type = 'button'
-      button.className = `placeholder ai${placement.field === selectedField ? ' selected' : ''}`
-      button.dataset.field = placement.field
-      button.textContent = `{{${placement.field}}}`
-      const badge = documentNode.createElement('span')
-      badge.textContent = 'AI扩写'
-      button.appendChild(badge)
-      const splitAt = placement.position === 'before' ? index : index + placement.anchor.length
+      const button = createButton()
+      const splitAt = placement.position === 'before' ? index : index + anchor.length
       const after = textNode.splitText(splitAt)
       after.parentNode?.insertBefore(button, after)
       return documentNode.body.innerHTML
@@ -142,9 +167,10 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
   const [promptOpen, setPromptOpen] = useState(false)
   const [newFieldName, setNewFieldName] = useState('')
   const [inlineAnchor, setInlineAnchor] = useState('')
+  const [inlineLocator, setInlineLocator] = useState<Pick<PlaceholderPlacement, 'tableIndex' | 'rowIndex' | 'cellIndex'> | null>(null)
   const [inlineEditorPosition, setInlineEditorPosition] = useState<{ left: number; top: number } | null>(null)
-  const [pendingPlacements, setPendingPlacements] = useState<Array<{ field: string; anchor: string; position: 'before' | 'after' }>>([])
-  const [deletedFields, setDeletedFields] = useState<Array<{ field: string; config: FieldConfig; placement?: { field: string; anchor: string; position: 'before' | 'after' } }>>([])
+  const [pendingPlacements, setPendingPlacements] = useState<PlaceholderPlacement[]>([])
+  const [deletedFields, setDeletedFields] = useState<Array<{ field: string; config: FieldConfig; placement?: PlaceholderPlacement }>>([])
   const [analyzing, setAnalyzing] = useState(false)
   const [suggestedFields, setSuggestedFields] = useState<SuggestedField[]>([])
   const [analyzeOpen, setAnalyzeOpen] = useState(false)
@@ -236,6 +262,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       setPendingPlacements([])
       setDeletedFields([])
       setInlineAnchor('')
+      setInlineLocator(null)
       setInlineEditorPosition(null)
       setInitialFields(fields)
       const next = { ...configs }
@@ -295,11 +322,12 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     if (fields.includes(name)) { message.warning('该字段已存在'); return }
     setConfigs(prev => ({ ...prev, [name]: defaultFieldConfig(name) }))
     if (template) setTemplate(prev => prev ? { ...prev, fields: [...(prev.fields || []), name] } : prev)
-    if (inlineAnchor) setPendingPlacements(prev => [...prev.filter(item => item.field !== name), { field: name, anchor: inlineAnchor, position: 'after' }])
+    if (inlineAnchor || inlineLocator) setPendingPlacements(prev => [...prev.filter(item => item.field !== name), { field: name, anchor: inlineAnchor || undefined, position: 'after', ...(inlineLocator || {}) }])
     setDeletedFields(prev => prev.filter(item => item.field !== name))
     setSelectedField(name)
     setNewFieldName('')
     setInlineAnchor('')
+    setInlineLocator(null)
     setInlineEditorPosition(null)
     message.success(`已在所选位置添加字段「${name}」`)
   }
@@ -618,7 +646,8 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
         {availableTemplates.length > 0 && <Select value={selectedTemplateId || undefined} onChange={(id) => { setSelectedTemplateId(id); void loadTemplate(id) }} variant="borderless" style={{ width: 220 }} options={availableTemplates.map(t => ({ value: t.id, label: t.name }))} placeholder="选择模板来源" />}
       </Space>
       <Space wrap className="template-editor-actions">
-        <Button icon={<FolderOpenOutlined />} disabled={!template?.path} onClick={() => template?.path && window.electronAPI.openPath(template.path)}>打开原文件</Button>
+        <Button icon={<FolderOpenOutlined />} disabled={!template?.path} onClick={() => template?.path && window.electronAPI.openFile(template.path)}>用 Word/WPS 编辑源文件</Button>
+        <Button icon={<ReloadOutlined />} disabled={!template?.path} onClick={() => loadTemplate(selectedTemplateId)}>源文件保存后重新载入</Button>
         <Button type="primary" ghost icon={<ThunderboltFilled />} loading={analyzing} onClick={analyzeTemplate}>AI 分析模板结构</Button>
         <Button icon={<ReloadOutlined />} onClick={() => loadTemplate(selectedTemplateId)}>重新扫描</Button>
         <Button icon={<PlayCircleOutlined />} onClick={() => setPreviewOpen(true)}>测试生成</Button>
@@ -669,7 +698,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
         </section>
 
         <section style={{ borderRight: '1px solid #edf0f3' }}>
-          <div style={paneTitle}><span><EyeOutlined /> 原始模板映射</span><Button type="link" size="small" onClick={() => template?.path && window.electronAPI.openPath(template.path)}>打开原文件</Button></div>
+          <div style={paneTitle}><span><EyeOutlined /> 原始模板映射</span><Text type="secondary" style={{ fontSize: 11 }}>本页编辑占位符；表头、边框、合并单元格请在 Word/WPS 修改后重新载入</Text></div>
           <div className="template-mapping-canvas" style={{ padding: '16px 22px', background: '#f6f7f9', minHeight: 0 }}>
             <div className="template-preview-scroll" ref={previewRef}>
               <Text type="secondary" style={{ display: 'block', marginBottom: 14 }}>{template?.name || '未关联模板文件'}</Text>
@@ -681,11 +710,24 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
                   if (target?.dataset.field) { setSelectedField(target.dataset.field); return }
                   const anchorElement = clicked.closest<HTMLElement>('td,th,p')
                   const anchor = (anchorElement?.innerText || clicked.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60)
-                  if (anchor) {
+                  const cell = clicked.closest<HTMLTableCellElement>('td,th')
+                  let locator: Pick<PlaceholderPlacement, 'tableIndex' | 'rowIndex' | 'cellIndex'> | null = null
+                  if (cell) {
+                    const row = cell.parentElement as HTMLTableRowElement | null
+                    const table = cell.closest<HTMLTableElement>('table')
+                    const previewRoot = previewRef.current?.querySelector('.docx-template-preview')
+                    if (row && table && previewRoot) locator = {
+                      tableIndex: [...previewRoot.querySelectorAll('table')].indexOf(table),
+                      rowIndex: [...table.rows].indexOf(row),
+                      cellIndex: [...row.cells].indexOf(cell),
+                    }
+                  }
+                  if (anchor || locator) {
                     const preview = previewRef.current
                     const targetRect = (anchorElement || clicked).getBoundingClientRect()
                     const previewRect = preview?.getBoundingClientRect()
                     setInlineAnchor(anchor)
+                    setInlineLocator(locator)
                     setNewFieldName('')
                     if (preview && previewRect) setInlineEditorPosition({
                       left: Math.max(12, Math.min(targetRect.left - previewRect.left + preview.scrollLeft, preview.scrollWidth - 310)),
@@ -695,10 +737,10 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
                 }}
                 dangerouslySetInnerHTML={{ __html: decoratedTemplateHtml }}
               /> : renderContent()}
-              {inlineAnchor && inlineEditorPosition && <div className="template-inline-field-popover" style={{ left: inlineEditorPosition.left, top: inlineEditorPosition.top }}>
+              {(inlineAnchor || inlineLocator) && inlineEditorPosition && <div className="template-inline-field-popover" style={{ left: inlineEditorPosition.left, top: inlineEditorPosition.top }}>
                 <Input size="small" autoFocus value={newFieldName} onChange={event => setNewFieldName(event.target.value)} onPressEnter={addField} placeholder="占位符名称，回车添加" />
                 <Button size="small" type="primary" onClick={addField}>添加</Button>
-                <Button size="small" type="text" onClick={() => { setInlineAnchor(''); setInlineEditorPosition(null); setNewFieldName('') }}>取消</Button>
+                <Button size="small" type="text" onClick={() => { setInlineAnchor(''); setInlineLocator(null); setInlineEditorPosition(null); setNewFieldName('') }}>取消</Button>
               </div>}
             </div>
           </div>
