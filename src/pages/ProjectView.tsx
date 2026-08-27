@@ -36,7 +36,7 @@ interface GenerationTemplate {
   id: string
   name: string
   docType: string
-  scope: 'global' | 'professional' | 'other' | 'system'
+  scope: 'global' | 'professional' | 'other' | 'system' | 'personal'
   projectType?: string
   projectTypeLabel?: string
   path: string
@@ -1910,6 +1910,7 @@ export default function ProjectView() {
                       return professionalMatch && searchMatch
                     })
                     const groups = [
+                      { key: 'personal', label: '私人模板库', items: visible.filter(item => item.scope === 'personal') },
                       { key: 'general', label: '通用模板', items: visible.filter(item => item.scope === 'global' || item.scope === 'system') },
                       { key: 'professional', label: `${currentType || '当前专业'}模板`, items: visible.filter(item => item.scope === 'professional') },
                       { key: 'other', label: '其他模板', items: visible.filter(item => item.scope === 'other') },

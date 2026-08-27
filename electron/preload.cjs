@@ -237,6 +237,7 @@ const api = {
   getTemplateFields: (filePath) => ipcRenderer.invoke('template:getFields', { path: filePath }),
   deleteLibraryTemplate: (id) => ipcRenderer.invoke('template:deleteLibrary', { id }),
   updateLibraryTemplate: (payload) => ipcRenderer.invoke('template:updateLibrary', payload),
+  saveTemplateContent: (payload) => ipcRenderer.invoke('template:saveContent', payload),
   listCustomProjectTypes: () => ipcRenderer.invoke('settings:listCustomProjectTypes'),
   listCustomDocTypes: () => ipcRenderer.invoke('settings:listCustomDocTypes'),
   listDocTypePromptOverrides: () => ipcRenderer.invoke('settings:listDocTypePromptOverrides'),

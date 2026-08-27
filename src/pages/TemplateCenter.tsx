@@ -42,6 +42,9 @@ export default function TemplateCenter() {
     if (section === 'other-templates') {
       return <TemplateLibraryZone scope="other" display="enterprise" title="其他模板" onGoRules={(docType, templateId) => setEditingRule({ docType, templateId })} />
     }
+    if (section === 'personal-templates') {
+      return <TemplateLibraryZone scope="personal" display="enterprise" title="私人模板库" onGoRules={(docType, templateId) => setEditingRule({ docType, templateId })} />
+    }
     return (
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Space>
@@ -101,6 +104,12 @@ export default function TemplateCenter() {
             {
               key: 'professional-group', title: '专业模板', selectable: false, icon: <FolderOutlined />,
               children: projectTypes.map(item => ({ key: `specialty-${item.code}`, title: item.label, icon: <FolderOutlined /> })),
+            },
+            {
+              key: 'personal-group', title: '私人模板库', selectable: false, icon: <FolderOutlined />,
+              children: [
+                { key: 'personal-templates', title: '我的模板', icon: <FolderOutlined /> },
+              ],
             },
             { key: 'other-templates', title: '其他模板', icon: <FolderOutlined /> },
           ]}

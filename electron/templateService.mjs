@@ -197,6 +197,14 @@ export function findTemplate(templatesDir, docType, options = {}) {
 /** 读取 DOCX 主文档中的 {{字段}}；项目模板可自由替换，因此字段以文件实际内容为准。 */
 export async function getTemplatePlaceholders(templatePath) {
   try {
+    if (path.extname(templatePath).toLowerCase() === '.xlsx') {
+      const configPath = path.join(path.dirname(templatePath), 'config.json')
+      if (!fs.existsSync(configPath)) return []
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+      return [...new Set(Object.keys(config.placeholders || {})
+        .map(key => key.replace(/^\{\{|\}\}$/g, '').trim())
+        .filter(Boolean))]
+    }
     const PizZip = (await import('pizzip')).default
     const zip = new PizZip(fs.readFileSync(templatePath))
     const xml = zip.file('word/document.xml')?.asText() || ''
@@ -205,6 +213,177 @@ export async function getTemplatePlaceholders(templatePath) {
     console.warn('[templateService] Failed to read template placeholders:', e.message)
     return []
   }
+}
+
+
+/**
+ * v1.3.4（2026-08-27）：把占位符变更写回原 .docx 模板文件
+ *
+ * 用户在「AI扩写规则编辑器」里增删占位符后，用差异补丁方式应用到原 docx：
+ *  - removeFields：从 word/document.xml 里删除 {{字段}} 文本
+ *  - addFields：在文档末尾段落追加 {{字段}}（保留原模板格式，不重建整个 XML）
+ *
+ * 不做"纯文本→docx XML 全量重建"，避免破坏原模板的样式/表格/页眉页脚。
+ * 新增占位符以独立段落追加，用户可在 Word 里自行调整位置。
+ */
+export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [], removeFields = [] } = {}) {
+  const PizZip = (await import('pizzip')).default
+  const raw = fs.readFileSync(templatePath)
+  const zip = new PizZip(raw)
+  const docXmlPath = 'word/document.xml'
+  let xml = zip.file(docXmlPath)?.asText()
+  if (!xml) throw new Error('模板文件格式异常：未找到 word/document.xml')
+
+  // 1. 删除占位符：把 {{字段}} 文本从 XML 里移除（连同可能包裹的 run 边界清理）
+  for (const field of removeFields) {
+    const name = String(field).trim()
+    if (!name) continue
+    // 转义 XML 特殊字符（字段名一般不含，但兜底）
+    const escaped = name.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch])
+    // {{字段}} 在 docx XML 里可能被拆成多个 <w:t>（docxtemplater 渲染时能识别跨 run 占位符）
+    // 但用户手动加的占位符通常是连续文本。先尝试整串删除，再尝试跨 run 拼接删除。
+    const token = `{{${escaped}}}`
+    // 简单情况：token 作为完整 <w:t> 文本存在
+    xml = xml.replace(new RegExp(escapeRegExp(token), 'g'), '')
+    // 跨 run 情况：{{ 在一个 w:t，字段名在下一个 w:t，}} 在第三个——用宽松匹配合并相邻 w:t
+    // 这种情况罕见且复杂，这里用"移除残留的孤立 {{ 或 }}"兜底
+    xml = xml.replace(/\{\{(?=<\/w:t>)/g, '')
+    xml = xml.replace(/(?<=<w:t[^>]*>)\}\}/g, '')
+  }
+
+  // 2. 新增占位符：在文档末尾（</w:body> 前）追加独立段落
+  const addFieldsClean = [...new Set(addFields.map(f => String(f).trim()).filter(Boolean))]
+  if (addFieldsClean.length) {
+    const paragraphs = addFieldsClean.map(name => {
+      const escaped = name.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch])
+      // 一个简单段落：{{字段}}，用默认样式
+      return `<w:p><w:r><w:t>{{${escaped}}}</w:t></w:r></w:p>`
+    }).join('')
+    // 插在最后一个 </w:p> 之后、</w:body> 之前（若没有 </w:p> 则直接插 </w:body> 前）
+    if (xml.includes('</w:body>')) {
+      xml = xml.replace(/<\/w:body>/, `${paragraphs}</w:body>`)
+    } else {
+      xml += paragraphs
+    }
+  }
+
+  // 3. 写回 zip
+  zip.file(docXmlPath, xml)
+  const buffer = zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' })
+  fs.writeFileSync(templatePath, buffer)
+
+  // 4. 重扫字段返回
+  return await getTemplatePlaceholders(templatePath)
+}
+
+/**
+ * v1.3.4（2026-08-27）：把占位符变更写回原 .xlsx 模板文件 + 同步 config.json
+ *
+ * xlsx 模板的占位符是直接写在单元格里的文本（如 F4 = "{{项目名称}}"）。
+ * 基于 config.json 的 placeholder_cells + placeholders 定位单元格：
+ *  - removeFields：清空对应单元格的占位符文本 + 从 config 删除条目
+ *  - addFields：在 config 声明的 placeholder_cells 末尾追加新单元格坐标，
+ *               在 xlsx 新行写入 {{字段}}（找不到空行时追加到末尾）
+ *  - renameMap：{ 旧名: 新名 } 重命名占位符（改单元格文本 + config key）
+ */
+export async function saveXlsxTemplatePlaceholders(templatePath, configPath, { addFields = [], removeFields = [], renameMap = {} } = {}) {
+  const { loadXlsx } = await import('./xlsxRuntime.mjs')
+  const XLSX = await loadXlsx()
+  const wb = XLSX.readFile(templatePath)
+  const ws = wb.Sheets[wb.SheetNames[0]]
+  if (!ws) throw new Error('xlsx 模板格式异常：未找到工作表')
+
+  // 读 config.json
+  let config = {}
+  if (configPath && fs.existsSync(configPath)) {
+    try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')) } catch {}
+  }
+  const placeholders = config.placeholders || {}
+  const placeholderCells = Array.isArray(config.placeholder_cells) ? [...config.placeholder_cells] : []
+  // 建立 占位符名 → 单元格坐标 的映射（按 placeholders key 顺序与 placeholder_cells 顺序对应）
+  const fieldNames = Object.keys(placeholders).map(k => k.replace(/^\{\{|\}\}$/g, '').trim())
+  const fieldToCell = {}
+  fieldNames.forEach((name, i) => {
+    if (placeholderCells[i]) fieldToCell[name] = placeholderCells[i]
+  })
+
+  // 1. 删除占位符
+  for (const field of removeFields) {
+    const name = String(field).trim()
+    if (!name) continue
+    const cellRef = fieldToCell[name]
+    if (cellRef && ws[cellRef]) {
+      // 清空单元格占位符文本（保留单元格本身）
+      delete ws[cellRef].v
+      delete ws[cellRef].w
+      ws[cellRef].t = 's'
+    }
+    delete placeholders[`{{${name}}}`]
+  }
+
+  // 2. 重命名占位符
+  for (const [oldName, newName] of Object.entries(renameMap)) {
+    const oldKey = `{{${String(oldName).trim()}}}`
+    const newKey = `{{${String(newName).trim()}}}`
+    if (!placeholders[oldKey]) continue
+    const cellRef = fieldToCell[String(oldName).trim()]
+    if (cellRef && ws[cellRef]) {
+      ws[cellRef].v = newKey
+      ws[cellRef].w = newKey
+      ws[cellRef].t = 's'
+    }
+    placeholders[newKey] = placeholders[oldKey]
+    delete placeholders[oldKey]
+  }
+
+  // 3. 新增占位符：找一个空单元格写入 {{字段}}
+  //    策略：在已有 placeholder_cells 最大行 +2 的 A 列起依次排开
+  const addFieldsClean = [...new Set(addFields.map(f => String(f).trim()).filter(Boolean))]
+  if (addFieldsClean.length) {
+    const maxRow = placeholderCells.reduce((max, ref) => {
+      const m = String(ref).match(/^([A-Z]+)(\d+)$/)
+      return m ? Math.max(max, Number(m[2])) : max
+    }, 0)
+    let nextRow = maxRow + 2
+    let colIdx = 0
+    for (const name of addFieldsClean) {
+      const colLetter = columnIndexToLetter(colIdx)
+      const cellRef = `${colLetter}${nextRow}`
+      ws[cellRef] = { t: 's', v: `{{${name}}}`, w: `{{${name}}}` }
+      placeholderCells.push(cellRef)
+      placeholders[`{{${name}}}`] = { source: 'param', default: '' }
+      colIdx++
+      if (colIdx > 25) { colIdx = 0; nextRow++ }
+    }
+  }
+
+  // 4. 写回 xlsx
+  const xlsxBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+  fs.writeFileSync(templatePath, xlsxBuffer)
+
+  // 5. 同步写回 config.json
+  if (configPath) {
+    config.placeholders = placeholders
+    config.placeholder_cells = placeholderCells
+    const tmp = `${configPath}.${process.pid}.${Date.now()}.tmp`
+    fs.writeFileSync(tmp, JSON.stringify(config, null, 2), 'utf8')
+    fs.renameSync(tmp, configPath)
+  }
+
+  // 6. 返回最新字段列表
+  return Object.keys(placeholders).map(k => k.replace(/^\{\{|\}\}$/g, '').trim())
+}
+
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function columnIndexToLetter(idx) {
+  // 0 -> A, 25 -> Z, 26 -> AA
+  let s = ''
+  let n = idx
+  do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1 } while (n >= 0)
+  return s
 }
 
 

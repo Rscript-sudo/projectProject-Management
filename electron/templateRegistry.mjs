@@ -128,7 +128,7 @@ export async function importTemplateToLibrary({ userDataPath, sourcePath, docTyp
   const supported = getSupportedDocTypes()
   if (!supported.includes(docType)) throw new Error(`不支持的文种：${docType}`)
   if (!fs.existsSync(sourcePath) || path.extname(sourcePath).toLowerCase() !== '.docx') throw new Error('请选择有效的 Word 模板文件')
-  if (!['global', 'professional', 'other'].includes(scope)) throw new Error('模板范围无效')
+  if (!['global', 'professional', 'other', 'personal'].includes(scope)) throw new Error('模板范围无效')
 
   const registry = readRegistry(userDataPath)
   const id = `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -183,10 +183,12 @@ export function resolveLibraryTemplate(userDataPath, { docType, projectType, sel
   }
   // v1.x：projectType 兼容 label 和 code（normalizeProjectType 都处理）
   const targetCode = normalizeProjectType(projectType)
-  return templates.find(item =>
-    item.scope === 'professional' &&
-    (item.projectType === targetCode || normalizeProjectType(item.projectType) === targetCode)
-  ) || templates.find(item => item.scope === 'global') || null
+  // 优先级：personal（个人私有库，用户自己配）> professional（专业库）> global（通用库）
+  return templates.find(item => item.scope === 'personal')
+    || templates.find(item =>
+      item.scope === 'professional' &&
+      (item.projectType === targetCode || normalizeProjectType(item.projectType) === targetCode)
+    ) || templates.find(item => item.scope === 'global') || null
 }
 
 /**
@@ -265,6 +267,8 @@ export async function migrateBuiltinProfessionalTemplates({ userDataPath, templa
           })
           customLabels.add(docType)
           results.customTypesCreated++
+          // 立即刷运行时缓存，让 importTemplateToLibrary 的 getSupportedDocTypes 认得新文种
+          setCustomDocTypes(customDocTypes)
         }
         // 导入到企业库（scope=professional）
         await importTemplateToLibrary({

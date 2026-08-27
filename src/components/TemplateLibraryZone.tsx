@@ -18,7 +18,7 @@ const STRUCTURED_SYSTEM_DOC_TYPES = new Set([
 ])
 
 interface Props {
-  scope: 'global' | 'professional' | 'other'
+  scope: 'global' | 'professional' | 'other' | 'personal'
   projectType?: string   // scope=professional 时必填（专业 label）
   title: string
   onGoRules?: (docType: string, templateId?: string) => void  // 跳转到扩写规则
@@ -29,6 +29,7 @@ interface Tpl {
   id: string; name: string; docType: string; scope: string; projectType: string
   path: string; sourceName: string; fields?: string[]; readOnly?: boolean; missing?: boolean
   customDocTypeCode?: string
+  projectTypeLabel?: string
 }
 
 export default function TemplateLibraryZone({ scope, projectType, title, onGoRules, display = 'all' }: Props) {
@@ -62,9 +63,13 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
       const hiddenTypes = Array.isArray(settings?.hiddenCommonDocTypes) ? settings.hiddenCommonDocTypes : []
       setHiddenSystemTemplateIds(hiddenIds)
       setHiddenCommonDocTypes(hiddenTypes)
-      const enterprise = (all || [])
-        .filter(t => scope === 'global' ? t.scope === 'global' : scope === 'other' ? t.scope === 'other' : (t.scope === 'professional' && (t.projectType === projectType || t.projectTypeLabel === projectType)))
-        .map(t => ({ ...t, readOnly: false }))
+      const matchScope = (t: Tpl) => {
+        if (scope === 'global') return t.scope === 'global'
+        if (scope === 'other') return t.scope === 'other'
+        if (scope === 'personal') return t.scope === 'personal'
+        return t.scope === 'professional' && (t.projectType === projectType || t.projectTypeLabel === projectType)
+      }
+      const enterprise = (all || []).filter(matchScope).map(t => ({ ...t, readOnly: false }))
       // 通用区：额外列出系统预置模板（只读），让清单列全
       const systemRows = scope === 'global'
         ? (system || []).filter(s => !hiddenIds.includes(s.id)).map(s => ({ ...s, readOnly: true }))
@@ -267,7 +272,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
             })
           : await window.electronAPI.cloneSystemTemplateToLibrary({
               docType: editTpl.docType,
-              scope: scope === 'professional' ? 'professional' : 'global',
+              scope: scope === 'professional' ? 'professional' : scope === 'personal' ? 'personal' : 'global',
               projectType: scope === 'professional' ? projectType : '通用',
               name: editName.trim() || editTpl.docType,
             })

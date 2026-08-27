@@ -750,6 +750,87 @@ export async function generateDocTypePrompt(
   }
 }
 
+/**
+ * v1.x：AI 分析模板结构，识别可填充位置 + 建议占位符字段。
+ * 用户上传的模板可能没有 {{占位符}}，是空白表格/段落，需要 AI 判断哪里该填、该扩写。
+ * 输入模板文本内容，输出建议字段列表（含 label/hint/mode/reason）。
+ */
+export interface SuggestedField {
+  name: string        // 占位符名（中文，简洁，如"现场负责人"）
+  label: string       // 显示名
+  hint: string        // 写作提示（该填什么）
+  mode: 'project' | 'system' | 'ai' | 'keep'  // 建议处理方式
+  reason: string      // 为什么建议这个字段（基于模板哪部分）
+  anchorText: string  // 原文定位锚点：模板里能唯一定位该位置的文本片段（10-30字），用于回写 {{占位符}}
+  insertPosition: 'before' | 'after' | 'replace'  // 占位符插在锚点前/后/替换锚点处的空白
+}
+
+export async function analyzeTemplateStructure(
+  config: AIConfig,
+  docType: string,
+  templateContent: string,
+  existingFields: string[] = [],
+): Promise<{ success: boolean; fields?: SuggestedField[]; error?: string }> {
+  const existingBlock = existingFields.length
+    ? `\n模板里已有的占位符（不要重复建议）：${existingFields.join('、')}`
+    : ''
+
+  const systemMsg = `你是工程监理文档模板分析专家。用户给你一份「${docType}」文种的模板文本（从 docx 提取，可能含表格/段落/空白填充位）。
+你的任务：分析模板结构，识别所有「需要填充或扩写」的位置，建议对应的占位符字段，并给出在原文的定位锚点。
+
+识别规则：
+1. 表格里的空白单元格、带"___"或"（）"的留白、需要填写的栏目 → 建议字段
+2. 项目通用字段（项目名称/工程名称/项目编号/文件编号/致单位/建设单位/施工单位/监理单位/项目监理机构/总监理工程师等）→ mode=project，hint 固定为"从项目资料读取正式全称，不得改写或推测"
+3. 日期/星期/天气等系统可计算字段 → mode=system
+4. 正文段落、意见栏、结论栏、描述性内容 → mode=ai（需要 AI 扩写）
+5. 固定标题/表头/落款格式 → mode=keep（保持原样）
+
+定位锚点规则（anchorText）：
+- 从模板原文里摘取一段能唯一标识该位置的文本（10-30字，必须是原文连续出现的文字）
+- insertPosition: before=占位符插在锚点文本前；after=插在锚点后；replace=替换锚点处的空白/下划线/括号
+- 例如原文"工程名称：___"，anchorText="工程名称：", insertPosition="after"
+- 例如原文"监理意见：（请填写）"，anchorText="（请填写）", insertPosition="replace"
+
+严格输出 JSON（不要 markdown、不要解释）：
+{
+  "fields": [
+    { "name": "工程名称", "label": "工程名称", "hint": "从项目资料读取正式全称，不得改写或推测", "mode": "project", "reason": "表头工程名称栏", "anchorText": "工程名称：", "insertPosition": "after" },
+    { "name": "监理意见", "label": "监理意见", "hint": "围绕本次检查结果写监理意见，200-400字，禁止编造", "mode": "ai", "reason": "表格末尾的意见栏", "anchorText": "监理意见：", "insertPosition": "after" }
+  ]
+}
+要求：
+- name 用简洁中文（2-8字），能作为 {{占位符}} 名
+- 项目通用字段必须 mode=project，不要归为 ai
+- anchorText 必须是原文里真实存在的连续文本片段（用于程序定位回写）
+- 不要编造模板里没有的字段
+- mode 必须是 project/system/ai/keep 之一
+- 字段数量按模板实际需要，通常 5-20 个`
+
+  const messages = [
+    { role: 'system', content: systemMsg },
+    { role: 'user', content: `文种：${docType}${existingBlock}\n\n模板内容：\n${templateContent.slice(0, 8000)}` },
+  ]
+
+  const result = await callAI(config, messages)
+  if (!result.success) return { success: false, error: result.error || 'AI 分析失败' }
+  try {
+    const json = JSON.parse(result.content?.match(/\{[\s\S]*\}/)?.[0] || '{}')
+    const fields: SuggestedField[] = (json.fields || []).map((f: any) => ({
+      name: String(f.name || '').trim(),
+      label: String(f.label || f.name || '').trim(),
+      hint: String(f.hint || '').trim(),
+      mode: (['project', 'system', 'ai', 'keep'].includes(f.mode) ? f.mode : 'ai') as SuggestedField['mode'],
+      reason: String(f.reason || '').trim(),
+      anchorText: String(f.anchorText || '').trim(),
+      insertPosition: (['before', 'after', 'replace'].includes(f.insertPosition) ? f.insertPosition : 'after') as SuggestedField['insertPosition'],
+    })).filter((f: SuggestedField) => f.name)
+    if (!fields.length) return { success: false, error: 'AI 未识别出可填充字段' }
+    return { success: true, fields }
+  } catch (e) {
+    return { success: false, error: 'AI 返回无法解析的 JSON：' + String(e) }
+  }
+}
+
 // 从用户输入识别文档类型
 export function identifyDocType(input: string): { type: string; confidence: number; mode: 'A' | 'B' } {
   const lower = input.toLowerCase()

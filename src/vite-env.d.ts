@@ -329,10 +329,10 @@ export interface ElectronAPI {
   assignProjectTemplate: (projectPath: string, docType: string, sourcePath: string) => Promise<{ success: boolean; path?: string; templateOverride?: { path: string; sourceName?: string; updatedAt?: string }; error?: string }>
   clearProjectTemplateOverride: (projectPath: string, docType: string) => Promise<{ success: boolean; error?: string }>
   getProjectTemplateContract: (projectPath: string, docType: string) => Promise<{ found: boolean; fields: string[]; source?: string; path?: string; templateId?: string; error?: string }>
-  listTemplateLibrary: () => Promise<Array<{ id: string; name: string; docType: string; scope: 'global' | 'professional' | 'other'; projectType: string; projectTypeLabel?: string; path: string; sourceName: string; fields?: string[]; createdAt: string; updatedAt: string }>>
+  listTemplateLibrary: () => Promise<Array<{ id: string; name: string; docType: string; scope: 'global' | 'professional' | 'other' | 'personal'; projectType: string; projectTypeLabel?: string; path: string; sourceName: string; fields?: string[]; createdAt: string; updatedAt: string }>>
   listSystemTemplates: () => Promise<Array<{ id: string; name: string; docType: string; scope: 'system'; projectType: string; path: string; sourceName: string; fields?: string[]; readOnly: true }>>
-  importTemplateToLibrary: (payload: { sourcePath: string; docType: string; scope: 'global' | 'professional' | 'other'; projectType?: string; name?: string }) => Promise<{ success: boolean; template?: any; error?: string }>
-  cloneSystemTemplateToLibrary: (payload: { docType: string; scope?: 'global' | 'professional'; projectType?: string; name?: string }) => Promise<{ success: boolean; template?: any; error?: string }>
+  importTemplateToLibrary: (payload: { sourcePath: string; docType: string; scope: 'global' | 'professional' | 'other' | 'personal'; projectType?: string; name?: string }) => Promise<{ success: boolean; template?: any; error?: string }>
+  cloneSystemTemplateToLibrary: (payload: { docType: string; scope?: 'global' | 'professional' | 'personal'; projectType?: string; name?: string }) => Promise<{ success: boolean; template?: any; error?: string }>
   refreshTemplateLibraryEntry: (templateId: string) => Promise<{ success: boolean; template?: any; error?: string }>
   selectProjectTemplate: (projectPath: string, docType: string, templateId: string | null) => Promise<{ success: boolean; templateId?: string | null; error?: string }>
   deleteFile: (filePath: string) => Promise<{ success: boolean; error?: string }>
@@ -441,6 +441,7 @@ export interface ElectronAPI {
   getTemplateFields: (filePath: string) => Promise<{ ok: boolean; fields?: string[]; error?: string }>
   deleteLibraryTemplate: (id: string) => Promise<{ ok: boolean; error?: string }>
   updateLibraryTemplate: (payload: { id: string; name?: string; sourcePath?: string }) => Promise<{ ok: boolean; template?: any; error?: string }>
+  saveTemplateContent: (payload: { path: string; addFields?: string[]; removeFields?: string[]; renameMap?: Record<string, string>; docType?: string; templateId?: string; saveAsPersonal?: boolean; name?: string }) => Promise<{ ok: boolean; path?: string; fields?: string[]; clonedToLibrary?: any; error?: string }>
   listSystemTemplates: () => Promise<any[]>
   listTemplatesByProjectType: (params: { projectType?: string; docType?: string; scope?: string }) => Promise<any[]>
   onCustomTypesChanged: (cb: (data: any) => void) => () => void

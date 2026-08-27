@@ -167,7 +167,7 @@ function createWindow() {
   return win
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // 1. 初始化数据库 + 迁移老 JSON（仅首次）
   let dbOk = false
   let dbError = ''
