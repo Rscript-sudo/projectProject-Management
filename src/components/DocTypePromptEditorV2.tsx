@@ -13,7 +13,7 @@ import { getDefaultPrompts, mergeDocTypePrompt } from '../shared/docTypePrompts'
 import type { DocTypeConfig, GlobalRule } from '../shared/docTypePrompts'
 import { BUILTIN_DOC_TYPES } from '../shared/builtinDocTypes'
 import { useSettingsStore } from '../stores/useSettingsStore'
-import { callAI, generateDocTypePrompt, analyzeTemplateStructure } from '../services/aiService'
+import { generateDocTypePrompt, analyzeTemplateStructure, generateFieldExpansionRule } from '../services/aiService'
 import type { SuggestedField } from '../services/aiService'
 
 const { Text, Title } = Typography
@@ -140,19 +140,30 @@ function defaultFieldConfig(field: string): FieldConfig {
   }
 }
 
+function extractFieldContext(content: string, field: string, radius = 900) {
+  if (!content.trim()) return ''
+  const markers = [`{{${field}}}`, `【${field}】`, field]
+  const indexes = markers.map(marker => content.indexOf(marker)).filter(index => index >= 0)
+  const index = indexes.length ? Math.min(...indexes) : -1
+  if (index < 0) return content.slice(0, radius * 2)
+  const start = Math.max(0, index - radius)
+  const end = Math.min(content.length, index + field.length + 4 + radius)
+  return `${start > 0 ? '…' : ''}${content.slice(start, end)}${end < content.length ? '…' : ''}`
+}
+
 export default function DocTypePromptEditorV2({ initialDocType, templateId, onBack, onSaved }: { initialDocType?: string; templateId?: string; onBack?: () => void; onSaved?: () => void }) {
   const { message } = App.useApp()
   const { docTypePromptOverrides, globalRulesOverrides, applyCustomTypes, customDocTypes } = useSettingsStore()
   const defaults = useMemo(() => getDefaultPrompts(), [])
   const docTypes = useMemo(() => [
-    ...BUILTIN_DOC_TYPES.map(label => ({ key: label, label })),
-    ...(customDocTypes || []).map(item => ({ key: item.code, label: item.label })),
+    ...BUILTIN_DOC_TYPES.map(label => ({ key: label, label, projectType: null as string | null })),
+    ...(customDocTypes || []).map(item => ({ key: item.code, label: item.label, projectType: item.projectType })),
   ], [customDocTypes])
 
   const [activeKey, setActiveKey] = useState('')
   const [draft, setDraft] = useState<DocTypeConfig | null>(null)
   const [globalDraft, setGlobalDraft] = useState<Record<string, GlobalRule>>({})
-  const [template, setTemplate] = useState<{ id?: string; name: string; path: string; fields: string[]; content: string; html: string; isSystem?: boolean } | null>(null)
+  const [template, setTemplate] = useState<{ id?: string; name: string; path: string; fields: string[]; content: string; html: string; isSystem?: boolean; projectType?: string } | null>(null)
   // 初始扫描字段快照——用于"保存模板"时计算占位符增删差异，写回原模板文件
   const [initialFields, setInitialFields] = useState<string[]>([])
   const [availableTemplates, setAvailableTemplates] = useState<{ id: string; name: string; scope: string; source: string }[]>([])
@@ -258,7 +269,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       const compactContent = parsed?.success ? (parsed.content || '')
         .replace(/[ \t]+\n/g, '\n').replace(/\n[ \t]+/g, '\n').replace(/\n{3,}/g, '\n\n').trim() : ''
       setRecognitionError(fields.length ? '' : '没有识别到占位符。可手动设定字段，或让 AI 重新分析模板结构。')
-      setTemplate({ id: found.id, name: found.sourceName || activeItem.label, path: found.path, fields, content: compactContent, html: parsed?.success ? parsed.html || '' : '', isSystem })
+      setTemplate({ id: found.id, name: found.sourceName || activeItem.label, path: found.path, fields, content: compactContent, html: parsed?.success ? parsed.html || '' : '', isSystem, projectType: (found as any).projectTypeLabel || (found as any).projectType || activeItem.projectType || '通用' })
       setPendingPlacements([])
       setDeletedFields([])
       setInlineAnchor('')
@@ -587,22 +598,33 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     finally { setGenerating(false) }
   }
 
-  const optimizeSelectedField = async () => {
+  const generateSelectedFieldRule = async (mode: 'suggest' | 'polish') => {
     if (!selectedField || !activeItem) return
     setGenerating(true)
     try {
       const settings = await window.electronAPI.getSettings()
-      const result = await callAI(
+      const result = await generateFieldExpansionRule(
         { provider: (settings.aiProvider as any) || 'deepseek', baseUrl: settings.baseUrl || '', model: settings.model || '' },
-        [
-          { role: 'system', content: '你是工程文档模板规则设计助手。只返回一段可直接保存的字段扩写要求，不要标题、解释或 Markdown。要求必须说明信息来源、应包含的内容、组织顺序、缺失信息处理和禁止编造。' },
-          { role: 'user', content: `文种：${activeItem.label}\n字段：${selectedField}\n当前要求：${current.requirement}\n模板上下文：${(template?.content || '').slice(0, 3000)}` },
-        ],
+        {
+          docType: activeItem.label,
+          projectType: template?.projectType,
+          field: selectedField,
+          userDescription: mode === 'polish' ? current.requirement : '',
+          localContext: extractFieldContext(template?.content || '', selectedField),
+          siblingFields: fields,
+        },
       )
-      if (!result.success || !result.content?.trim()) throw new Error(result.error || '模型未返回规则')
-      updateConfig({ requirement: result.content.trim() })
-      message.success(`已优化“${selectedField}”字段规则`)
-    } catch (error: any) { message.error(`字段规则优化失败：${error?.message || error}`) }
+      if (!result.success || !result.rule) throw new Error(result.error || '模型未返回规则')
+      updateConfig({
+        mode: result.rule.mode,
+        source: result.rule.source,
+        requirement: result.rule.requirement,
+        minWords: result.rule.minWords,
+        maxWords: result.rule.maxWords,
+        antiFabrication: result.rule.antiFabrication,
+      })
+      message.success(mode === 'suggest' ? `已建议“${selectedField}”字段规则` : `已润色“${selectedField}”字段规则`)
+    } catch (error: any) { message.error(`字段规则生成失败：${error?.message || error}`) }
     finally { setGenerating(false) }
   }
 
@@ -759,10 +781,13 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
             {!selectedField ? <Empty description="请从左侧选择字段" /> : <>
               <div><Text strong>处理方式</Text><Segmented block style={{ marginTop: 7 }} value={current.mode} onChange={value => updateConfig({ mode: value as FillMode })} options={[{ label: '自动填充', value: 'project' }, { label: 'AI扩写', value: 'ai' }, { label: '保持原样', value: 'keep' }]} /></div>
               <div><Text strong>信息来源</Text><Input value={current.source} onChange={event => updateConfig({ source: event.target.value })} style={{ marginTop: 7 }} placeholder="例如：用户输入、项目资料、系统字段" /></div>
-              <div><Text strong>AI 扩写要求</Text><Input.TextArea value={current.requirement} onChange={event => updateConfig({ requirement: event.target.value })} autoSize={{ minRows: 4, maxRows: 7 }} style={{ marginTop: 7 }} placeholder="写清填充依据、表达重点及禁止事项；保存后自动同步到系统提示词" /></div>
+              <div><Text strong>AI 扩写要求 / 自然语言描述</Text><Input.TextArea value={current.requirement} onChange={event => updateConfig({ requirement: event.target.value })} autoSize={{ minRows: 4, maxRows: 7 }} style={{ marginTop: 7 }} placeholder="可直接写规则，也可用自然语言描述，例如：根据检查问题形成正式监理意见，并要求施工单位整改" /></div>
               <div><Text strong>建议篇幅</Text><Space style={{ marginTop: 7 }}><InputNumber min={0} value={current.minWords} onChange={value => updateConfig({ minWords: Number(value) || 0 })} />—<InputNumber min={0} value={current.maxWords} onChange={value => updateConfig({ maxWords: Number(value) || 0 })} /> 字</Space></div>
               <div style={{ padding: 12, borderRadius: 8, background: '#fff7e8', display: 'flex', justifyContent: 'space-between' }}><span><CheckCircleFilled style={{ color: '#fa8c16', marginRight: 7 }} />防止编造</span><Switch checked={current.antiFabrication} onChange={value => updateConfig({ antiFabrication: value })} /></div>
-              <Button type="primary" ghost icon={<ThunderboltFilled />} loading={generating} onClick={optimizeSelectedField}>AI 优化此字段规则</Button>
+              <Space.Compact block>
+                <Button block type="primary" ghost icon={<ThunderboltFilled />} loading={generating} onClick={() => generateSelectedFieldRule('suggest')}>AI 建议规则</Button>
+                <Button block type="primary" icon={<ThunderboltFilled />} loading={generating} onClick={() => generateSelectedFieldRule('polish')} disabled={!current.requirement.trim()}>AI 润色规则</Button>
+              </Space.Compact>
             </>}
           </div>
         </section>
