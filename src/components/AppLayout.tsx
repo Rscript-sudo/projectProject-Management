@@ -111,7 +111,6 @@ export default function AppLayout() {
           <div style={{ height: 52, display: 'flex', alignItems: 'center', padding: navCollapsed ? '0 8px' : '0 12px', borderBottom: '1px solid #f0f0f0', color: '#1677ff', gap: 10, flex: 'none' }}>
             <ProjectOutlined style={{ fontSize: 20, flex: 'none' }} />
             {!navCollapsed && <Text strong ellipsis style={{ flex: 1 }}>项目文档管理系统</Text>}
-            <Button type="text" size="small" icon={navCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setNavCollapsed(value => !value)} title={navCollapsed ? '展开菜单' : '收起为图标'} />
           </div>
 
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, padding: 8 }}>
@@ -173,6 +172,13 @@ export default function AppLayout() {
             style={{ height: 40, justifyContent: navCollapsed ? 'center' : 'flex-start' }}
             title="运行与诊断中心"
           >{!navCollapsed && '运行与诊断'}</Button>
+          <Button
+            type="text"
+            icon={navCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            onClick={() => setNavCollapsed(value => !value)}
+            style={{ height: 40, justifyContent: navCollapsed ? 'center' : 'flex-start', borderTop: '1px solid #f0f0f0', borderRadius: 0 }}
+            title={navCollapsed ? '展开菜单' : '收起菜单'}
+          >{!navCollapsed && '收起菜单'}</Button>
           </div>
         </div>
       </Sider>

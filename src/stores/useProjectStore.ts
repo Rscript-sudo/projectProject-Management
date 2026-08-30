@@ -18,6 +18,7 @@ interface Settings {
   baseUrl: string
   model: string
   autoOpenFile: boolean
+  aiProfiles?: Partial<Record<Settings['aiProvider'], { baseUrl: string; model: string; hasApiKey?: boolean; apiKey?: string; apiKeyDecryptError?: string | null }>>
 }
 
 interface AppState {

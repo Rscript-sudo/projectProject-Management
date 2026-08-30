@@ -193,6 +193,7 @@ interface AppSettings {
   baseUrl: string
   model: string
   autoOpenFile: boolean
+  aiProfiles?: Partial<Record<AppSettings['aiProvider'], { baseUrl: string; model: string; hasApiKey?: boolean; apiKeyDecryptError?: string | null }>>
   // v1.x：自定义专业/文种 + 扩写规则覆盖（运行时 JSON，主进程持久化）
   customProjectTypes?: any[]
   customDocTypes?: any[]
@@ -238,7 +239,7 @@ export interface ElectronAPI {
   }>
   callAI: (options: AIOptions) => Promise<AIResult>
   recognizeImages: (options: { paths: string[] }) => Promise<{ success: boolean; content?: string; model?: string; error?: string }>
-  listModels: (options: { baseUrl: string; apiKey?: string }) => Promise<{ success: boolean; models?: string[]; error?: string }>
+  listModels: (options: { baseUrl: string; apiKey?: string; provider?: string }) => Promise<{ success: boolean; models?: string[]; error?: string }>
   checkAIHealth: (options?: { provider?: string; baseUrl?: string; model?: string }) => Promise<{ success: boolean; provider?: string; baseUrl?: string; model?: string; models?: string[]; error?: string }>
   readClipboardText: () => Promise<{ success: boolean; text?: string; error?: string }>
   callAIStream: (options: AIOptions) => Promise<{ success: boolean; error?: string; requestId?: string }>

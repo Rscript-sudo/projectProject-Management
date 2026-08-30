@@ -12,6 +12,7 @@
 .provider-item__icon { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 30px; border-radius: 8px; color: #1677ff; background: #fff; border: 1px solid #dce8f8; }
 .provider-item__copy { min-width: 0; display: flex; flex: 1; flex-direction: column; }
 .provider-item__copy strong { font-size: 14px; font-weight: 600; }
+.provider-item__default { margin-left: 6px; padding-inline: 5px; font-size: 10px; line-height: 17px; vertical-align: 1px; }
 .provider-item__copy small { color: #8a94a3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .provider-item__check { color: #1677ff; }
 .provider-item__arrow { color: #b4bbc5; font-size: 11px; }

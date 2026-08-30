@@ -533,8 +533,11 @@ ${dataContext}
   }))
 
   // 获取 AI 模型列表（调用各服务商的 /models 接口）
-  ipcMain.handle('ai:listModels', safeCall(async (_, { baseUrl, apiKey }) => {
-    const savedApiKey = getSettings().apiKey
+  ipcMain.handle('ai:listModels', safeCall(async (_, { baseUrl, apiKey, provider }) => {
+    const savedSettings = getSettings()
+    const savedApiKey = provider && savedSettings.aiProfiles?.[provider]?.apiKey
+      ? savedSettings.aiProfiles[provider].apiKey
+      : savedSettings.apiKey
     const effectiveApiKey = apiKey || (typeof savedApiKey === 'string' ? savedApiKey : '')
     if (!effectiveApiKey) return { success: false, error: 'API Key 未配置' }
     if (!baseUrl) return { success: false, error: 'API 地址未填写' }

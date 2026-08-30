@@ -31,6 +31,7 @@ import './Settings.css'
 const { Title, Text } = Typography
 
 type TabKey = 'ai' | 'basic' | 'data'
+type AIProfileDraft = { baseUrl: string; model: string; hasApiKey?: boolean; apiKey?: string; apiKeyDecryptError?: string | null }
 
 const VALID_TABS: TabKey[] = ['ai', 'basic', 'data']
 
@@ -46,6 +47,9 @@ export default function Settings() {
   const [models, setModels] = useState<string[]>([])
   const [fetchingModels, setFetchingModels] = useState(false)
   const [modelFetchError, setModelFetchError] = useState<string | null>(null)
+  const [profileDrafts, setProfileDrafts] = useState<Partial<Record<AIProvider, AIProfileDraft>>>({})
+  const [editingProvider, setEditingProvider] = useState<AIProvider>('deepseek')
+  const [defaultProvider, setDefaultProvider] = useState<AIProvider>('deepseek')
   // 支持 ?tab=ai|basic|data 直接定位 Tab（用于截图验证和深链接）
   const tabParam = searchParams.get('tab') as TabKey | null
   const [activeTab, setActiveTab] = useState<TabKey>(
@@ -64,7 +68,14 @@ export default function Settings() {
     if (!apiReady) return
     loadSettings().then(() => {
       const currentSettings = useAppStore.getState().settings
-      form.setFieldsValue(currentSettings)
+      const provider = currentSettings.aiProvider as AIProvider
+      const profiles = currentSettings.aiProfiles || {
+        [provider]: { baseUrl: currentSettings.baseUrl, model: currentSettings.model, hasApiKey: currentSettings.hasApiKey },
+      }
+      setProfileDrafts(profiles)
+      setEditingProvider(provider)
+      setDefaultProvider(provider)
+      form.setFieldsValue({ ...currentSettings, aiProvider: provider, ...(profiles[provider] || {}), apiKey: '' })
     })
     // v1.x：启动时拉一次自定义专业/文种（Store 内部会订阅主进程推送）
   }, [apiReady])
@@ -111,11 +122,16 @@ export default function Settings() {
       // 用 getFieldsValue 拿真实值（不受 validateFields 内部状态延迟影响）
       const values = form.getFieldsValue(true)
       const visibleApiKey = apiKeyInputRef.current?.input?.value?.trim() || ''
-      if (visibleApiKey) values.apiKey = visibleApiKey
-      // 如果已配置 API Key 且没改，不提交 apiKey（由主进程保留原加密值）
-      if (settings.hasApiKey && !visibleApiKey) {
-        delete values.apiKey
-      }
+      const currentDraft = { ...(profileDrafts[editingProvider] || {}), baseUrl: values.baseUrl || '', model: values.model || '' }
+      if (visibleApiKey) currentDraft.apiKey = visibleApiKey
+      else delete currentDraft.apiKey
+      const nextProfiles = { ...profileDrafts, [editingProvider]: currentDraft }
+      const defaultProfile = nextProfiles[defaultProvider]
+      values.aiProfiles = nextProfiles
+      values.aiProvider = defaultProvider
+      values.baseUrl = defaultProfile?.baseUrl || providerConfigs[defaultProvider].baseUrl
+      values.model = defaultProfile?.model || providerConfigs[defaultProvider].defaultModel
+      delete values.apiKey
       // 兜底：projectRoot 必须有值（否则后端写盘后会变空）
       if (!values.projectRoot) {
         message.error('请选择或填写项目根目录')
@@ -133,7 +149,8 @@ export default function Settings() {
       // 重新加载以拿到新的 hasApiKey 状态
       await loadSettings()
       const updatedSettings = useAppStore.getState().settings
-      form.setFieldsValue({ ...updatedSettings, apiKey: '' })
+      setProfileDrafts(updatedSettings.aiProfiles || {})
+      form.setFieldsValue({ ...updatedSettings, ...(updatedSettings.aiProfiles?.[editingProvider] || {}), aiProvider: editingProvider, apiKey: '' })
       setTimeout(() => setSaved(false), 2000)
     } catch (e: any) {
       setLoading(false)
@@ -146,38 +163,42 @@ export default function Settings() {
     }
   }
 
-  const handleProviderChange = (provider: AIProvider) => {
-    const config = providerConfigs[provider]
-    if (config && provider !== 'custom') {
-      form.setFieldsValue({
-        baseUrl: config.baseUrl,
-        model: config.defaultModel,
-      })
-    }
-  }
-
-  // 一键应用服务商配置（Data Tab「应用此配置」触发）
+  // 保存当前服务商草稿，再加载目标服务商自己的配置。
   const applyProvider = (key: string) => {
-    const config = providerConfigs[key as AIProvider]
+    const provider = key as AIProvider
+    const config = providerConfigs[provider]
     if (!config) return
+    const values = form.getFieldsValue(true)
+    const visibleApiKey = apiKeyInputRef.current?.input?.value?.trim() || ''
+    const currentDraft: AIProfileDraft = {
+      ...(profileDrafts[editingProvider] || {}),
+      baseUrl: values.baseUrl || '',
+      model: values.model || '',
+    }
+    if (visibleApiKey) currentDraft.apiKey = visibleApiKey
+    const nextDrafts = { ...profileDrafts, [editingProvider]: currentDraft }
+    const target = nextDrafts[provider] || { baseUrl: config.baseUrl, model: config.defaultModel, hasApiKey: false }
+    setProfileDrafts(nextDrafts)
+    setEditingProvider(provider)
     form.setFieldsValue({
-      aiProvider: key,
-      baseUrl: config.baseUrl,
-      model: config.defaultModel,
+      aiProvider: provider,
+      baseUrl: target.baseUrl,
+      model: target.model,
+      apiKey: target.apiKey || '',
     })
     setModels([])
     setModelFetchError(null)
     setActiveTab('ai')
-    message.success(`已切换到 ${config.name}${settings.hasApiKey ? '，可直接获取模型' : '，请配置 API Key'}`)
   }
 
   const selectedProvider = Form.useWatch('aiProvider', form) as AIProvider | undefined
-  const currentProvider = selectedProvider || settings.aiProvider
+  const currentProvider = selectedProvider || editingProvider
+  const currentProfileHasKey = !!profileDrafts[editingProvider]?.hasApiKey
 
   const handleFetchModels = async () => {
     const values = form.getFieldsValue(true)
     const draftApiKey = apiKeyInputRef.current?.input?.value?.trim() || values.apiKey || ''
-    if (!draftApiKey && !settings.hasApiKey) {
+    if (!draftApiKey && !currentProfileHasKey) {
       message.warning('请先填写 API Key')
       return
     }
@@ -191,7 +212,7 @@ export default function Settings() {
     setFetchingModels(true)
     setModelFetchError(null)
     try {
-      const result = await window.electronAPI.listModels({ baseUrl, apiKey: draftApiKey || undefined })
+      const result = await window.electronAPI.listModels({ baseUrl, apiKey: draftApiKey || undefined, provider })
       if (result.success && result.models && result.models.length > 0) {
         setModels(result.models)
         const currentModel = form.getFieldValue('model')
@@ -227,13 +248,13 @@ export default function Settings() {
   const handleTestConnection = async () => {
     const values = form.getFieldsValue(true)
     const draftApiKey = apiKeyInputRef.current?.input?.value?.trim() || values.apiKey || ''
-    if (!draftApiKey && !settings.hasApiKey) {
+    if (!draftApiKey && !currentProfileHasKey) {
       message.info('请先输入 API Key')
       return
     }
     setTestingConnection(true)
     try {
-      const result = await window.electronAPI.listModels({ baseUrl: values.baseUrl, apiKey: draftApiKey || undefined })
+      const result = await window.electronAPI.listModels({ baseUrl: values.baseUrl, apiKey: draftApiKey || undefined, provider: editingProvider })
       if (!result.success) throw new Error(result.error || '连接失败')
       setModels(result.models || [])
       message.success(`连接成功${result.models?.length ? `，获取到 ${result.models.length} 个模型` : ''}`)
@@ -305,9 +326,9 @@ export default function Settings() {
     <Space direction="vertical" size={16} style={{ width: '100%' }} className="ai-settings">
       <div className="ai-settings__heading">
         <div><Title level={3}>AI 配置</Title><Text type="secondary">选择服务商并配置模型，图片识别能力可按需开启。</Text></div>
-        <Tag color={settings.hasApiKey && !settings.apiKeyDecryptError ? 'success' : 'warning'} className="ai-settings__status">
-          <Badge status={settings.hasApiKey && !settings.apiKeyDecryptError ? 'success' : 'warning'} />
-          {settings.hasApiKey && !settings.apiKeyDecryptError ? '密钥已安全配置' : '等待配置密钥'}
+        <Tag color={currentProfileHasKey ? 'success' : 'warning'} className="ai-settings__status">
+          <Badge status={currentProfileHasKey ? 'success' : 'warning'} />
+          {currentProfileHasKey ? '当前服务商密钥已配置' : '当前服务商等待配置密钥'}
         </Tag>
       </div>
       <div className="ai-settings__workspace">
@@ -318,7 +339,7 @@ export default function Settings() {
               const active = currentProvider === key
               return <button type="button" key={key} className={`provider-item${active ? ' provider-item--active' : ''}`} onClick={() => applyProvider(key)}>
                 <span className="provider-item__icon"><ApiOutlined /></span>
-                <span className="provider-item__copy"><strong>{config.name}</strong><small>{config.defaultModel || '自定义模型'}</small></span>
+                <span className="provider-item__copy"><strong>{config.name}{defaultProvider === key && <Tag color="blue" bordered={false} className="provider-item__default">默认</Tag>}</strong><small>{profileDrafts[key as AIProvider]?.model || config.defaultModel || '自定义模型'}</small></span>
                 {active ? <CheckCircleOutlined className="provider-item__check" /> : <RightOutlined className="provider-item__arrow" />}
               </button>
             })}
@@ -332,15 +353,15 @@ export default function Settings() {
             <div className="config-section__header">
               <span className="config-section__icon"><SafetyCertificateOutlined /></span>
               <div><Title level={5}>访问凭据</Title><Text type="secondary">密钥使用系统安全存储，不会在界面显示明文。</Text></div>
-              {settings.hasApiKey && <Tag color="success">已配置</Tag>}
+              {currentProfileHasKey && <Tag color="success">已配置</Tag>}
             </div>
-            <Form.Item name="apiKey" rules={[{ required: !settings.hasApiKey, message: '请输入 API Key' }]} extra={settings.hasApiKey ? '已保存原密钥；输入新密钥后保存即可替换，留空保存则保持原密钥' : '支持 ⌘V、右键粘贴，或点击右侧“粘贴”按钮'}>
+            <Form.Item name="apiKey" rules={[{ required: !currentProfileHasKey, message: '请输入 API Key' }]} extra={currentProfileHasKey ? '此服务商已保存密钥；输入新密钥可替换，留空则保持原密钥' : '每个服务商独立保存密钥；支持 ⌘V、右键粘贴或点击“粘贴”'}>
               <Space.Compact style={{ width: '100%' }}>
-                <Input.Password ref={apiKeyInputRef} size="large" placeholder={settings.hasApiKey ? '在这里输入或粘贴新密钥' : '在这里输入或粘贴 API Key'} />
+                <Input.Password ref={apiKeyInputRef} size="large" placeholder={currentProfileHasKey ? '输入新密钥以替换（留空则不变）' : `输入 ${providerConfigs[editingProvider].name} API Key`} />
                 <Button size="large" icon={<CopyOutlined />} onClick={handlePasteApiKey}>粘贴</Button>
               </Space.Compact>
             </Form.Item>
-            {settings.apiKeyDecryptError && <Alert type="warning" showIcon message="原密钥无法解密，请重新输入并保存" />}
+            {profileDrafts[editingProvider]?.apiKeyDecryptError && <Alert type="warning" showIcon message="此服务商的原密钥无法解密，请重新输入并保存" />}
           </section>
           <Divider />
           <section className="config-section">
@@ -355,6 +376,14 @@ export default function Settings() {
               <Form.Item name="baseUrl" label="API 地址" extra="选择服务商后自动填写，也可改为兼容接口地址"><Input placeholder="OpenAI 兼容接口地址" /></Form.Item>
             </div>
             <Button icon={<ReloadOutlined />} loading={testingConnection} onClick={handleTestConnection}>测试连接</Button>
+            <Button
+              type={defaultProvider === editingProvider ? 'primary' : 'default'}
+              icon={<CheckCircleOutlined />}
+              disabled={defaultProvider === editingProvider}
+              onClick={() => { setDefaultProvider(editingProvider); message.success(`${providerConfigs[editingProvider].name} 已设为默认，保存设置后生效`) }}
+              style={{ marginLeft: 10 }}
+            >{defaultProvider === editingProvider ? '当前默认模型' : '设为默认模型'}</Button>
+            <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>默认模型用于新建对话、文档生成和图片任务；切换服务商仅编辑配置，不会自动改变默认模型。</Text>
           </section>
           <Collapse ghost className="advanced-settings" items={[{ key: 'advanced', label: <Space><SettingOutlined /><Text strong>高级设置</Text><Text type="secondary">推荐配置与存储诊断</Text></Space>, children: <>
             <Text type="secondary">快速应用推荐配置</Text>

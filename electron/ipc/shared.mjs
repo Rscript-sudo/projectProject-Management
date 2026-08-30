@@ -269,6 +269,17 @@ export function getSettings() {
           merged._apiKeyDecryptError = decrypted.decryptError
         }
       }
+      if (merged.aiProfiles && typeof merged.aiProfiles === 'object') {
+        merged.aiProfiles = Object.fromEntries(Object.entries(merged.aiProfiles).map(([provider, profile]) => {
+          const next = { ...(profile || {}) }
+          if (next.apiKey && typeof next.apiKey === 'object') {
+            const decrypted = decryptSecret(next.apiKey)
+            next.apiKey = decrypted
+            if (decrypted && typeof decrypted === 'object' && decrypted.decryptError) next._apiKeyDecryptError = decrypted.decryptError
+          }
+          return [provider, next]
+        }))
+      }
       // 把 settings.json 里的 customProjectTypes 注入运行时缓存
       // （供 aiService / normalizeProjectType / 项目类型 Select 用）
       setCustomProjectTypes(merged.customProjectTypes || [])
@@ -288,8 +299,13 @@ export function getSettingsForFrontend() {
   const settings = getSettings()
   const { apiKey, _apiKeyDecryptError, ...rest } = settings
   const apiKeyDecryptError = _apiKeyDecryptError || null
+  const aiProfiles = Object.fromEntries(Object.entries(settings.aiProfiles || {}).map(([provider, profile]) => {
+    const { apiKey: profileKey, _apiKeyDecryptError: profileDecryptError, ...profileRest } = profile || {}
+    return [provider, { ...profileRest, hasApiKey: !!profileKey && !profileDecryptError, apiKeyDecryptError: profileDecryptError || null }]
+  }))
   return {
     ...rest,
+    aiProfiles,
     hasApiKey: !!apiKey && !apiKeyDecryptError,
     apiKeyDecryptError,
     // 明文存储标志（true = 不用加密，直接落明文）
@@ -313,6 +329,26 @@ export function saveSettings(settings) {
     if (incomingApiKey) toSave.apiKey = encryptSecret(incomingApiKey)
     else if (existingRaw.apiKey !== undefined) toSave.apiKey = existingRaw.apiKey
     else delete toSave.apiKey
+    if (settings.aiProfiles && typeof settings.aiProfiles === 'object') {
+      const existingProfiles = existingRaw.aiProfiles || {}
+      toSave.aiProfiles = Object.fromEntries(Object.entries(settings.aiProfiles).map(([provider, profile]) => {
+        const existingProfile = existingProfiles[provider] || {}
+        const incomingProfileKey = typeof profile?.apiKey === 'string' ? profile.apiKey.trim() : ''
+        const next = { ...existingProfile, ...(profile || {}) }
+        delete next.hasApiKey
+        delete next.apiKeyDecryptError
+        if (incomingProfileKey) next.apiKey = encryptSecret(incomingProfileKey)
+        else if (existingProfile.apiKey !== undefined) next.apiKey = existingProfile.apiKey
+        else delete next.apiKey
+        return [provider, next]
+      }))
+      const active = toSave.aiProfiles[toSave.aiProvider]
+      if (active) {
+        toSave.baseUrl = active.baseUrl || toSave.baseUrl
+        toSave.model = active.model || toSave.model
+        if (active.apiKey !== undefined) toSave.apiKey = active.apiKey
+      }
+    }
     // ====== 校验 customProjectTypes / customDocTypes ======
     if (Array.isArray(toSave.customProjectTypes)) {
       toSave.customProjectTypes = sanitizeCustomProjectTypes(toSave.customProjectTypes)
