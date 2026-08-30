@@ -49,6 +49,13 @@ interface DirTreeProps {
   onRefresh?: () => void
 }
 
+interface DirTreeDataNode extends DataNode {
+  path: string
+  name: string
+  type: DirNode['type']
+  ext?: string
+}
+
 export default function DirTree({ dirTree, onFileClick, onFolderSelect, onFileDelete, onRefresh }: DirTreeProps) {
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([])
   const [selectedKey, setSelectedKey] = useState<React.Key | null>(null)
@@ -83,19 +90,20 @@ export default function DirTree({ dirTree, onFileClick, onFolderSelect, onFileDe
     )
   }
 
-  const handleDeleteRequest = (filePath: string, fileName: string) => {
+  const handleDeleteRequest = (node: DirNode) => {
+    const isFolder = node.type === 'folder'
     modal.confirm({
       title: '确认删除',
-      content: `确定要删除文件"${fileName}"吗？此操作不可撤销。`,
-      okText: '删除',
+      content: `确定要将${isFolder ? '文件夹' : '文件'}"${node.name}"移入系统废纸篓吗？`,
+      okText: '移入废纸篓',
       okType: 'danger',
       okButtonProps: { danger: true },
       onOk: async () => {
         if (!onFileDelete) return
         try {
-          const ok = await onFileDelete(filePath)
+          const ok = await onFileDelete(node.path)
           if (ok) {
-            message.success(`"${fileName}" 已删除`)
+            message.success(`"${node.name}" 已移入废纸篓`)
           }
         } catch (e: any) {
           message.error('删除失败：' + (e?.message || '未知错误'))
@@ -155,6 +163,7 @@ export default function DirTree({ dirTree, onFileClick, onFolderSelect, onFileDe
   // 右键菜单项
   const buildContextMenu = (node: DirNode) => {
     const isFolder = node.type === 'folder'
+    const isRoot = node.path === dirTree.path
     const items = [
       {
         key: 'open',
@@ -181,10 +190,11 @@ export default function DirTree({ dirTree, onFileClick, onFolderSelect, onFileDe
       { type: 'divider' as const },
       {
         key: 'delete',
-        label: '删除',
+        label: isRoot ? '项目根目录请在项目管理页删除' : '移入废纸篓',
         icon: <DeleteOutlined />,
         danger: true,
-        onClick: () => handleDeleteRequest(node.path, node.name),
+        disabled: isRoot,
+        onClick: () => handleDeleteRequest(node),
       },
     ]
     return { items }
@@ -229,7 +239,7 @@ export default function DirTree({ dirTree, onFileClick, onFolderSelect, onFileDe
     hoverTimerRef.current = setTimeout(() => setHoveredFile(null), 200)
   }
 
-  const dirToTreeData = (node: DirNode): DataNode => {
+  const dirToTreeData = (node: DirNode): DirTreeDataNode => {
     const isRoot = node.path === dirTree.path
     const isFolder = node.type === 'folder'
     const childCount = node.children?.length || 0
@@ -237,6 +247,9 @@ export default function DirTree({ dirTree, onFileClick, onFolderSelect, onFileDe
     if (isFolder) {
       return {
         key: node.path,
+        path: node.path,
+        name: node.name,
+        type: node.type,
         title: (
           <span style={{
             fontSize: 12,
@@ -263,6 +276,10 @@ export default function DirTree({ dirTree, onFileClick, onFolderSelect, onFileDe
     } else {
       return {
         key: node.path,
+        path: node.path,
+        name: node.name,
+        type: node.type,
+        ext: node.ext,
         title: (
           <span
             style={{
@@ -345,7 +362,7 @@ export default function DirTree({ dirTree, onFileClick, onFolderSelect, onFileDe
           <button
             type="button"
             className="file-delete-btn"
-            onClick={() => handleDeleteRequest(hoveredFile.path, hoveredFile.name)}
+            onClick={() => handleDeleteRequest({ path: hoveredFile.path, name: hoveredFile.name, type: 'file' })}
             title="删除文件"
           >
             <DeleteOutlined style={{ marginRight: 2 }} />

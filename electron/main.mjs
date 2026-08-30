@@ -226,7 +226,7 @@ app.whenReady().then(async () => {
   archiveLegacyTemplateLibrary()
 
   mainWindow = createWindow()
-  registerAll(ipcMain, mainWindow)
+  registerAll(ipcMain, mainWindow, shell)
 
   // v1.3.2：模板做减法 — 迁移 templates/专业/ 到企业模板库（仅首次，幂等）
   try {

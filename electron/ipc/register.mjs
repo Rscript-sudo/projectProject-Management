@@ -28,9 +28,9 @@ import { setCustomDocTypeCodes } from './filename.mjs'
 import { setCustomDocTypePrefixes } from './numbering.mjs'
 import { setCustomStructuredDocTypes } from '../templateService.mjs'
 
-export function registerAll(ipcMain, mainWindow) {
+export function registerAll(ipcMain, mainWindow, shellApi) {
   registerProject(ipcMain)
-  registerFile(ipcMain)
+  registerFile(ipcMain, { trashItem: shellApi?.trashItem })
   registerDoc(ipcMain)
   registerSettings(ipcMain)
   registerShell(ipcMain, mainWindow)

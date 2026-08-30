@@ -11,7 +11,7 @@ import { isPathSafe } from '../shared/pathSafety.mjs'
  */
 export { isPathSafe } from '../shared/pathSafety.mjs'
 
-export function register(ipcMain) {
+export function register(ipcMain, { trashItem } = {}) {
   ipcMain.handle('fs:getDirTree', (_, dirPath, maxDepth = 2) => {
     try {
       if (!dirPath || !isPathSafe(dirPath)) {
@@ -101,10 +101,12 @@ export function register(ipcMain) {
     return { success: true }
   }))
 
-  ipcMain.handle('fs:deleteFile', safeCall((_, filePath) => {
+  ipcMain.handle('fs:deleteFile', safeCall(async (_, filePath) => {
+    if (!filePath || typeof filePath !== 'string') return { success: false, error: '文件路径无效' }
     if (!fs.existsSync(filePath)) return { success: false, error: '文件不存在' }
     if (!isPathSafe(filePath)) return { success: false, error: '禁止删除系统目录文件' }
-    fs.unlinkSync(filePath)
+    if (typeof trashItem !== 'function') return { success: false, error: '系统废纸篓不可用' }
+    await trashItem(filePath)
     return { success: true }
   }))
 
