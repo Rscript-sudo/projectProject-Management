@@ -5,6 +5,10 @@
 
 ---
 
+## v1.4.1 · 2026-08-30
+
+- fix: Windows CI 改用专用 `build:win` 命令，确保 `--publish never` 正确传给 electron-builder，再由 Release Action 统一上传产物
+
 ## v1.4.0 · 2026-08-30
 
 ### 全局规则中心与规则分层

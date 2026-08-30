@@ -41,7 +41,7 @@ jobs:
       # 5. 构建前端 + electron-builder 出 Windows 包
       #    --publish never：不依赖 electron-builder 自带的发布逻辑（用 action-gh-release 更可控）
       - name: Build Windows installer
-        run: npm run build -- --win --publish never
+        run: npm run build:win
 
       # 6. 上传产物到 Actions 页面（保留 30 天，方便手动下载）
       - name: Upload EXE artifacts
