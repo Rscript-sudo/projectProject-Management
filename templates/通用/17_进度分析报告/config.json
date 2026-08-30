@@ -63,7 +63,7 @@
     "{{编制人}}": {
       "source": "param",
       "key": "creator",
-      "default": "虚竹"
+      "default": ""
     },
     "{{审核人}}": {
       "source": "param",

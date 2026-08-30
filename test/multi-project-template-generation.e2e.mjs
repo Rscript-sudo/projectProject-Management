@@ -44,6 +44,7 @@ async function main() {
   registerAll(ipcMain, null)
 
   const root = path.join(runtimeDir, 'projects')
+  assert.equal((await call('settings:set', { projectRoot: root })).success, true)
   const docType = '监理周报'
   const base = path.resolve('templates/通用/02_监理周报/监理周报模板.docx')
   const variants = [
@@ -58,6 +59,8 @@ async function main() {
     variant.result = await call('fs:importTemplateToLibrary', { sourcePath: variant.path, docType, scope: variant.scope, projectType: variant.projectType, name: variant.name })
     assert.equal(variant.result.success, true)
     assert.ok(variant.result.template.fields.includes(variant.field), `${variant.name} 应识别其特有字段`)
+    const configured = await call('template:markRuleConfigured', { id: variant.result.template.id })
+    assert.equal(configured.ok, true, `${variant.name} 应在 AI 规则确认后启用`)
   }
 
   const projects = [

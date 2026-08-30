@@ -16,11 +16,13 @@ export const PAGE = Object.freeze({
 })
 
 export const FONTS = Object.freeze({
-  title: '方正小标宋简体',
-  heading: 'Heiti SC',
-  subheading: 'Kaiti SC',
-  body: 'FangSong_GB2312',
-  pageNumber: 'Songti SC',
+  // PingFang SC 在 macOS/LibreOffice/WPS 的中英文回退最稳定；旧公文字体
+  // 在未安装 Office 字体的机器上会只显示数字和拉丁字符，中文正文整段消失。
+  title: 'PingFang SC',
+  heading: 'PingFang SC',
+  subheading: 'PingFang SC',
+  body: 'PingFang SC',
+  pageNumber: 'PingFang SC',
 })
 
 const bodyStyles = Object.freeze({
@@ -43,8 +45,8 @@ const tableCellStyles = Object.freeze({
   h2: Object.freeze({ font: FONTS.body, size: 28, bold: false, align: 'justify', before: 0, after: 0, firstLine: 560, keepNext: true }),
   h3: Object.freeze({ font: FONTS.body, size: 28, bold: false, align: 'justify', before: 0, after: 0, firstLine: 0, left: 560, hanging: 560, keepNext: true }),
   h4: Object.freeze({ font: FONTS.body, size: 28, bold: false, align: 'justify', before: 0, after: 0, firstLine: 560, keepNext: true }),
-  body: Object.freeze({ font: FONTS.body, size: 28, bold: false, align: 'justify', before: 0, after: 0, firstLine: 560, line: 480 }),
-  closing: Object.freeze({ font: FONTS.body, size: 28, bold: false, align: 'right', before: 180, after: 0, firstLine: 0, line: 480 }),
+  body: Object.freeze({ font: FONTS.body, size: 28, bold: false, align: 'justify', before: 0, after: 0, firstLine: 560, line: 420 }),
+  closing: Object.freeze({ font: FONTS.body, size: 28, bold: false, align: 'right', before: 120, after: 0, firstLine: 0, line: 420 }),
   meta: Object.freeze({ font: FONTS.body, size: 24, bold: false, align: 'left', before: 0, after: 60, firstLine: 0, line: 400 }),
 })
 
@@ -88,6 +90,6 @@ export function formatAuditFromXml(documentXml = '', stylesXml = '', docType = '
   if (!options.preserveTemplateLayout && !['top', 'bottom', 'left', 'right'].every(key => marginTag.includes(`w:${key}="${margin[key]}"`))) issues.push('页边距未统一')
   if (/\{\{|\}\}|【待补充正文内容】|待补充正文内容/.test(documentXml)) issues.push('存在未完成占位内容')
   if (!documentXml.includes('<w:t')) issues.push('文档正文为空')
-  if (!options.preserveTemplateLayout && !/FangSong_GB2312|仿宋_GB2312|仿宋|Songti SC|宋体|Arial Unicode MS/.test(`${documentXml}${stylesXml}`)) issues.push('缺少可用中文正文字体')
+  if (!options.preserveTemplateLayout && !/FangSong_GB2312|仿宋_GB2312|仿宋|Songti SC|宋体|Arial Unicode MS|PingFang SC/.test(`${documentXml}${stylesXml}`)) issues.push('缺少可用中文正文字体')
   return { valid: issues.length === 0, issues, layer: profile.layer, version: profile.version, specId: profile.specId }
 }

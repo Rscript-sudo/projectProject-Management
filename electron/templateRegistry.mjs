@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url'
 import { normalizeProjectType } from '../src/shared/projectProfile.mjs'
 import { getTemplateScopeDir, getTemplateWorkspaceRoot } from './templateWorkspace.mjs'
 import { isTemplateReady } from '../src/shared/templateReadiness.mjs'
+import { extractTemplateLayoutContract, getTemplateLayoutContractPath } from './templateLayoutContract.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -74,7 +75,11 @@ export function normalizeTemplateLibrary(userDataPath) {
     const originalDocType = String(entry.docType || entry.name || '未命名模板')
     const cleanedDocType = cleanTemplateDocType(originalDocType)
     if (originalDocType !== cleanedDocType) renamedDocTypes[originalDocType] = cleanedDocType
-    const projectLabel = entry.scope === 'professional' ? (entry.projectTypeLabel || entry.projectType || '未分类') : '通用'
+    const projectLabel = entry.scope === 'professional'
+      ? (entry.projectTypeLabel || entry.projectType || '未分类')
+      : (entry.scope === 'other' || entry.scope === 'personal')
+        ? (entry.projectTypeLabel || entry.projectType || '通用')
+        : '通用'
     const key = `${entry.scope}:${entry.projectTypeLabel || entry.projectType || '通用'}:${cleanedDocType}`
     const sourcePath = entry.path && fs.existsSync(entry.path) ? entry.path : ''
     if (seen.has(key)) {
@@ -153,6 +158,23 @@ export async function deleteProfessionalCategory(userDataPath, projectType, { tr
   return { ok: true, removedTemplates: removed.length, trashed: fs.existsSync(categoryDir) === false }
 }
 
+/** 删除用户自定义模板文件夹，同步清理文件夹内的模板登记。 */
+export async function deleteTemplateCategory(userDataPath, scope, category, { trashItem } = {}) {
+  if (!['personal', 'other'].includes(scope)) return { ok: false, error: '只允许删除用户自定义模板文件夹' }
+  const label = String(category || '').trim()
+  if (!label || /[\\/:*?"<>|]/.test(label)) return { ok: false, error: '文件夹名称无效' }
+  const registry = readRegistry(userDataPath)
+  const removed = registry.templates.filter(item => item.scope === scope && (item.projectTypeLabel === label || item.projectType === label))
+  const categoryDir = path.join(getTemplateScopeDir(userDataPath, scope), label)
+  if (fs.existsSync(categoryDir)) {
+    if (typeof trashItem !== 'function') return { ok: false, error: '系统废纸篓不可用' }
+    await trashItem(categoryDir)
+  }
+  registry.templates = registry.templates.filter(item => !removed.some(candidate => candidate.id === item.id))
+  writeRegistry(userDataPath, registry)
+  return { ok: true, removedTemplates: removed.length, trashed: !fs.existsSync(categoryDir) }
+}
+
 /**
  * v1.x：按 projectType + docType 过滤企业库（新增）
  * 供模板中心 UI 用：选专业 + docType 时调用
@@ -215,9 +237,11 @@ export async function updateTemplateInLibrary(userDataPath, id, { name, sourcePa
     fs.copyFileSync(sourcePath, entry.path)
     const { getTemplatePlaceholders } = await import('./templateService.mjs')
     entry.fields = await getTemplatePlaceholders(entry.path)
+    const layoutContract = await extractTemplateLayoutContract(entry.path, { docType: entry.docType, write: true })
+    entry.layoutContract = { path: getTemplateLayoutContractPath(entry.path), templateHash: layoutContract.templateHash, schemaVersion: layoutContract.schemaVersion, status: 'ready', warningCount: layoutContract.warnings.length }
     entry.sourceName = path.basename(sourcePath)
-    // 文件内容已替换，旧模板上的规则确认不能沿用。
-    delete entry.aiRuleConfiguredAt
+    // 文件内容已替换，旧模板上的规则确认不能沿用；保留曾配置记录，供界面明确显示“需更新”。
+    if (entry.aiRuleConfiguredAt) entry.aiRuleNeedsUpdate = true
   }
   entry.updatedAt = new Date().toISOString()
   writeRegistry(userDataPath, registry)
@@ -230,6 +254,7 @@ export function markTemplateRuleConfigured(userDataPath, id) {
   const entry = registry.templates.find(item => item.id === id)
   if (!entry) return { ok: false, error: '模板不存在' }
   entry.aiRuleConfiguredAt = new Date().toISOString()
+  delete entry.aiRuleNeedsUpdate
   entry.updatedAt = entry.aiRuleConfiguredAt
   writeRegistry(userDataPath, registry)
   return { ok: true, template: entry }
@@ -257,14 +282,15 @@ export async function importTemplateToLibrary({ userDataPath, sourcePath, docTyp
     // v1.x：用运行时全量文种（含 customDocTypes）做校验
   const supported = getSupportedDocTypes()
   if (!supported.includes(docType)) throw new Error(`不支持的文种：${docType}`)
-  if (!fs.existsSync(sourcePath) || path.extname(sourcePath).toLowerCase() !== '.docx') throw new Error('请选择有效的 Word 模板文件')
+  if (!fs.existsSync(sourcePath) || !/\.(docx|xlsx)$/i.test(sourcePath)) throw new Error('请选择有效的 Word 或 Excel 模板文件')
   if (!['global', 'professional', 'other', 'personal'].includes(scope)) throw new Error('模板范围无效')
 
   const registry = readRegistry(userDataPath)
   const id = `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   const extension = path.extname(sourcePath).toLowerCase()
   const safeDocType = cleanTemplateDocType(docType).replace(/[\\/:*?"<>|]/g, '_')
-  const targetDir = path.join(getTemplateScopeDir(userDataPath, scope), scope === 'professional' ? (projectType || '未分类') : '通用', safeDocType)
+  const categoryLabel = scope === 'professional' ? (projectType || '未分类') : scope === 'other' || scope === 'personal' ? (projectType || '通用') : '通用'
+  const targetDir = path.join(getTemplateScopeDir(userDataPath, scope), categoryLabel, safeDocType)
   fs.mkdirSync(targetDir, { recursive: true })
   // 同一分类、同一文种只保留一个正式模板，不再产生“变体 1/2”式名称。
   const targetPath = path.join(targetDir, `${safeDocType}模板${extension}`)
@@ -279,9 +305,18 @@ export async function importTemplateToLibrary({ userDataPath, sourcePath, docTyp
   }
   registry.templates = registry.templates.filter(item => !existing.some(duplicate => duplicate.id === item.id))
   fs.copyFileSync(sourcePath, targetPath)
+  // XLSX 的单元格占位符映射保存在同目录 config.json；导入时必须一起带入，
+  // 否则文件虽然复制成功，后续扫描和生成却无法知道字段对应哪个单元格。
+  if (extension === '.xlsx') {
+    const sourceConfig = path.join(path.dirname(sourcePath), 'config.json')
+    if (fs.existsSync(sourceConfig)) fs.copyFileSync(sourceConfig, path.join(targetDir, 'config.json'))
+  }
   // 在导入时即扫描占位符：用户无需研究模板语法，也能判断模板是否可直接生成。
   const { getTemplatePlaceholders } = await import('./templateService.mjs')
   const fields = await getTemplatePlaceholders(targetPath)
+  const layoutContract = extension === '.docx'
+    ? await extractTemplateLayoutContract(targetPath, { docType, write: true })
+    : null
   const entry = {
     id,
     name: safeDocType,
@@ -289,13 +324,20 @@ export async function importTemplateToLibrary({ userDataPath, sourcePath, docTyp
     scope,
     // v1.x：projectType 存 code 便于 normalizeProjectType 反查；
     // 老数据是 label，写入时统一转 code；保留 label 给 UI 显示
-    projectType: scope === 'global' || scope === 'other'
+    projectType: scope === 'global'
       ? 'global'  // sentinel：global 永远命中
-      : (normalizeProjectType(projectType) || 'unclassified'),
-    projectTypeLabel: projectType,  // UI 显示用
+      : scope === 'professional' ? (normalizeProjectType(projectType) || 'unclassified') : categoryLabel,
+    projectTypeLabel: categoryLabel,  // UI 显示用
     path: targetPath,
     sourceName: `${safeDocType}模板${extension}`,
     fields,
+    layoutContract: layoutContract ? {
+      path: getTemplateLayoutContractPath(targetPath),
+      templateHash: layoutContract.templateHash,
+      schemaVersion: layoutContract.schemaVersion,
+      status: 'ready',
+      warningCount: layoutContract.warnings.length,
+    } : undefined,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
@@ -311,7 +353,14 @@ export async function refreshTemplateLibraryEntry({ userDataPath, templateId }) 
   if (!entry) throw new Error('未找到企业模板')
   if (!fs.existsSync(entry.path)) throw new Error('企业模板文件不存在')
   const { getTemplatePlaceholders } = await import('./templateService.mjs')
+  const previousFields = Array.isArray(entry.fields) ? [...entry.fields].sort() : []
   entry.fields = await getTemplatePlaceholders(entry.path)
+  if (path.extname(entry.path).toLowerCase() === '.docx') {
+    const layoutContract = await extractTemplateLayoutContract(entry.path, { docType: entry.docType, write: true })
+    entry.layoutContract = { path: getTemplateLayoutContractPath(entry.path), templateHash: layoutContract.templateHash, schemaVersion: layoutContract.schemaVersion, status: 'ready', warningCount: layoutContract.warnings.length }
+  }
+  const currentFields = [...entry.fields].sort()
+  if (entry.aiRuleConfiguredAt && JSON.stringify(previousFields) !== JSON.stringify(currentFields)) entry.aiRuleNeedsUpdate = true
   entry.updatedAt = new Date().toISOString()
   writeRegistry(userDataPath, registry)
   return entry

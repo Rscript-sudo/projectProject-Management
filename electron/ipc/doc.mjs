@@ -47,7 +47,7 @@ export function register(ipcMain) {
     //   避免任何非前端入口（如直接 IPC）绕开后处理
     const _guardResult = postProcessFabricationGuard(content || '')
     let _processedContent = _guardResult.content
-    _processedContent = postProcessTimeFields(_processedContent)
+    _processedContent = postProcessTimeFields(_processedContent, { sourceText: userInput })
     if (_guardResult.warnings.length > 0) {
       console.warn('[saveDoc] 反编造告警:', _guardResult.warnings.join('；'))
     }
@@ -110,17 +110,23 @@ export function register(ipcMain) {
     let finalSubDir = subDir
     let filenameMeta = null
     if (!finalFileName) {
-      // 自动决定修订版本（如果没传 version 且用了 customSummary）
-      let autoVersion = version
-      if (!autoVersion && customSummary) {
-        autoVersion = nextVersion(projectPath, docType, customSummary)
-      }
-      const built = buildFileName({
+      // 所有自动命名文件都必须检查修订版号。旧逻辑只在 customSummary
+      // 非空时检查，使用默认摘要连续生成会覆盖同名首版。
+      const baseName = buildFileName({
         docType,
         projectName,
         customSummary: customSummary || '',
-        version: autoVersion,
+        version: '',
       })
+      const autoVersion = version || nextVersion(projectPath, docType, baseName.summary)
+      const built = autoVersion
+        ? buildFileName({
+            docType,
+            projectName,
+            customSummary: customSummary || '',
+            version: autoVersion,
+          })
+        : baseName
       finalFileName = built.fileName
       finalSubDir = subDir || getFilenameSubDir(docType)
       filenameMeta = built
@@ -140,7 +146,7 @@ export function register(ipcMain) {
     console.debug('[saveDoc] Saving:', { docType, projectName, fileName: finalFileName, subDir: finalSubDir, ...(filenameMeta || {}) })
 
     const templatesDir = getTemplatesDir()
-    const { findTemplate, buildPlaceholderData, renderTemplate, renderXlsxTemplate, formatDocx, validateDocxFormatting } = await import('../templateService.mjs')
+    const { findTemplate, getTemplatePlaceholders, buildPlaceholderData, renderTemplate, renderXlsxTemplate, getXlsxPlaceholderResidues, formatDocx, validateDocxFormatting } = await import('../templateService.mjs')
     let projectConfig = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', templateOverrides: {} }
     const configPath = path.join(getProjectDataPath(projectName), 'project.config.json')
     if (fs.existsSync(configPath)) {
@@ -162,6 +168,18 @@ export function register(ipcMain) {
       // 先预览编号，全部渲染和校验通过后再正式占号，避免失败文件造成跳号。
       const previewAutoNumber = previewNumber(docType, projectName)
 
+      const engine = template.config.engine || 'docx'
+      let layoutContract = null
+      if (engine === 'docx') {
+        const { loadOrCreateTemplateLayoutContract } = await import('../templateLayoutContract.mjs')
+        const layout = await loadOrCreateTemplateLayoutContract(template.templatePath, {
+          docType,
+          // 系统安装目录可能只读；用户、企业和项目模板才持久化旁车合同。
+          write: template.source !== 'global',
+        })
+        layoutContract = layout.contract
+      }
+
       const data = buildPlaceholderData({
         docType,
         projectName,
@@ -174,16 +192,17 @@ export function register(ipcMain) {
         userInput,
         content,
         config: template.config,
+        // 用户模板通常没有相邻 config.json；以实体模板实际占位符作为结构化字段真相源。
+        templateFields: await getTemplatePlaceholders(template.templatePath),
         // v1.2.5：传项目类型，渲染前做禁用术语兜底（信息化项目去塔吊/扬尘/木工等）
         projectType: projectConfig.projectType || '',
+        layoutContract,
       })
 
       // 覆盖文件编号占位符
       data['文件编号'] = previewAutoNumber
 
       console.debug('[saveDoc] Placeholder keys:', Object.keys(data).join(', '))
-
-      const engine = template.config.engine || 'docx'
 
       const renderBuffer = async () => {
         if (engine === 'xlsx') {
@@ -195,14 +214,22 @@ export function register(ipcMain) {
           }))
           return renderXlsxTemplate(template.templatePath, data, cellMappings)
         }
-        return renderTemplate(template.templatePath, data)
+        return renderTemplate(template.templatePath, data, { layoutContract })
       }
       let buffer = await renderBuffer()
 
       fs.writeFileSync(temporarySavePath, buffer)
 
       if (engine !== 'xlsx') {
-        await formatDocx(temporarySavePath, true, docType)
+        // 实体模板只做正文换行与字体兼容处理，保留原页眉、页脚、Logo、
+        // 表格、边框和节属性。正式生成不得用结构化文档覆盖实体模板。
+        await formatDocx(temporarySavePath, true, docType, true)
+        const { validateRenderedTemplateAssets } = await import('../templateLayoutContract.mjs')
+        const assetCheck = await validateRenderedTemplateAssets(fs.readFileSync(temporarySavePath), layoutContract)
+        if (!assetCheck.valid) {
+          try { fs.unlinkSync(temporarySavePath) } catch {}
+          return { success: false, error: `模板资产保护校验失败：${[...assetCheck.missing.map(name => `缺失 ${name}`), ...assetCheck.changed.map(name => `被改写 ${name}`)].slice(0, 5).join('、')}。文件未保留。` }
+        }
       }
 
       // 渲染后再扫一次，防止模板默认值、空影像字段等绕过输入层校验。
@@ -219,6 +246,12 @@ export function register(ipcMain) {
           try { fs.unlinkSync(temporarySavePath) } catch {}
           return { success: false, error: `文档排版验收未通过：${formatCheck.issues.join('、')}。文件未保留。` }
         }
+      } else {
+        const xlsxResidues = await getXlsxPlaceholderResidues(buffer)
+        if (xlsxResidues.length) {
+          try { fs.unlinkSync(temporarySavePath) } catch {}
+          return { success: false, error: `表格模板渲染后仍有未替换占位符：${xlsxResidues.slice(0, 5).join('、')}。文件未保留。` }
+        }
       }
 
       if (preview) {
@@ -231,7 +264,15 @@ export function register(ipcMain) {
         data['文件编号'] = autoNumber
         buffer = await renderBuffer()
         fs.writeFileSync(temporarySavePath, buffer)
-        if (engine !== 'xlsx') await formatDocx(temporarySavePath, true, docType)
+        if (engine !== 'xlsx') {
+          await formatDocx(temporarySavePath, true, docType, true)
+          const { validateRenderedTemplateAssets } = await import('../templateLayoutContract.mjs')
+          const assetCheck = await validateRenderedTemplateAssets(fs.readFileSync(temporarySavePath), layoutContract)
+          if (!assetCheck.valid) {
+            try { fs.unlinkSync(temporarySavePath) } catch {}
+            return { success: false, error: '正式编号重渲染后模板页眉、页脚或 Logo 资产发生变化，文件未保留。' }
+          }
+        }
       }
       fs.renameSync(temporarySavePath, savePath)
       await updateLedger(projectPath, finalSubDir, finalFileName, docType, { ...meta, fileNumber: autoNumber, status: '正式件' })
@@ -289,7 +330,7 @@ export function register(ipcMain) {
     // v1.2.0：主进程入口反编造铁律（与 fs:saveDoc 同源）
     const _guardResult = postProcessFabricationGuard(content || '')
     let _processedContent = _guardResult.content
-    _processedContent = postProcessTimeFields(_processedContent)
+    _processedContent = postProcessTimeFields(_processedContent, { sourceText: userInput })
     if (_guardResult.warnings.length > 0) {
       console.warn('[exportPDF] 反编造告警:', _guardResult.warnings.join('；'))
     }

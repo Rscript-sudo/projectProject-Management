@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { App, Button, Card, Checkbox, Col, Empty, Input, Modal, Row, Select, Space, Table, Tabs, Tag, Timeline, Typography } from 'antd'
-import { ArrowLeftOutlined, EditOutlined, HistoryOutlined, PlusOutlined, StopOutlined } from '@ant-design/icons'
+import { App, Button, Card, Checkbox, Empty, Input, Modal, Select, Space, Table, Tabs, Tag, Timeline, Typography } from 'antd'
+import { ArrowLeftOutlined, EditOutlined, FolderOpenOutlined, HistoryOutlined, PlusOutlined, StopOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
 import { useElectronAPI } from '../hooks/useElectronAPI'
@@ -92,24 +92,27 @@ export default function ProjectArchiveView() {
     </Space> },
   ]
 
-  return <div style={{ padding: 24, maxWidth: 1280, margin: '0 auto' }}>
-    <Space style={{ marginBottom: 16 }}><Button icon={<ArrowLeftOutlined />} onClick={() => navigate(-1)}>返回</Button><Title level={4} style={{ margin: 0 }}>项目档案 · {projectName}</Title></Space>
-    <Row gutter={16}>
-      <Col span={17}>
-        <Card size="small">
+  return <div className="app-page">
+    <header className="app-page-header">
+      <div className="app-page-heading"><span className="app-page-heading__icon"><FolderOpenOutlined /></span><div className="app-page-heading__copy"><Title level={3} className="app-page-heading__title">项目档案</Title><Text className="app-page-heading__description">{projectName} · 维护参建单位、成员、阶段与 AI 事实证据</Text></div></div>
+      <div className="app-page-actions"><Button icon={<ArrowLeftOutlined />} onClick={() => navigate(-1)}>返回项目</Button></div>
+    </header>
+    <div className="app-responsive-grid">
+      <div>
+        <Card size="small" className="app-content-card">
           <Tabs activeKey={activeType} onChange={key => setActiveType(key as MasterType)}
             tabBarExtraContent={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { setEditing('new'); setForm({ effective_from: new Date().toISOString().slice(0, 10) }) }}>新增{config.label}</Button>}
             items={(Object.keys(TYPES) as MasterType[]).map(key => ({ key, label: `${TYPES[key].label}（${data[key].length}）`, children: data[key].length ? <Table size="small" rowKey="id" pagination={false} dataSource={data[key]} columns={key === activeType ? columns as any : []} /> : <Empty description={`暂无${TYPES[key].label}`} /> }))} />
         </Card>
-      </Col>
-      <Col span={7}>
-        <Card size="small" title="当前项目阶段" extra={<Button type="link" size="small" onClick={() => setPhaseOpen(true)}>切换</Button>} style={{ marginBottom: 16 }}>
+      </div>
+      <div className="app-stack">
+        <Card size="small" className="app-content-card" title="当前项目阶段" extra={<Button type="link" size="small" onClick={() => setPhaseOpen(true)}>切换</Button>}>
           {phases[0] ? <><Tag color="blue">{phases[0].phase}</Tag><Text type="secondary" style={{ fontSize: 11 }}>{phases[0].note}</Text></> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未设置阶段" />}
         </Card>
-        <Card size="small" title={<Space><HistoryOutlined />变更历史</Space>}>
+        <Card size="small" className="app-content-card" title={<Space><HistoryOutlined />变更历史</Space>}>
           <Timeline items={changes.slice(0, 20).map(item => ({ children: <div style={{ fontSize: 11 }}><Tag>{item.entity_type}</Tag>{item.action}<div style={{ color: '#999' }}>{new Date(item.changed_at).toLocaleString()}</div></div> }))} />
         </Card>
-        <Card size="small" title="AI 事实证据" extra={<Button type="link" size="small" onClick={() => setEvidenceOpen(true)}>新增</Button>} style={{ marginTop: 16 }}>
+        <Card size="small" className="app-content-card" title="AI 事实证据" extra={<Button type="link" size="small" onClick={() => setEvidenceOpen(true)}>新增</Button>}>
           {evidence.length ? <Space direction="vertical" style={{ width: '100%' }}>
             {evidence.slice(0, 8).map(item => <div key={item.id} style={{ borderBottom: '1px solid #f0f0f0', paddingBottom: 6 }}>
               <Space wrap><Text>E{item.id} · {item.title}</Text>{item.critical ? <Tag color="red">关键</Tag> : null}<Tag color={item.status === 'confirmed' ? 'green' : item.status === 'invalid' ? 'red' : 'gold'}>{item.status === 'confirmed' ? '已确认' : item.status === 'invalid' ? '已失效' : '待确认'}</Tag></Space>
@@ -117,8 +120,8 @@ export default function ProjectArchiveView() {
             </div>)}
           </Space> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无证据" />}
         </Card>
-      </Col>
-    </Row>
+      </div>
+    </div>
     <Modal open={!!editing} title={`${editing === 'new' ? '新增' : '变更'}${config.label}`} onCancel={() => setEditing(null)} onOk={save} okText="保存">
       <Space direction="vertical" style={{ width: '100%' }}>
         {config.fields.map(([key, label, options]) => <div key={key}><Text type="secondary">{label}</Text>{options ? <Select value={form[key]} onChange={value => setForm({ ...form, [key]: value })} options={options.map(value => ({ value, label: value }))} style={{ width: '100%' }} /> : <Input value={form[key] || ''} onChange={event => setForm({ ...form, [key]: event.target.value })} />}</div>)}

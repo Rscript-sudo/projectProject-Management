@@ -16,6 +16,7 @@ async function main() {
   const { closeDb } = await import('../electron/db/database.mjs')
   registerAll(ipcMain, null)
   const root = path.join(runtimeDir, 'projects')
+  assert.equal((await call('settings:set', { projectRoot: root })).success, true)
   const docType = '监理周报'
   const sourcePath = path.resolve('templates/通用/02_监理周报/监理周报模板.docx')
 
@@ -37,6 +38,7 @@ async function main() {
   const cloneRefresh = await call('fs:refreshTemplateLibraryEntry', cloned.template.id)
   assert.equal(cloneRefresh.success, true)
   assert.ok(cloneRefresh.template.fields.includes('集采部分内容'))
+  assert.equal((await call('template:markRuleConfigured', { id: cloned.template.id })).ok, true)
   const clonedContract = await call('fs:getProjectTemplateContract', beforeImport.path, docType)
   assert.equal(clonedContract.templateId, cloned.template.id, '企业副本应覆盖系统预置模板')
 
@@ -45,6 +47,8 @@ async function main() {
   assert.equal(global.success, true)
   assert.equal(professional.success, true)
   assert.ok(professional.template.fields.includes('集采部分内容'), '导入时应识别 Word 模板中的占位符')
+  assert.equal((await call('template:markRuleConfigured', { id: global.template.id })).ok, true)
+  assert.equal((await call('template:markRuleConfigured', { id: professional.template.id })).ok, true)
 
   const telecom = await call('fs:createProject', root, '通信项目', '通信工程')
   const information = await call('fs:createProject', root, '信息化项目', '信息化工程')

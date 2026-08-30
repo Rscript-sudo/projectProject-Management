@@ -10,15 +10,10 @@ const handlers = new Map()
 const ipcMain = { handle(channel, handler) { handlers.set(channel, handler) } }
 const call = async (channel, ...args) => handlers.get(channel)({}, ...args)
 
-function documentBody(docType, minimum) {
-  const seed = `本次信息化文档验收以项目实际资料为准。监理机构依据现行规范、设计文件、合同约定和已报审资料，对质量、进度、安全、资料及协调事项实施全过程控制。施工单位应落实责任人、完成时限和复核记录；涉及现场事实、工程量、日期及签字盖章的信息，均须由项目人员核实后签发。`
-  const repeat = Math.ceil((minimum + 120) / seed.length)
-  return seed.repeat(repeat)
-}
-
-function structuredContent(docType, minimum, fields) {
+function structuredContent(docType, _minimum, fields) {
+  const fullBody = `2026年8月13日，监理人员在信息化机房核对网络设备到货清单和安装记录。已到场设备12台，型号及数量与清单一致；其中2处设备标签与清单编号不一致，施工单位现场完成标签更正并提交复核记录。后续按照已确认的接口联调计划继续检查设备连线和记录完整性。`
   const values = {
-    '项目名称': '信息化文档生成验收项目',
+    '项目名称': '信息化文档全量验收项目',
     '建设单位': '测试建设单位',
     '施工单位': '测试施工单位',
     '监理单位': '测试监理单位',
@@ -27,39 +22,46 @@ function structuredContent(docType, minimum, fields) {
     '文件编号': 'TEST-202608-001',
     '事由': `${docType}信息化生成验收`,
     '主题': `${docType}信息化生成验收`,
-    '正文内容': documentBody(docType, minimum),
-    '内容': documentBody(docType, minimum),
+    '正文内容': fullBody,
+    '内容': fullBody,
     // AI 规则可能包含项目资料字段之外的扩写字段，测试输入统一覆盖常用字段。
     '施工部位': '信息化机房及网络设备区',
     '参与人员': '总监理工程师、专业监理工程师、施工单位项目负责人',
-    '今日内容': documentBody(docType, minimum),
-    '核心工作落实': documentBody(docType, minimum),
-    '协调解决情况': documentBody(docType, minimum),
-    '其他事项': documentBody(docType, minimum),
+    '今日内容': '完成12台网络设备到货清单、型号和安装位置核对，并检查设备标签。',
+    '核心工作落实': '核对结果显示设备型号及数量与到货清单一致；2处标签编号不一致事项已更正并复核。',
+    '协调解决情况': '施工单位现场完成2处设备标签更正，并提交对应复核记录。',
+    '其他事项': '后续按照已确认的接口联调计划检查设备连线和记录完整性。',
     '日期范围': '2026年08月10日至2026年08月16日',
     '周数': '第33周',
-    '形象进度说明': documentBody(docType, minimum),
-    '周进度详情': documentBody(docType, minimum),
-    '安全质量描述': documentBody(docType, minimum),
-    '存在问题': '本期未发现需签发整改通知的事项。',
-    '下周计划': documentBody(docType, minimum),
-    '监理建议': documentBody(docType, minimum),
+    '形象进度说明': '本期完成12台网络设备到场核对和安装位置检查，设备标签问题已完成更正。',
+    '周进度详情': '网络设备到货12台；已完成清单、型号、安装位置和标签核对。',
+    '集采部分内容': '本期已核验的集采设备为网络设备12台，型号及数量与到货清单一致。',
+    '非集采部分内容': '',
+    '到货安装统计': '网络设备到货12台，已完成12台清单和安装位置核对。',
+    '安全质量描述': '检查设备安装位置及标签，发现2处标签编号与清单不一致，现场更正后完成复核。',
+    '存在问题': '发现2处设备标签编号与到货清单不一致，已现场更正并完成复核。',
+    '下周计划': '按照已确认的接口联调计划检查设备连线和联调记录。',
+    '监理建议': '联调时同步保留接口检查和问题复核记录。',
     '月份': '2026年08月',
-    '本月进度详情': documentBody(docType, minimum),
-    '本月质量描述': documentBody(docType, minimum),
-    '本月安全描述': documentBody(docType, minimum),
-    '监理履职情况': documentBody(docType, minimum),
+    '本月进度详情': '本月完成12台网络设备到场核对和安装位置检查，2处标签问题已更正并复核。',
+    '本月完成工程量': '网络设备到货及核对12台。',
+    '累计完成情况': '本次测试资料仅确认本月12台设备数据，未提供项目累计工程量。',
+    '本月投资情况': '',
+    '本月质量描述': '设备型号及数量与清单一致；2处标签编号问题已更正并复核。',
+    '本月安全描述': '本次资料未记录新增安全问题。',
+    '监理履职情况': '完成到货清单、设备型号、安装位置及标签检查，并复核2处更正记录。',
     '报告期': '2026年08月',
     '总体进度': '以已确认的项目进度台账为准。',
     '进度偏差': '本期未发现已确认的进度偏差。',
     '偏差原因': '无。',
     '风险提示': '持续关注设备到货和接口联调计划。',
-    '建议措施': documentBody(docType, minimum),
+    '建议措施': '联调阶段同步核对设备连线和接口记录。',
+    '项目概况': '本项目为信息化工程，本次验收范围为信息化机房网络设备到货、安装位置及标签记录核对。',
   }
   for (const field of fields) {
-    if (!values[field]) values[field] = `${field}：已按项目资料填写。`
+    if (!(field in values)) values[field] = ''
   }
-  return Object.entries(values).map(([key, value]) => `【${key}】${value}`).join('\n')
+  return fields.map(field => `【${field}】${values[field]}`).join('\n')
 }
 
 async function docxXml(filePath) {
@@ -108,7 +110,7 @@ async function main() {
       assert.equal(xml.includes('{{'), false, `${template.docType} 不得残留模板占位符`)
       // 个别规范长文模板没有项目名称占位符；该类模板仍须保证可渲染且无残留占位符。
       if (template.fields.includes('项目名称')) {
-        assert.ok(xml.includes('信息化文档生成验收项目'), `${template.docType} 应写入项目名称`)
+        assert.ok(xml.includes(projectName), `${template.docType} 应写入项目正式名称`)
       }
       // 字体、表头和表格样式由实体模板自身决定；保存链路已通过模板版式验收。
     } else {
@@ -116,6 +118,13 @@ async function main() {
       const xlsx = xlsxModule.default || xlsxModule
       const workbook = xlsx.readFile(saved.path)
       assert.ok(workbook.SheetNames.length > 0, `${template.docType} Excel 应包含工作表`)
+      for (const sheetName of workbook.SheetNames) {
+        const worksheet = workbook.Sheets[sheetName]
+        for (const [cellRef, cell] of Object.entries(worksheet)) {
+          if (cellRef.startsWith('!')) continue
+          assert.doesNotMatch(String(cell?.v || ''), /\{\{[^{}]+\}\}/, `${template.docType}.${sheetName}!${cellRef} 不得残留占位符`)
+        }
+      }
     }
     generated.push({ docType: template.docType, path: saved.path, extension: path.extname(saved.path).toLowerCase() })
   }

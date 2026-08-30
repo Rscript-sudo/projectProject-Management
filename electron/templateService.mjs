@@ -10,6 +10,7 @@ import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { getKnownAliases, EXPECTED_PLACEHOLDER_RE } from './placeholderScan.mjs'
 import { PAGE, FONTS, getFormatProfile, detectParagraphRole, formatAuditFromXml } from './documentFormatEngine.mjs'
+import { applyTemplateLayoutContract } from './templateLayoutContract.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -192,6 +193,24 @@ export function findTemplate(templatesDir, docType, options = {}) {
   }
 }
 
+function decodeXmlText(value) {
+  return String(value || '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'").replace(/&amp;/g, '&')
+}
+
+/** Word frequently splits {{field}} across several w:t runs. Reconstruct each
+ * paragraph before scanning so the physical DOCX remains the field truth source. */
+export function extractDocxPlaceholdersFromXml(xml) {
+  const fields = []
+  for (const paragraph of String(xml || '').match(/<w:p\b[\s\S]*?<\/w:p>/g) || []) {
+    const text = [...paragraph.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)]
+      .map(match => decodeXmlText(match[1])).join('')
+    for (const match of text.matchAll(/\{\{([^}]{1,80})\}\}/g)) fields.push(match[1].trim())
+  }
+  return [...new Set(fields.filter(Boolean))]
+}
+
 /** 读取 DOCX 主文档中的 {{字段}}；项目模板可自由替换，因此字段以文件实际内容为准。 */
 export async function getTemplatePlaceholders(templatePath) {
   try {
@@ -206,7 +225,7 @@ export async function getTemplatePlaceholders(templatePath) {
     const PizZip = (await import('pizzip')).default
     const zip = new PizZip(fs.readFileSync(templatePath))
     const xml = zip.file('word/document.xml')?.asText() || ''
-    return [...new Set([...xml.matchAll(/\{\{([^}]{1,80})\}\}/g)].map(m => m[1].trim()).filter(Boolean))]
+    return extractDocxPlaceholdersFromXml(xml)
   } catch (e) {
     console.warn('[templateService] Failed to read template placeholders:', e.message)
     return []
@@ -231,6 +250,10 @@ export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [
   const docXmlPath = 'word/document.xml'
   let xml = zip.file(docXmlPath)?.asText()
   if (!xml) throw new Error('模板文件格式异常：未找到 word/document.xml')
+
+  // Idempotency guard: a split-run placeholder is still an existing field.
+  // Do not insert it again merely because its raw token is not contiguous XML.
+  const existingFields = new Set(extractDocxPlaceholdersFromXml(xml))
 
   // 1. 删除占位符：把 {{字段}} 文本从 XML 里移除（连同可能包裹的 run 边界清理）
   for (const field of removeFields) {
@@ -273,16 +296,31 @@ export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [
       }).value
     })
   }
+  const insertAtParagraph = (source, placement, token) => {
+    if (!Number.isInteger(placement.paragraphIndex)) return { value: source, changed: false }
+    return replaceIndexedBlock(source, /<w:p\b[\s\S]*?<\/w:p>/g, placement.paragraphIndex, paragraphXml => {
+      const run = `<w:r><w:t xml:space="preserve">${token}</w:t></w:r>`
+      return paragraphXml.replace('</w:p>', `${run}</w:p>`)
+    })
+  }
   for (const placement of placements) {
     const name = String(placement?.field || '').trim()
     const anchor = String(placement?.anchor || '').trim()
-    if (!name) continue
+    if (!name || existingFields.has(name)) continue
     const escapedName = name.replace(/[&<>\"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' })[ch])
     const insertion = `{{${escapedName}}}`
     const cellResult = insertAtTableCell(xml, placement, insertion)
     if (cellResult.changed) {
       xml = cellResult.value
       placed.add(name)
+      existingFields.add(name)
+      continue
+    }
+    const paragraphResult = insertAtParagraph(xml, placement, insertion)
+    if (paragraphResult.changed) {
+      xml = paragraphResult.value
+      placed.add(name)
+      existingFields.add(name)
       continue
     }
     if (anchor) {
@@ -292,11 +330,13 @@ export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [
       const at = placement.position === 'before' ? index : index + escapedAnchor.length
       xml = xml.slice(0, at) + insertion + xml.slice(at)
       placed.add(name)
+      existingFields.add(name)
     }
   }
 
   // 3. 没有可靠锚点的新增字段才追加到文档末尾，保证字段不会丢失。
-  const addFieldsClean = [...new Set(addFields.map(f => String(f).trim()).filter(Boolean))].filter(name => !placed.has(name))
+  const addFieldsClean = [...new Set(addFields.map(f => String(f).trim()).filter(Boolean))]
+    .filter(name => !placed.has(name) && !existingFields.has(name))
   if (addFieldsClean.length) {
     const paragraphs = addFieldsClean.map(name => {
       const escaped = name.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch])
@@ -437,23 +477,28 @@ function columnIndexToLetter(idx) {
  * 修两个老板反馈的渲染问题：
  *  1. AI 输出"    一、安全防范要求" → 前面有 4 空格 + 模板首行缩进另设 → 视觉上"缩进不严谨"
  *     → 剥掉"一、""（一）""1."等序号前的所有前导空格
- *  2. AI 用单 \n 分段 → docxtemplater linebreaks:true 转软换行 <w:br/> → 视觉上"标题与正文没换行"
- *     → 把"段落标题行末尾的 \n"升级为 \n\n，让 docxtemplater 识别为新段落
+ *  2. docxtemplater 的 linebreaks:true 会把每个 \n 都转成 <w:br/>；\n\n 并不会
+ *     生成 Word 新段落，而会生成两个软回车，中间形成肉眼可见的空白行。
+ *     → 渲染前把连续换行统一为一个换行，并清理每行首尾空白。
  *
  * v1.2.4（2026-06-29 老板反馈）：AI 输出"事由：：国庆假期..."双冒号
  *   v1.2.3 regex 只剥一次前缀，剩"：国庆..."。修法：循环剥 + 兜底剥任何残留"：xxx"开头的列
  *
- * 不动 \n\n（已经是段落分隔）
+ * 实体模板内的多段正文统一使用单软回车；系统结构化文档另行生成真实段落。
  */
-function sanitizeBodyContent(value, projectType) {
+export function sanitizeBodyContent(value, projectType, { collapseBlankLines = true } = {}) {
   if (!value || typeof value !== 'string') return value
-  let v = value
+  let v = value.replace(/\r\n?/g, '\n')
   // 1. 剥掉序号前的空格（"    一、" → "一、"，"  （一）" → "（一）"，"   1." → "1."）
   v = v.replace(/^[ \t]+(?=[一二三四五六七八九十]+[、.]|[（(][一二三四五六七八九十][）)]|\d+[.)、])/gm, '')
-  // 2. 段落标题行末尾的 \n 升级为 \n\n（让 docxtemplater 渲染成新段落而不是软换行）
-  v = v.replace(/([一二三四五六七八九十]+[、.][^\n]*)\n(?![\n])/g, '$1\n\n')
-  v = v.replace(/([（(][一二三四五六七八九十][）)][^\n]*)\n(?![\n])/g, '$1\n\n')
-  v = v.replace(/(\d+[.)、][^\n]*)\n(?![\n])/g, '$1\n\n')
+  // 2. 一次性消除 AI 输出、字段解析和用户粘贴叠加产生的空白行。
+  //    行内普通空格不动，只清理换行两侧的空格，避免模板中出现“空格行”。
+  v = v
+    .split('\n')
+    .map(line => line.trim())
+    .join('\n')
+    .trim()
+  if (collapseBlankLines) v = v.replace(/\n{2,}/g, '\n')
   // 3. v1.2.7 兜底：信件语体清理（"尊敬的..."/"此致敬礼"）
   //   与 src/services/aiService.ts 的 sanitizeLetterStyle 词表双向同步
   //   非前端入口（直接 IPC 调用 saveDoc/exportPDF）会绕过 aiService parse-time 防线
@@ -471,7 +516,7 @@ const LETTER_CLOSING_RE = /(此致敬礼|顺祝商祺|敬请审阅|以上请批�
 
 export function sanitizeLetterStyle(value) {
   if (!value || typeof value !== 'string') return value
-  let v = value
+  let v = value.replace(/\{\{待清理：信件语体(?:\s*-\s*[^}]*)?\}\}/g, '')
 
   // 1. 开头客套话
   const openingHits = []
@@ -490,12 +535,7 @@ export function sanitizeLetterStyle(value) {
     return ''
   })
 
-  const allHits = [...openingHits, ...closingHits]
-  if (allHits.length > 0) {
-    const placeholder = `\n\n{{待清理：信件语体 - ${allHits.join('、')}}}`
-    v = `${v.trim()}${placeholder}`
-  }
-  return v
+  return v.replace(/\n{3,}/g, '\n\n').trim()
 }
 
 /**
@@ -555,6 +595,17 @@ function parseSections(content, knownKeys = new Set()) {
   return result
 }
 
+const OPTIONAL_BLANK_TEMPLATE_FIELDS = new Set([
+  '局点名称', '表格行规格型号', '表格行备注', '表格行其它情况',
+  '施工单位签名', '监理单位签名', '建设单位签名', '签名日期',
+])
+
+function normalizeOptionalTemplateValue(key, value) {
+  const text = String(value || '').trim()
+  if (OPTIONAL_BLANK_TEMPLATE_FIELDS.has(key) && /^(待确认|未提供|未明确|无|暂无)$/.test(text)) return ''
+  return value
+}
+
 /**
  * 构建占位符数据（基于 FieldRegistry 统一别名）
  * 1. 从基础环境变量构建（项目名称、参建单位等）
@@ -572,7 +623,9 @@ export function buildPlaceholderData({
   userInput = '',
   content = '',
   config = {},
+  templateFields = [],
   projectType = '',  // v1.2.5：用于正文禁用术语兜底替换
+  layoutContract = null,
 }) {
   const now = new Date()
   const dateStr = `${now.getFullYear()}年${String(now.getMonth() + 1).padStart(2, '0')}月${String(now.getDate()).padStart(2, '0')}日`
@@ -625,10 +678,17 @@ export function buildPlaceholderData({
     data[stripped] = value
   }
 
+  // 实体模板字段可能没有 config 定义（企业/私人 DOCX 的常态），先建立空值槽位。
+  for (const field of templateFields) {
+    const key = String(field || '').trim()
+    if (key && data[key] === undefined) data[key] = ''
+  }
+
   // 4. 从 content 中解析 【key】value 结构化数据并覆盖
   const knownSectionKeys = new Set([
     ...Object.keys(data),
     ...Object.keys(placeholders).map(key => key.replace(/^\{\{|\}\}$/g, '').trim()),
+    ...templateFields.map(key => String(key || '').trim()).filter(Boolean),
     ...getKnownAliases(),
     // 兼容旧模板和模型常用的正文写法。
     '正文内容', '正文', '内容',
@@ -636,15 +696,32 @@ export function buildPlaceholderData({
   const sections = parseSections(content, knownSectionKeys)
   for (const [key, value] of Object.entries(sections)) {
     const stdKey = resolveKey(key)
+    // 项目元数据由系统真相源回填，不能被模型输出的“待确认”等占位话术覆盖。
+    // 私人模板同样遵循此规则，避免工程名称、编号和日期被 AI 降级为不确定值。
+    if (stdKey && new Set(['projectName', 'fileNumber', 'date']).has(stdKey)) continue
     const aliases = stdKey ? (FIELD_ALIASES[stdKey] || [key]) : [key]
+    const fieldContract = layoutContract?.fields?.[key]
+      || aliases.map(alias => layoutContract?.fields?.[alias]).find(Boolean)
+    const collapseBlankLines = fieldContract?.collapseBlankLines !== false
     for (const alias of aliases) {
       // v1.2.2（2026-06-28）：正文段格式清洗（解决"一、安全防范要求"前空格 + 不换行 bug）
       //   docxtemplater linebreaks:true 把单 \n 转软换行，要段落分隔必须 \n\n
       //   但 AI 经常输出"    一、安全防范要求\n（一）..." → 软换行 + 空格，渲染成一段
       //   修法：1) 剥"标题"前导空格  2) 单 \n 升级为 \n\n（除非已在 \n\n 中）
       // v1.2.5：传 projectType 进去做禁用术语兜底替换
-      data[alias] = sanitizeBodyContent(value, projectType)
+      data[alias] = fieldContract?.mode === 'manual'
+        ? ''
+        : sanitizeBodyContent(normalizeOptionalTemplateValue(key, value), projectType, { collapseBlankLines })
     }
+  }
+
+  // “手工填写”是明确的出厂策略：无论该字段来自项目资料、config 默认值还是 AI 分段，
+  // 均不自动写入。同步清空 Registry 别名，避免同一字段换一个别名后绕过合同。
+  for (const [field, fieldContract] of Object.entries(layoutContract?.fields || {})) {
+    if (fieldContract?.mode !== 'manual') continue
+    const stdKey = resolveKey(field)
+    const aliases = stdKey ? (FIELD_ALIASES[stdKey] || [field]) : [field]
+    for (const alias of new Set([field, ...aliases])) data[alias] = ''
   }
 
   console.log('[templateService] Built placeholder data (registry):', Object.keys(data).length, 'keys')
@@ -659,7 +736,7 @@ export function buildPlaceholderData({
  * v1.2.1 修复（P0）：扫描源必须从「渲染后 buffer」重新解 zip 读取，
  *   不能用源 zip 引用——v1.2.0 的扫描永远命中源模板（永远空），防线失效。
  */
-export async function renderTemplate(templatePath, data) {
+export async function renderTemplate(templatePath, data, options = {}) {
   const Docxtemplater = (await import('docxtemplater')).default
   const PizZip = (await import('pizzip')).default
 
@@ -667,6 +744,13 @@ export async function renderTemplate(templatePath, data) {
   const tmplContent = fs.readFileSync(templatePath, 'binary')
   const zip = new PizZip(tmplContent)
   let templateXml = zip.file('word/document.xml')?.asText() || ''
+  if (options.layoutContract) {
+    templateXml = applyTemplateLayoutContract(templateXml, options.layoutContract)
+    zip.file('word/document.xml', templateXml)
+    for (const [field, fieldContract] of Object.entries(options.layoutContract.fields || {})) {
+      if (fieldContract?.mode === 'manual') data[field] = ''
+    }
+  }
   // 周报未提供现场照片时，不得保留“影像资料”空白整页和蓝色表格。
   // 这是模板级可交付规则：有真实照片字段才保留附录；没有就完全移除。
   const photoKeys = ['图1路径', '图2路径', '图3路径', '图4路径']
@@ -937,16 +1021,32 @@ export async function renderXlsxTemplate(templatePath, data, cellMappings) {
     if (!cellRef || !placeholderName) continue
     if (!ws[cellRef]) continue
     const value = data[placeholderName]
-    if (value && String(value).trim()) {
-      const cell = ws[cellRef]
-      cell.v = value
-      cell.t = 's'
-      cell.w = String(value)
-    }
+    // 即使字段没有事实，也必须把模板占位符清空。旧逻辑只在非空值时写入，
+    // 会把 {{变更原因}} 等原样留在正式 XLSX 中。
+    const cell = ws[cellRef]
+    cell.v = value == null ? '' : value
+    cell.t = 's'
+    cell.w = String(cell.v)
   }
 
   // 生成 buffer（不应用样式，保留模板原始样式）
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+}
+
+/** 扫描 XLSX 所有工作表中的残留模板占位符。 */
+export async function getXlsxPlaceholderResidues(buffer) {
+  const { loadXlsx } = await import('./xlsxRuntime.mjs')
+  const XLSX = await loadXlsx()
+  const workbook = XLSX.read(buffer, { type: 'buffer' })
+  const residues = new Set()
+  for (const sheetName of workbook.SheetNames || []) {
+    const sheet = workbook.Sheets[sheetName]
+    for (const [cellRef, cell] of Object.entries(sheet || {})) {
+      if (cellRef.startsWith('!') || typeof cell?.v !== 'string') continue
+      for (const match of cell.v.matchAll(/\{\{[^{}]{1,80}\}\}/g)) residues.add(`${sheetName}!${cellRef}:${match[0]}`)
+    }
+  }
+  return [...residues]
 }
 
 // =============================================================================

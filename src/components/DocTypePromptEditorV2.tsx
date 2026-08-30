@@ -7,14 +7,17 @@ import {
   ApartmentOutlined, CheckCircleFilled, CheckOutlined, EyeOutlined,
   FileSearchOutlined, LeftOutlined, ReloadOutlined, RightOutlined,
   SaveOutlined, ThunderboltFilled, ArrowLeftOutlined, FolderOpenOutlined, PlayCircleOutlined,
-  PlusOutlined, DeleteOutlined,
+  PlusOutlined, DeleteOutlined, DownOutlined, LockOutlined,
 } from '@ant-design/icons'
 import { getDefaultPrompts, mergeDocTypePrompt } from '../shared/docTypePrompts'
-import type { DocTypeConfig, GlobalRule } from '../shared/docTypePrompts'
+import type { DocTypeConfig } from '../shared/docTypePrompts'
 import { BUILTIN_DOC_TYPES } from '../shared/builtinDocTypes'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { generateDocTypePrompt, analyzeTemplateStructure, generateFieldExpansionRule } from '../services/aiService'
 import type { SuggestedField } from '../services/aiService'
+import { stripThinkingContent } from '../shared/aiOutput.mjs'
+import { buildTemplateStructureMap, deriveTemplateFieldSuggestions, reconcileTemplateFieldPlacements } from '../shared/templateStructureMap.mjs'
+import { mergeTemplateAnalysisFields, resolveReloadedTemplateFields, suggestPlaceholderNames } from '../shared/templateFieldSuggestions.mjs'
 
 const { Text, Title } = Typography
 
@@ -23,9 +26,11 @@ type FieldConfig = {
   mode: FillMode
   source: string
   requirement: string
+  required: boolean
   minWords: number
   maxWords: number
   antiFabrication: boolean
+  missingInfoPolicy: '留空' | '待确认'
 }
 
 type PlaceholderPlacement = {
@@ -35,14 +40,16 @@ type PlaceholderPlacement = {
   tableIndex?: number
   rowIndex?: number
   cellIndex?: number
+  paragraphIndex?: number
 }
 
-const SYSTEM_FIELDS = ['日期', '星期几', '天气', '气温', '当前时间', '编制日期']
+const SYSTEM_FIELDS = ['日期', '日期范围', '周数', '月份', '星期几', '当前时间', '编制日期']
+const HUMAN_SIGNOFF_FIELDS = ['施工单位签名', '监理单位签名', '建设单位签名', '监理单位签章', '施工单位签章', '签名日期']
 // 项目通用字段：新建项目时已写入项目基本信息，生成时直接从项目资料读取，不调 AI
 const PROJECT_FIELDS = [
   '项目名称', '工程名称', '项目编号', '文件编号', '编号', '文号',
-  '致单位', '致送单位', '建设单位', '建设方', '甲方', '业主单位', '业主',
-  '施工单位', '施工单位名称', '乙方', '承建单位',
+  '致单位', '致送单位', '建设单位', '建设方', '甲方单位', '甲方', '业主单位', '业主',
+  '施工单位', '施工单位名称', '乙方单位', '乙方', '承建单位',
   '监理单位', '监理公司', '项目监理机构', '监理机构',
   '总监理工程师', '总监姓名', '总监理',
   '项目类型', '工程类型',
@@ -50,7 +57,7 @@ const PROJECT_FIELDS = [
 
 const EMPTY_CONFIG: FieldConfig = {
   mode: 'ai', source: '用户输入与项目资料', requirement: '',
-  minWords: 80, maxWords: 300, antiFabrication: true,
+  required: false, minWords: 80, maxWords: 300, antiFabrication: true, missingInfoPolicy: '留空',
 }
 
 const FIELD_HINTS: Record<string, string> = {
@@ -65,6 +72,28 @@ const FIELD_HINTS: Record<string, string> = {
   核心工作落实: '围绕质量、进度、安全的检查结果和落实情况展开。',
   协调解决情况: '写明问题、协调对象、处理结论及后续责任。',
   其他事项: '仅记录不属于前述栏目但确有依据的重要事项。',
+}
+
+function normalizeTemplateFieldConfig(field: string, config: FieldConfig): FieldConfig {
+  if (HUMAN_SIGNOFF_FIELDS.includes(field)) {
+    return { ...config, mode: 'keep', source: '人工签章', requirement: '', required: false, minWords: 0, maxWords: 0, missingInfoPolicy: '留空' }
+  }
+  if (field.startsWith('表格行')) {
+    const label = field.replace(/^表格行/, '')
+    const requirement = label === '其它情况'
+      ? '仅根据用户已提供事实填写差异或其它情况；没有明确说明时留空，不得推测原因。'
+      : `仅提取当前明细行的“${label}”原始值，保留数值和单位；用户未提供时留空，不得补造。`
+    return { ...config, mode: 'ai', source: '用户输入中的明确事实', requirement, required: false, minWords: 0, maxWords: label === '其它情况' ? 120 : 40, antiFabrication: true, missingInfoPolicy: '留空' }
+  }
+  // 文件路径是用户选择/上传的资源引用，不是可由模型“扩写”的正文。
+  // 强制归为自动填充，避免模型生成不存在的本地路径。
+  if (/^(?:图|图片|照片|附件)\d*(?:文件)?路径$/.test(field)) {
+    return { ...config, mode: 'project', source: '用户上传附件或项目资料', requirement: '只使用用户已选择或项目中已归档的真实文件路径；没有对应文件时留空。', required: false, minWords: 0, maxWords: 0, antiFabrication: true, missingInfoPolicy: '留空' }
+  }
+  if (field === '局点名称') {
+    return { ...config, requirement: '仅提取用户明确提供的局点名称；未提供时留空，不得用项目名称代替。', required: false, minWords: 0, maxWords: 40, missingInfoPolicy: '留空' }
+  }
+  return config
 }
 
 function escapeHtmlAttribute(value: string) {
@@ -88,16 +117,21 @@ function sanitizeTemplateHtml(html: string) {
   return documentNode.body.innerHTML
 }
 
-function injectMappedPlaceholder(html: string, placement: PlaceholderPlacement, selectedField: string) {
+function injectMappedPlaceholder(html: string, placement: PlaceholderPlacement, selectedField: string, mode: FillMode = 'ai') {
   const documentNode = new DOMParser().parseFromString(html, 'text/html')
+  // A DOCX placeholder may be split across multiple Word runs. Once mammoth
+  // reconstructs it, the decorated HTML already contains data-field even when
+  // an older field scan missed it. Never draw a pending placement a second time.
+  if ([...documentNode.body.querySelectorAll<HTMLElement>('[data-field]')]
+    .some(element => element.dataset.field === placement.field)) return html
   const createButton = () => {
     const button = documentNode.createElement('button')
     button.type = 'button'
-    button.className = `placeholder ai${placement.field === selectedField ? ' selected' : ''}`
+    button.className = `placeholder ${mode === 'ai' ? 'ai' : 'keep'}${placement.field === selectedField ? ' selected' : ''}`
     button.dataset.field = placement.field
     button.textContent = `{{${placement.field}}}`
     const badge = documentNode.createElement('span')
-    badge.textContent = 'AI扩写'
+    badge.textContent = mode === 'ai' ? 'AI扩写' : mode === 'project' ? '项目资料' : mode === 'system' ? '系统填充' : '保持原样'
     button.appendChild(badge)
     return button
   }
@@ -107,6 +141,13 @@ function injectMappedPlaceholder(html: string, placement: PlaceholderPlacement, 
     const cell = row?.cells[placement.cellIndex!]
     if (cell) {
       const paragraph = cell.querySelector('p') || cell
+      paragraph.appendChild(createButton())
+      return documentNode.body.innerHTML
+    }
+  }
+  if (Number.isInteger(placement.paragraphIndex)) {
+    const paragraph = documentNode.body.querySelectorAll('p')[placement.paragraphIndex!] as HTMLParagraphElement | undefined
+    if (paragraph) {
       paragraph.appendChild(createButton())
       return documentNode.body.innerHTML
     }
@@ -137,6 +178,8 @@ function defaultFieldConfig(field: string): FieldConfig {
     mode,
     source: mode === 'system' ? '系统自动计算' : mode === 'project' ? '项目资料' : '用户输入与项目资料',
     requirement: FIELD_HINTS[field] || `围绕“${field}”提取可核验事实，按模板语气整理；信息不足时标注待确认。`,
+    required: false,
+    missingInfoPolicy: mode === 'ai' ? '留空' : '留空',
   }
 }
 
@@ -153,7 +196,7 @@ function extractFieldContext(content: string, field: string, radius = 900) {
 
 export default function DocTypePromptEditorV2({ initialDocType, templateId, onBack, onSaved }: { initialDocType?: string; templateId?: string; onBack?: () => void; onSaved?: () => void }) {
   const { message } = App.useApp()
-  const { docTypePromptOverrides, globalRulesOverrides, applyCustomTypes, customDocTypes } = useSettingsStore()
+  const { docTypePromptOverrides, applyCustomTypes, customDocTypes } = useSettingsStore()
   const defaults = useMemo(() => getDefaultPrompts(), [])
   const docTypes = useMemo(() => [
     ...BUILTIN_DOC_TYPES.map(label => ({ key: label, label, projectType: null as string | null })),
@@ -162,7 +205,6 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
 
   const [activeKey, setActiveKey] = useState('')
   const [draft, setDraft] = useState<DocTypeConfig | null>(null)
-  const [globalDraft, setGlobalDraft] = useState<Record<string, GlobalRule>>({})
   const [template, setTemplate] = useState<{ id?: string; name: string; path: string; fields: string[]; content: string; html: string; isSystem?: boolean; projectType?: string } | null>(null)
   // 初始扫描字段快照——用于"保存模板"时计算占位符增删差异，写回原模板文件
   const [initialFields, setInitialFields] = useState<string[]>([])
@@ -178,8 +220,10 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
   const [promptOpen, setPromptOpen] = useState(false)
   const [newFieldName, setNewFieldName] = useState('')
   const [inlineAnchor, setInlineAnchor] = useState('')
-  const [inlineLocator, setInlineLocator] = useState<Pick<PlaceholderPlacement, 'tableIndex' | 'rowIndex' | 'cellIndex'> | null>(null)
+  const [inlineLocator, setInlineLocator] = useState<Pick<PlaceholderPlacement, 'tableIndex' | 'rowIndex' | 'cellIndex' | 'paragraphIndex'> | null>(null)
   const [inlineEditorPosition, setInlineEditorPosition] = useState<{ left: number; top: number } | null>(null)
+  const [locatingField, setLocatingField] = useState(false)
+  const [inlineExistingField, setInlineExistingField] = useState('')
   const [pendingPlacements, setPendingPlacements] = useState<PlaceholderPlacement[]>([])
   const [deletedFields, setDeletedFields] = useState<Array<{ field: string; config: FieldConfig; placement?: PlaceholderPlacement }>>([])
   const [analyzing, setAnalyzing] = useState(false)
@@ -190,6 +234,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
   const [saveAsOpen, setSaveAsOpen] = useState(false)
   const [personalTemplateName, setPersonalTemplateName] = useState('')
   const previewRef = useRef<HTMLDivElement>(null)
+  const templateLoadRequestRef = useRef(0)
 
   const activeItem = docTypes.find(item => item.key === activeKey)
   const activeIndex = docTypes.findIndex(item => item.key === activeKey)
@@ -216,43 +261,54 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
           fields: override?.fields ?? [], hardConstraints: override?.hardConstraints ?? [], extras: override?.extras ?? {},
         }
     setDraft(next)
-    const saved = ((next.extras as any)?.fieldConfigs || {}) as Record<string, FieldConfig>
+    const saved = ((next.extras as any)?.fieldConfigs || {}) as Record<string, Partial<FieldConfig>>
     const legacy = ((next.extras as any)?.fieldRules || {}) as Record<string, string>
-    const keys = (next.fields || []).map(field => typeof field === 'string' ? field : field.key)
+    // `next.fields` 是 AI 输出契约，只列出需要模型生成的字段；项目资料、系统字段、
+    // 保持原样字段则完整保存在 extras.fieldConfigs。加载时必须取并集，否则保存一次后
+    // 非 AI 字段会从规则编辑器消失，造成“模板实际有 7 个字段，界面只剩 5 个”的假象。
+    const contractKeys = (next.fields || []).map(field => typeof field === 'string' ? field : field.key)
+    const keys = [...new Set([...contractKeys, ...Object.keys(saved)])]
     const merged: Record<string, FieldConfig> = {}
-    for (const key of keys) merged[key] = { ...defaultFieldConfig(key), ...(saved[key] || {}), requirement: saved[key]?.requirement || legacy[key] || defaultFieldConfig(key).requirement }
+    for (const key of keys) {
+      const fieldContract = (next.fields || []).find(field => (typeof field === 'string' ? field : field.key) === key) as any
+      merged[key] = normalizeTemplateFieldConfig(key, {
+        ...defaultFieldConfig(key),
+        required: fieldContract?.required === true,
+        minWords: fieldContract?.minWords ?? defaultFieldConfig(key).minWords,
+        maxWords: fieldContract?.maxWords ?? defaultFieldConfig(key).maxWords,
+        ...(saved[key] || {}),
+        requirement: saved[key]?.requirement || legacy[key] || defaultFieldConfig(key).requirement,
+      })
+    }
     setConfigs(merged)
   }, [activeKey, defaults, docTypePromptOverrides])
 
-  useEffect(() => {
-    const merged: Record<string, GlobalRule> = {}
-    for (const [key, value] of Object.entries(defaults.globalRules)) {
-      merged[key] = { ...value, ...(globalRulesOverrides?.[key] || {}) }
-    }
-    setGlobalDraft(merged)
-  }, [defaults, globalRulesOverrides])
-
-  const loadTemplate = async (requestedTemplateId?: string) => {
-    if (!activeItem?.label) return
+  const loadTemplate = async (requestedTemplateId?: string, requestedDocTypeLabel?: string) => {
+    const docTypeLabel = requestedDocTypeLabel || activeItem?.label
+    if (!docTypeLabel) return
+    const requestId = ++templateLoadRequestRef.current
     setLoadingTemplate(true)
     try {
       const [library, system] = await Promise.all([window.electronAPI.listTemplateLibrary(), window.electronAPI.listSystemTemplates()])
+      if (requestId !== templateLoadRequestRef.current) return
       // 列出当前文种所有可用模板（私人库 > 专业库 > 通用库 > 系统预置）
       const matched = [
-        ...library.filter(t => t.docType === activeItem.label && t.scope === 'personal').map(t => ({ id: t.id, name: `${t.name}（私人库）`, scope: t.scope, source: 'personal' })),
-        ...library.filter(t => t.docType === activeItem.label && t.scope === 'professional').map(t => ({ id: t.id, name: `${t.name}（专业库·${t.projectTypeLabel || t.projectType}）`, scope: t.scope, source: 'professional' })),
-        ...library.filter(t => t.docType === activeItem.label && t.scope === 'global').map(t => ({ id: t.id, name: `${t.name}（通用库）`, scope: t.scope, source: 'global' })),
-        ...system.filter(t => t.docType === activeItem.label).map(t => ({ id: t.id, name: `${t.name}`, scope: t.scope, source: 'system' })),
+        ...library.filter(t => t.docType === docTypeLabel && t.scope === 'personal').map(t => ({ id: t.id, name: `${t.name}（私人库）`, scope: t.scope, source: 'personal' })),
+        ...library.filter(t => t.docType === docTypeLabel && t.scope === 'professional').map(t => ({ id: t.id, name: `${t.name}（专业库·${t.projectTypeLabel || t.projectType}）`, scope: t.scope, source: 'professional' })),
+        ...library.filter(t => t.docType === docTypeLabel && t.scope === 'global').map(t => ({ id: t.id, name: `${t.name}（通用库）`, scope: t.scope, source: 'global' })),
+        ...system.filter(t => t.docType === docTypeLabel).map(t => ({ id: t.id, name: `${t.name}`, scope: t.scope, source: 'system' })),
       ]
       setAvailableTemplates(matched)
-      // 选中规则：传入 templateId > 已选 > 默认第一个（优先 personal）
-      const targetId = requestedTemplateId || templateId || selectedTemplateId || matched[0]?.id
-      const found = library.find(item => item.id === targetId)
-        || system.find(item => item.id === targetId)
-        || library.find(item => item.docType === activeItem.label)
-        || system.find(item => item.docType === activeItem.label)
+      // 只能沿用当前文种内的模板 ID；切换文种时，上一文种的 selectedTemplateId 必须失效。
+      const preferredTemplateId = requestedTemplateId || templateId || selectedTemplateId
+      const targetId = matched.some(item => item.id === preferredTemplateId) ? preferredTemplateId : matched[0]?.id
+      const found = library.find(item => item.id === targetId && item.docType === docTypeLabel)
+        || system.find(item => item.id === targetId && item.docType === docTypeLabel)
+        || library.find(item => item.docType === docTypeLabel)
+        || system.find(item => item.docType === docTypeLabel)
       if (!found?.path) {
         setTemplate(null)
+        setSelectedTemplateId('')
         setRecognitionError('当前文种没有可识别的模板文件。你可以手动设定占位符，或添加模板后重试识别。')
         return
       }
@@ -264,29 +320,33 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
         window.electronAPI.getTemplateFields(found.path),
         window.electronAPI.readFileContent(found.path),
       ])
-      const scannedFields = scanResult?.ok ? (scanResult.fields || []) : (found.fields || [])
-      const fields = [...new Set([...(found.fields || []), ...scannedFields])]
+      if (requestId !== templateLoadRequestRef.current) return
+      // 重载必须以源文件当前扫描结果为真相源。旧登记字段只能在扫描失败时兜底，
+      // 不能取并集，否则在 Word/WPS 中删除或改名的字段会永久残留。
+      const fields = resolveReloadedTemplateFields(Boolean(scanResult?.ok), scanResult?.fields || [], found.fields || [])
       const compactContent = parsed?.success ? (parsed.content || '')
         .replace(/[ \t]+\n/g, '\n').replace(/\n[ \t]+/g, '\n').replace(/\n{3,}/g, '\n\n').trim() : ''
       setRecognitionError(fields.length ? '' : '没有识别到占位符。可手动设定字段，或让 AI 重新分析模板结构。')
-      setTemplate({ id: found.id, name: found.sourceName || activeItem.label, path: found.path, fields, content: compactContent, html: parsed?.success ? parsed.html || '' : '', isSystem, projectType: (found as any).projectTypeLabel || (found as any).projectType || activeItem.projectType || '通用' })
+      setTemplate({ id: found.id, name: found.sourceName || docTypeLabel, path: found.path, fields, content: compactContent, html: parsed?.success ? parsed.html || '' : '', isSystem, projectType: (found as any).projectTypeLabel || (found as any).projectType || activeItem?.projectType || '通用' })
       setPendingPlacements([])
       setDeletedFields([])
       setInlineAnchor('')
       setInlineLocator(null)
       setInlineEditorPosition(null)
       setInitialFields(fields)
-      const next = { ...configs }
-      for (const field of fields) if (!next[field]) next[field] = defaultFieldConfig(field)
-      setConfigs(next)
+      setConfigs(previous => Object.fromEntries(fields.map(field => [
+        field,
+        normalizeTemplateFieldConfig(field, previous[field] || defaultFieldConfig(field)),
+      ])))
       setSelectedField(current => fields.includes(current) ? current : fields[0] || '')
       setStep(fields.length ? 2 : 1)
     } catch (error: any) {
+      if (requestId !== templateLoadRequestRef.current) return
       const detail = `模板读取失败：${error?.message || error}`
       setRecognitionError(detail)
       message.error(detail)
     } finally {
-      setLoadingTemplate(false)
+      if (requestId === templateLoadRequestRef.current) setLoadingTemplate(false)
     }
   }
 
@@ -309,27 +369,102 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     }
   }
 
-  useEffect(() => { loadTemplate() }, [activeItem?.label, templateId])
+  // 直接重读当前页面绑定的精确文件路径，不重新经过模板优先级选择。
+  // 这避免“点了重新载入，却因为同文种存在多份模板而又加载回旧文件”。
+  const reloadCurrentTemplateSource = async () => {
+    if (!template?.path) return
+    setLoadingTemplate(true)
+    try {
+      const [scanResult, parsed] = await Promise.all([
+        window.electronAPI.getTemplateFields(template.path),
+        window.electronAPI.readFileContent(template.path),
+      ])
+      if (!scanResult?.ok) throw new Error(scanResult?.error || '占位符扫描失败')
+      if (!parsed?.success) throw new Error(parsed?.error || '模板正文读取失败')
+      const fields = resolveReloadedTemplateFields(true, scanResult.fields || [], [])
+      const compactContent = (parsed.content || '')
+        .replace(/[ \t]+\n/g, '\n').replace(/\n[ \t]+/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+      setTemplate(previous => previous ? { ...previous, fields, content: compactContent, html: parsed.html || '' } : previous)
+      setConfigs(previous => Object.fromEntries(fields.map(field => [
+        field,
+        normalizeTemplateFieldConfig(field, previous[field] || defaultFieldConfig(field)),
+      ])))
+      setInitialFields(fields)
+      setSelectedField(current => fields.includes(current) ? current : fields[0] || '')
+      setPendingPlacements([])
+      setDeletedFields([])
+      setInlineAnchor('')
+      setInlineLocator(null)
+      setInlineEditorPosition(null)
+      setLocatingField(false)
+      setRecognitionError(fields.length ? '' : '源文件中没有识别到占位符')
+      message.success(`已从当前源文件重新载入：${fields.length} 个占位符`)
+    } catch (error: any) {
+      message.error(`重新载入失败：${error?.message || error}`)
+    } finally {
+      setLoadingTemplate(false)
+    }
+  }
+
+  // 内置模板在首次安装时已复制到用户文档目录，是可编辑的企业默认模板。
+  // 安装包内文件仅作为恢复种子；日常修改必须始终绑定当前这份运行时文件。
+  const openEditableTemplateSource = async () => {
+    if (!template?.path) return
+    try {
+      const opened = await window.electronAPI.openFile(template.path)
+      if (!opened?.success) throw new Error(opened?.error || '无法打开模板文件')
+      if (template.isSystem) message.info('正在编辑内置模板的用户工作副本；保存后请回到这里重新载入')
+    } catch (error: any) {
+      message.error(`打开模板失败：${error?.message || error}`)
+    }
+  }
+
+  useEffect(() => {
+    if (!activeItem?.label) return
+    setTemplate(null)
+    setAvailableTemplates([])
+    setSelectedTemplateId('')
+    setSelectedField('')
+    void loadTemplate(undefined, activeItem.label)
+  }, [activeItem?.label, templateId])
 
   const fields = template?.fields || Object.keys(configs)
+  const inlineSuggestedNames = useMemo(
+    () => suggestPlaceholderNames(inlineAnchor, fields, suggestedFields),
+    [inlineAnchor, fields, suggestedFields],
+  )
   useEffect(() => { if (!selectedField && fields[0]) setSelectedField(fields[0]) }, [fields, selectedField])
   const current = configs[selectedField] || defaultFieldConfig(selectedField)
 
   const grouped = useMemo(() => ({
-    '基础信息': fields.filter(field => PROJECT_FIELDS.includes(field)),
-    '系统字段': fields.filter(field => SYSTEM_FIELDS.includes(field)),
-    'AI 扩写字段': fields.filter(field => !PROJECT_FIELDS.includes(field) && !SYSTEM_FIELDS.includes(field)),
-  }), [fields])
+    '基础信息': fields.filter(field => configs[field]?.mode === 'project'),
+    '系统字段': fields.filter(field => configs[field]?.mode === 'system'),
+    'AI 扩写字段': fields.filter(field => configs[field]?.mode === 'ai'),
+    '人工或固定内容': fields.filter(field => configs[field]?.mode === 'keep'),
+  }), [fields, configs])
+  // 默认收起分组，先展示整体字段结构；用户需要时再逐组展开编辑。
+  const [collapsedFieldGroups, setCollapsedFieldGroups] = useState<Set<string>>(
+    () => new Set(['基础信息', '系统字段', 'AI 扩写字段', '人工或固定内容']),
+  )
+
+  const toggleFieldGroup = (group: string) => {
+    setCollapsedFieldGroups(previous => {
+      const next = new Set(previous)
+      if (next.has(group)) next.delete(group)
+      else next.add(group)
+      return next
+    })
+  }
 
   const updateConfig = (patch: Partial<FieldConfig>) => {
     if (!selectedField) return
     setConfigs(prev => ({ ...prev, [selectedField]: { ...(prev[selectedField] || defaultFieldConfig(selectedField)), ...patch } }))
   }
 
-  // 映射区就地添加字段：先点模板位置，再直接输入字段名。
+  // 映射区就地添加字段：先点模板位置，再从系统/AI 建议中选择字段名。
   const addField = () => {
-    const name = newFieldName.trim()
-    if (!name) { message.warning('请输入字段名'); return }
+    const name = newFieldName.trim().replace(/^\{\{\s*|\s*\}\}$/g, '').trim()
+    if (!name) { message.warning('请输入占位符名称'); return }
     if (fields.includes(name)) { message.warning('该字段已存在'); return }
     setConfigs(prev => ({ ...prev, [name]: defaultFieldConfig(name) }))
     if (template) setTemplate(prev => prev ? { ...prev, fields: [...(prev.fields || []), name] } : prev)
@@ -340,6 +475,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     setInlineAnchor('')
     setInlineLocator(null)
     setInlineEditorPosition(null)
+    setInlineExistingField('')
     message.success(`已在所选位置添加字段「${name}」`)
   }
 
@@ -376,24 +512,48 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     try {
       // 1. 先加载模板内容（mammoth 解析，可能慢，但 AI 分析必须读内容）
       let content = template.content
-      if (!content) {
+      let html = template.html
+      if (!content || !html) {
         const parsed = await window.electronAPI.readFileContent(template.path)
         if (!parsed.success || !parsed.content) throw new Error('模板内容读取失败')
         content = (parsed.content || '').replace(/[ \t]+\n/g, '\n').replace(/\n[ \t]+/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
-        setTemplate(prev => prev ? { ...prev, content, html: parsed.html || '' } : prev)
+        html = parsed.html || ''
+        setTemplate(prev => prev ? { ...prev, content, html } : prev)
       }
-      // 2. 调 AI 分析
+      // 2. 本地识别只作失败兜底，不能冒充“AI 分析”并提前结束。
+      //    AI 必须重新核对已有占位符的字段规则，同时发现模板新增的空白填值位。
+      const localFields = reconcileTemplateFieldPlacements(
+        deriveTemplateFieldSuggestions(content, html),
+        html,
+      ) as unknown as SuggestedField[]
       const settings = await window.electronAPI.getSettings()
       const result = await analyzeTemplateStructure(
         { provider: (settings.aiProvider as any) || 'deepseek', baseUrl: settings.baseUrl || '', model: settings.model || '' },
         activeItem.label,
         content,
         fields,
+        buildTemplateStructureMap(html),
       )
-      if (!result.success || !result.fields?.length) throw new Error(result.error || 'AI 未识别出字段')
+      const analyzedFields = result.success && result.fields?.length
+        ? reconcileTemplateFieldPlacements(result.fields, html) as SuggestedField[]
+        : localFields
+      if (!analyzedFields.length && !fields.length) throw new Error(result.error || 'AI 未识别出字段')
+      const reconciledFields = mergeTemplateAnalysisFields(fields, analyzedFields, field => {
+        const currentConfig = configs[field] || defaultFieldConfig(field)
+        return {
+          name: field,
+          label: field,
+          mode: currentConfig.mode,
+          hint: currentConfig.requirement,
+          reason: result.success ? '模板已有占位符，AI 本次漏报，已保留当前规则供复核' : 'AI 分析失败，已使用当前字段规则兜底',
+          anchorText: `{{${field}}}`,
+          insertPosition: 'after',
+          rule: currentConfig,
+        } as SuggestedField
+      }) as SuggestedField[]
       setRecognitionError('')
-      setSuggestedFields(result.fields)
-      setSelectedSuggestions(result.fields.map(f => f.name))
+      setSuggestedFields(reconciledFields)
+      setSelectedSuggestions(reconciledFields.map(f => f.name))
       setAnalyzeOpen(true)
     } catch (error: any) {
       const detail = `AI 模板识别失败：${error?.message || error}`
@@ -408,17 +568,34 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
   const importSuggestions = () => {
     const picked = suggestedFields.filter(f => selectedSuggestions.includes(f.name))
     const newFields: string[] = []
+    let refreshedCount = 0
+    const nextConfigs = { ...configs }
     for (const f of picked) {
-      if (fields.includes(f.name)) continue
-      setConfigs(prev => ({ ...prev, [f.name]: {
-        mode: f.mode, source: f.mode === 'system' ? '系统自动计算' : f.mode === 'project' ? '项目资料' : '用户输入与项目资料',
-        requirement: f.hint, minWords: 80, maxWords: 300, antiFabrication: true,
-      } }))
-      newFields.push(f.name)
+      const existed = fields.includes(f.name)
+      nextConfigs[f.name] = {
+        mode: f.mode,
+        requirement: f.rule?.requirement || f.hint,
+        required: f.rule?.required === true,
+        minWords: f.rule?.minWords ?? (f.mode === 'ai' ? 80 : 0),
+        maxWords: f.rule?.maxWords ?? (f.mode === 'ai' ? 300 : 80),
+        antiFabrication: f.rule?.antiFabrication !== false,
+        missingInfoPolicy: f.rule?.missingInfoPolicy || (f.mode === 'ai' ? '待确认' : '留空'),
+        source: f.rule?.source || (f.mode === 'system' ? '系统自动计算' : f.mode === 'project' ? '项目资料' : '用户输入与项目资料'),
+      }
+      if (existed) refreshedCount += 1
+      else newFields.push(f.name)
     }
+    setConfigs(nextConfigs)
     const placements = picked
-      .filter(f => !fields.includes(f.name) && f.anchorText)
-      .map(f => ({ field: f.name, anchor: f.anchorText.trim(), position: (f.insertPosition === 'before' ? 'before' : 'after') as 'before' | 'after' }))
+      .filter(f => !fields.includes(f.name) && (f.anchorText || [f.tableIndex, f.rowIndex, f.cellIndex].every(Number.isInteger)))
+      .map(f => ({
+        field: f.name,
+        anchor: f.anchorText.trim(),
+        position: (f.insertPosition === 'before' ? 'before' : 'after') as 'before' | 'after',
+        tableIndex: f.tableIndex,
+        rowIndex: f.rowIndex,
+        cellIndex: f.cellIndex,
+      }))
     setPendingPlacements(prev => [
       ...prev.filter(item => !placements.some(next => next.field === item.field)),
       ...placements,
@@ -464,12 +641,8 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       }
       return { ...prev, content, fields: [...new Set([...(prev.fields || []), ...picked.map(f => f.name)])] }
     })
-    if (newFields.length) {
-      setSelectedField(newFields[0])
-      message.success(`已导入 ${newFields.length} 个建议字段${insertedCount ? `，${insertedCount} 个占位符已回写到预览` : '（占位符需到预览界面手动插入）'}`)
-    } else {
-      message.info('没有新字段可导入')
-    }
+    if (newFields.length) setSelectedField(newFields[0])
+    message.success(`已更新 ${refreshedCount} 个现有字段规则${newFields.length ? `，并导入 ${newFields.length} 个新字段` : ''}，请核对后保存`)
     setAnalyzeOpen(false)
   }
 
@@ -482,16 +655,21 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     if (!draft || !activeKey) return
     setSaving(true)
     try {
-      const locked = fields.filter(field => configs[field]?.mode === 'ai')
+      const cleanedConfigs = Object.fromEntries(Object.entries(configs).map(([field, config]) => [field, normalizeTemplateFieldConfig(field, {
+        ...config,
+        source: stripThinkingContent(config.source).trim(),
+        requirement: stripThinkingContent(config.requirement).trim(),
+      })])) as Record<string, FieldConfig>
+      const locked = fields.filter(field => cleanedConfigs[field]?.mode === 'ai')
       const lines = locked.map(field => {
-        const c = configs[field] || defaultFieldConfig(field)
-        return `- 【${field}】：来源=${c.source}；要求=${c.requirement}；篇幅=${c.minWords}-${c.maxWords}字；${c.antiFabrication ? '禁止编造，信息不足标注“待确认”' : '允许依据上下文合理整理'}`
+        const c = cleanedConfigs[field] || defaultFieldConfig(field)
+        return `- 【${field}】：来源=${c.source}；要求=${c.requirement}；篇幅=${c.minWords}-${c.maxWords}字；${c.required ? '必填' : '可选'}；缺失时=${c.missingInfoPolicy}；${c.antiFabrication ? '禁止编造' : '允许依据上下文合理整理'}`
       })
       const lockBlock = lines.length ? `【占位符锁定规则】\n仅填充以下 AI 扩写占位符，其他模板内容保持不变：\n${lines.join('\n')}\n【/占位符锁定规则】\n\n` : ''
       const cleanSystem = draft.systemTemplate.replace(/【占位符锁定规则】[\s\S]*?【\/占位符锁定规则】\s*/g, '')
       const contractLines = fields.map(field => {
-        const c = configs[field] || defaultFieldConfig(field)
-        if (c.mode === 'ai') return `- 【${field}】${c.requirement}；建议 ${c.minWords}-${c.maxWords} 字；${c.antiFabrication ? '禁止编造，信息不足时标注“待确认”。' : ''}`
+        const c = cleanedConfigs[field] || defaultFieldConfig(field)
+        if (c.mode === 'ai') return `- 【${field}】${c.requirement}；${c.required ? '必填' : '可选'}；建议 ${c.minWords}-${c.maxWords} 字；信息不足时${c.missingInfoPolicy}；${c.antiFabrication ? '禁止编造。' : ''}`
         if (c.mode === 'keep') return `- 【${field}】保持原模板内容，不进行填充或改写。`
         return `- 【${field}】由${c.source || (c.mode === 'system' ? '系统' : '项目资料')}自动填充，AI 不得改写或推测。`
       })
@@ -502,33 +680,26 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       const nextDraft = {
         ...draft,
         systemTemplate: lockBlock + synchronizedSystem,
-        fields: locked.map(key => ({ key, required: true })),
-        extras: { ...(draft.extras || {}), fieldConfigs: configs, fieldRules: Object.fromEntries(locked.map(key => [key, configs[key]?.requirement || ''])) },
+        userTemplate: draft.userTemplate.trim() || '【任务】根据以下用户事实填写当前模板中允许 AI 扩写的字段。\n\n【用户事实】\n${userInput}\n\n只输出模板字段契约要求的【字段名】字段；信息不足时留空或标注“待确认”，不得编造。',
+        fields: locked.map(key => ({
+          key,
+          required: cleanedConfigs[key]?.required === true,
+          minWords: cleanedConfigs[key]?.minWords,
+          maxWords: cleanedConfigs[key]?.maxWords,
+        })),
+        extras: { ...(draft.extras || {}), fieldConfigs: cleanedConfigs, fieldRules: Object.fromEntries(locked.map(key => [key, cleanedConfigs[key]?.requirement || ''])) },
       }
       const nextOverrides = { ...(docTypePromptOverrides || {}) } as Record<string, any>
       nextOverrides[activeKey] = {
         systemTemplate: nextDraft.systemTemplate, userTemplate: nextDraft.userTemplate,
         minWords: nextDraft.minWords, fields: nextDraft.fields, extras: nextDraft.extras,
       }
-      const nextRules: Record<string, any> = {}
-      for (const [key, rule] of Object.entries(globalDraft)) {
-        const base = defaults.globalRules[key]
-        const patch: Record<string, any> = {}
-        if (rule.enabled !== base.enabled) patch.enabled = rule.enabled
-        if (rule.content !== base.content) patch.content = rule.content
-        if (Object.keys(patch).length) nextRules[key] = patch
-      }
       const settings = await window.electronAPI.getSettings()
-      const result = await window.electronAPI.setSettings({ ...settings, docTypePromptOverrides: nextOverrides, globalRulesOverrides: Object.keys(nextRules).length ? nextRules : null })
+      const result = await window.electronAPI.setSettings({ ...settings, docTypePromptOverrides: nextOverrides })
       if (!result.success) throw new Error(result.error || '未知错误')
       const overrides = await window.electronAPI.listDocTypePromptOverrides()
       applyCustomTypes(await window.electronAPI.listCustomProjectTypes(), await window.electronAPI.listCustomDocTypes(), overrides?.docTypes || null, overrides?.globalRules || null)
       setDraft(nextDraft)
-      if (template?.id && !template.isSystem) {
-        const marked = await window.electronAPI.markTemplateRuleConfigured(template.id)
-        if (!marked?.ok) throw new Error(marked?.error || '模板规则状态保存失败')
-      }
-
       // v1.3.4：把占位符增删写回原模板文件（docx/xlsx）
       // 对比 initialFields（初始扫描）与当前 fields，计算 add/remove 差异
       if (template?.path) {
@@ -544,7 +715,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
               placements: pendingPlacements.filter(item => addFields.includes(item.field)),
               docType: activeItem?.label || activeKey,
               templateId: template.id,
-              saveAsPersonal: saveAsPersonal || template.isSystem,
+              saveAsPersonal,
               name: personalTemplateName.trim() || `${activeItem?.label || activeKey}私人模板`,
             })
             if (saveRes?.ok) {
@@ -554,7 +725,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
                 if (!marked?.ok) throw new Error(marked?.error || '私人模板规则状态保存失败')
                 setTemplate(prev => prev ? { ...prev, path: saveRes.path!, id: saveRes.clonedToLibrary.id, isSystem: false } : prev)
                 setSelectedTemplateId(saveRes.clonedToLibrary.id)
-                message.success(saveAsPersonal ? '已另存为私人模板' : '系统模板只读，已复制到私人模板库并保存')
+                message.success(saveAsPersonal ? '已另存为私人模板' : '模板及规则已保存')
               } else {
                 message.success(`已把 ${addFields.length + removeFields.length} 个占位符变更写回模板文件`)
               }
@@ -568,6 +739,12 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
             message.warning(`模板文件保存异常：${saveErr?.message || saveErr}（规则已保存，但模板文件未更新）`)
           }
         }
+      }
+
+      // 必须在模板文件和字段变更全部写回之后再确认规则版本；否则刷新字段会把刚保存的规则误判为过期。
+      if (template?.id && !template.isSystem) {
+        const marked = await window.electronAPI.markTemplateRuleConfigured(template.id)
+        if (!marked?.ok) throw new Error(marked?.error || '模板规则状态保存失败')
       }
 
       setStep(3)
@@ -591,7 +768,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       if (!result.success || !result.prompt) throw new Error(result.error || '生成失败')
       setDraft(prev => prev ? { ...prev, ...result.prompt } : prev)
       const next = { ...configs }
-      for (const field of fields) next[field] = { ...(next[field] || defaultFieldConfig(field)), requirement: FIELD_HINTS[field] || next[field]?.requirement || defaultFieldConfig(field).requirement }
+      for (const field of fields) next[field] = normalizeTemplateFieldConfig(field, { ...(next[field] || defaultFieldConfig(field)), requirement: FIELD_HINTS[field] || next[field]?.requirement || defaultFieldConfig(field).requirement })
       setConfigs(next)
       message.success('AI 已整理字段规则，请确认后保存')
     } catch (error: any) { message.error(`AI 整理失败：${error?.message || error}`) }
@@ -606,6 +783,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       const result = await generateFieldExpansionRule(
         { provider: (settings.aiProvider as any) || 'deepseek', baseUrl: settings.baseUrl || '', model: settings.model || '' },
         {
+          operation: mode,
           docType: activeItem.label,
           projectType: template?.projectType,
           field: selectedField,
@@ -619,9 +797,11 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
         mode: result.rule.mode,
         source: result.rule.source,
         requirement: result.rule.requirement,
+        required: current.required,
         minWords: result.rule.minWords,
         maxWords: result.rule.maxWords,
         antiFabrication: result.rule.antiFabrication,
+        missingInfoPolicy: current.missingInfoPolicy,
       })
       message.success(mode === 'suggest' ? `已建议“${selectedField}”字段规则` : `已润色“${selectedField}”字段规则`)
     } catch (error: any) { message.error(`字段规则生成失败：${error?.message || error}`) }
@@ -658,7 +838,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       const escapedField = escapeHtmlAttribute(field)
       return `<button type="button" class="placeholder ${tone}${selected ? ' selected' : ''}" data-field="${escapedField}">{{${escapedField}}}${mode === 'ai' ? '<span>AI扩写</span>' : ''}</button>`
     })
-    for (const placement of pendingPlacements) safe = injectMappedPlaceholder(safe, placement, selectedField)
+    for (const placement of pendingPlacements) safe = injectMappedPlaceholder(safe, placement, selectedField, configs[placement.field]?.mode || 'ai')
     return safe
   }, [template?.html, configs, selectedField, pendingPlacements, fields])
 
@@ -672,16 +852,16 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
         <span style={{ width: 30, height: 30, display: 'inline-grid', placeItems: 'center', borderRadius: 7, color: '#fff', background: '#1677ff' }}><FileSearchOutlined /></span>
         <Title level={4} className="template-editor-title" style={{ margin: 0 }} title={`${activeItem?.label || '模板'} · AI扩写规则`}>{activeItem?.label || '模板'} · AI扩写规则</Title>
         <Select showSearch value={activeKey || undefined} onChange={setActiveKey} optionFilterProp="label" variant="borderless" style={{ width: 150 }} options={docTypes.map(item => ({ value: item.key, label: item.label }))} />
-        {availableTemplates.length > 0 && <Select value={selectedTemplateId || undefined} onChange={(id) => { setSelectedTemplateId(id); void loadTemplate(id) }} variant="borderless" style={{ width: 220 }} options={availableTemplates.map(t => ({ value: t.id, label: t.name }))} placeholder="选择模板来源" />}
+        {availableTemplates.length > 0 && <Select value={selectedTemplateId || undefined} onChange={(id) => { setSelectedTemplateId(id); void loadTemplate(id, activeItem?.label) }} variant="borderless" style={{ width: 220 }} options={availableTemplates.map(t => ({ value: t.id, label: t.name }))} placeholder="选择模板来源" />}
       </Space>
       <Space wrap className="template-editor-actions">
-        <Button icon={<FolderOpenOutlined />} disabled={!template?.path} onClick={() => template?.path && window.electronAPI.openFile(template.path)}>用 Word/WPS 编辑源文件</Button>
-        <Button icon={<ReloadOutlined />} disabled={!template?.path} onClick={() => loadTemplate(selectedTemplateId)}>源文件保存后重新载入</Button>
+        <Button icon={<FolderOpenOutlined />} disabled={!template?.path} onClick={openEditableTemplateSource}>用 Word/WPS 编辑源文件</Button>
+        <Button icon={<ReloadOutlined />} disabled={!template?.path} onClick={reloadCurrentTemplateSource}>源文件保存后重新载入</Button>
         <Button type="primary" ghost icon={<ThunderboltFilled />} loading={analyzing} onClick={analyzeTemplate}>AI 分析模板结构</Button>
-        <Button icon={<ReloadOutlined />} onClick={() => loadTemplate(selectedTemplateId)}>重新扫描</Button>
+        <Button icon={<ReloadOutlined />} onClick={() => loadTemplate(selectedTemplateId, activeItem?.label)}>重新扫描</Button>
         <Button icon={<PlayCircleOutlined />} onClick={() => setPreviewOpen(true)}>测试生成</Button>
         <Button icon={<SaveOutlined />} loading={saving} disabled={!template?.path} onClick={() => { setPersonalTemplateName(`${activeItem?.label || activeKey}私人模板`); setSaveAsOpen(true) }}>另存为私人模板</Button>
-        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => save(false)}>{onSaved ? '保存并返回扩写' : '保存并启用'}</Button>
+        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => save(false)}>保存并启用</Button>
       </Space>
     </div>
     <div style={{ padding: '12px 24px 11px', borderBottom: '1px solid #edf0f3' }}>
@@ -707,40 +887,66 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     <Spin spinning={loadingTemplate}>
       <div className="template-editor-grid">
         <section style={{ borderRight: '1px solid #edf0f3', background: '#fbfcfe' }}>
-          <div style={paneTitle}><span><ApartmentOutlined /> 占位符结构</span><Space size={6}><Tag color="blue">{fields.length} 个</Tag>{deletedFields.length > 0 && <Button size="small" type="link" onClick={restoreLastDeletedField}>撤销删除（{deletedFields.length}）</Button>}<Button size="small" type="link" icon={<PlusOutlined />} onClick={() => message.info('请直接点击右侧模板中的目标段落或单元格')}>定位添加</Button></Space></div>
-          <div style={{ padding: 12 }}>
-            {Object.entries(grouped).map(([group, items]) => items.length > 0 && <div key={group} style={{ marginBottom: 15 }}>
-              <Text type="secondary" style={{ fontSize: 12, fontWeight: 700 }}>{group}</Text>
-              <div style={{ marginTop: 6, display: 'grid', gap: 4 }}>
-                {items.map(field => <div key={field} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderRadius: 7, padding: '8px 9px', cursor: 'pointer', color: field === selectedField ? '#0958d9' : '#30343b', background: field === selectedField ? '#e8f3ff' : 'transparent' }} onClick={() => setSelectedField(field)}>
+          <div style={paneTitle}><span><ApartmentOutlined /> 占位符结构</span><Space size={6}><Tag color="blue">{fields.length} 个</Tag>{deletedFields.length > 0 && <Button size="small" type="link" onClick={restoreLastDeletedField}>撤销删除（{deletedFields.length}）</Button>}<Button size="small" type={locatingField ? 'primary' : 'link'} icon={<PlusOutlined />} onClick={() => { setLocatingField(value => !value); message.info(locatingField ? '已退出定位添加' : '定位模式已开启：请点击右侧模板中的目标段落或单元格') }}>{locatingField ? '退出定位' : '定位添加'}</Button></Space></div>
+          <div className="placeholder-tree">
+            {Object.entries(grouped).map(([group, items]) => {
+              if (!items.length) return null
+              const collapsed = collapsedFieldGroups.has(group)
+              return <div className="placeholder-tree-group" key={group}>
+                <button className="placeholder-tree-heading" type="button" aria-expanded={!collapsed} onClick={() => toggleFieldGroup(group)}>
+                  <span className="placeholder-tree-chevron">{collapsed ? <RightOutlined /> : <DownOutlined />}</span>
+                  <span className="placeholder-tree-heading-label">{group}</span>
+                  <span className="placeholder-tree-count">{items.length}</span>
+                </button>
+                {!collapsed && <div className="placeholder-tree-children">
+                {items.map(field => <div key={field} className={`placeholder-tree-item${field === selectedField ? ' selected' : ''}`} onClick={() => setSelectedField(field)}>
                   <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{field}</span>
                   <Space size={4}>
-                    <span style={{ fontSize: 11, color: configs[field]?.mode === 'ai' ? '#1677ff' : '#999' }}>{configs[field]?.mode === 'ai' ? 'AI' : configs[field]?.mode === 'project' ? '资料' : configs[field]?.mode === 'system' ? '系统' : '保留'}</span>
+                    <span className={`placeholder-tree-mode ${configs[field]?.mode || 'ai'}`}>{configs[field]?.mode === 'ai' ? 'AI' : configs[field]?.mode === 'project' ? '资料' : configs[field]?.mode === 'system' ? '系统' : '保留'}</span>
                     <Button type="text" size="small" icon={<DeleteOutlined />} danger onClick={(e) => { e.stopPropagation(); removeField(field) }} style={{ padding: '0 2px', minWidth: 20 }} />
                   </Space>
                 </div>)}
-              </div>
-            </div>)}
-            {!fields.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未扫描到占位符，可手动添加" />}
-            <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid #e7ebf0', display: 'flex', justifyContent: 'space-between' }}><Text type="secondary">共 {fields.length} 个占位符</Text><Text type="secondary">已配置 {fields.filter(field => !!configs[field]?.requirement).length}</Text></div>
+              </div>}
+            </div>})}
+            {!fields.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未扫描到占位符，可定位后从建议中选择" />}
+            <div className="placeholder-tree-summary"><Text type="secondary">共 {fields.length} 个占位符</Text><Text type="secondary">已配置 {fields.filter(field => !!configs[field]?.requirement).length}</Text></div>
           </div>
         </section>
 
         <section style={{ borderRight: '1px solid #edf0f3' }}>
           <div style={paneTitle}><span><EyeOutlined /> 原始模板映射</span><Text type="secondary" style={{ fontSize: 11 }}>本页编辑占位符；表头、边框、合并单元格请在 Word/WPS 修改后重新载入</Text></div>
           <div className="template-mapping-canvas" style={{ padding: '16px 22px', background: '#f6f7f9', minHeight: 0 }}>
+            {locatingField && <Alert type="info" showIcon banner message="定位添加已开启：点击目标位置，可直接编辑 {{字段名}} 或采用本地建议" style={{ marginBottom: 10 }} />}
             <div className="template-preview-scroll" ref={previewRef}>
               <Text type="secondary" style={{ display: 'block', marginBottom: 14 }}>{template?.name || '未关联模板文件'}</Text>
               {decoratedTemplateHtml ? <div
-                className="docx-template-preview"
+                className={`docx-template-preview${locatingField ? ' locating' : ''}`}
                 onClick={event => {
                   const clicked = event.target as HTMLElement
                   const target = clicked.closest<HTMLElement>('[data-field]')
-                  if (target?.dataset.field) { setSelectedField(target.dataset.field); return }
+                  // Existing placeholders always take precedence over placement mode.
+                  // Otherwise, after locating a blank paragraph, locatingField remains true
+                  // and clicking an existing placeholder is incorrectly treated as a new
+                  // paragraph placement, hiding the delete action.
+                  if (target?.dataset.field) {
+                    const field = target.dataset.field
+                    setSelectedField(field)
+                    setInlineExistingField(field)
+                    setInlineAnchor('')
+                    setInlineLocator(null)
+                    const preview = previewRef.current
+                    const targetRect = target.getBoundingClientRect()
+                    const previewRect = preview?.getBoundingClientRect()
+                    if (preview && previewRect) setInlineEditorPosition({
+                      left: Math.max(12, Math.min(targetRect.left - previewRect.left + preview.scrollLeft, preview.scrollWidth - 330)),
+                      top: targetRect.bottom - previewRect.top + preview.scrollTop + 6,
+                    })
+                    return
+                  }
                   const anchorElement = clicked.closest<HTMLElement>('td,th,p')
                   const anchor = (anchorElement?.innerText || clicked.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60)
                   const cell = clicked.closest<HTMLTableCellElement>('td,th')
-                  let locator: Pick<PlaceholderPlacement, 'tableIndex' | 'rowIndex' | 'cellIndex'> | null = null
+                  let locator: Pick<PlaceholderPlacement, 'tableIndex' | 'rowIndex' | 'cellIndex' | 'paragraphIndex'> | null = null
                   if (cell) {
                     const row = cell.parentElement as HTMLTableRowElement | null
                     const table = cell.closest<HTMLTableElement>('table')
@@ -751,25 +957,55 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
                       cellIndex: [...row.cells].indexOf(cell),
                     }
                   }
+                  if (!locator && anchorElement?.tagName === 'P') {
+                    const previewRoot = previewRef.current?.querySelector('.docx-template-preview')
+                    if (previewRoot) locator = {
+                      paragraphIndex: [...previewRoot.querySelectorAll('p')].indexOf(anchorElement as HTMLParagraphElement),
+                    }
+                  }
                   if (anchor || locator) {
                     const preview = previewRef.current
                     const targetRect = (anchorElement || clicked).getBoundingClientRect()
                     const previewRect = preview?.getBoundingClientRect()
                     setInlineAnchor(anchor)
                     setInlineLocator(locator)
-                    setNewFieldName('')
+                    setInlineExistingField('')
+                    const recommendations = suggestPlaceholderNames(anchor, fields, suggestedFields)
+                    setNewFieldName(recommendations[0] || '')
                     if (preview && previewRect) setInlineEditorPosition({
                       left: Math.max(12, Math.min(targetRect.left - previewRect.left + preview.scrollLeft, preview.scrollWidth - 310)),
                       top: targetRect.bottom - previewRect.top + preview.scrollTop + 6,
                     })
+                    setLocatingField(true)
                   }
                 }}
                 dangerouslySetInnerHTML={{ __html: decoratedTemplateHtml }}
               /> : renderContent()}
-              {(inlineAnchor || inlineLocator) && inlineEditorPosition && <div className="template-inline-field-popover" style={{ left: inlineEditorPosition.left, top: inlineEditorPosition.top }}>
-                <Input size="small" autoFocus value={newFieldName} onChange={event => setNewFieldName(event.target.value)} onPressEnter={addField} placeholder="占位符名称，回车添加" />
-                <Button size="small" type="primary" onClick={addField}>添加</Button>
-                <Button size="small" type="text" onClick={() => { setInlineAnchor(''); setInlineLocator(null); setInlineEditorPosition(null); setNewFieldName('') }}>取消</Button>
+              {inlineExistingField && inlineEditorPosition && <div className="template-inline-field-popover" style={{ left: inlineEditorPosition.left, top: inlineEditorPosition.top }}>
+                <Tag color="blue" style={{ margin: 0 }}>{`{{${inlineExistingField}}}`}</Tag>
+                <Button size="small" danger icon={<DeleteOutlined />} onClick={() => { removeField(inlineExistingField); setInlineExistingField(''); setInlineEditorPosition(null) }}>删除占位符</Button>
+                <Button size="small" type="text" onClick={() => { setInlineExistingField(''); setInlineEditorPosition(null) }}>取消</Button>
+              </div>}
+              {(inlineAnchor || inlineLocator) && !inlineExistingField && inlineEditorPosition && <div className="template-inline-field-popover editor" style={{ left: inlineEditorPosition.left, top: inlineEditorPosition.top }}>
+                <Text strong style={{ fontSize: 12 }}>添加占位符</Text>
+                <Input
+                  size="small"
+                  autoFocus
+                  value={newFieldName}
+                  onChange={event => setNewFieldName(event.target.value.replace(/[{}]/g, ''))}
+                  onPressEnter={addField}
+                  addonBefore="{{"
+                  addonAfter="}}"
+                  placeholder="字段名称"
+                />
+                {inlineSuggestedNames.length > 0 && <div className="template-placeholder-suggestions">
+                  <Text type="secondary" style={{ fontSize: 11 }}>建议：</Text>
+                  {inlineSuggestedNames.slice(0, 4).map(name => <Button key={name} size="small" type="link" onClick={() => setNewFieldName(name)}>{name}</Button>)}
+                </div>}
+                <div className="template-inline-field-actions">
+                  <Button size="small" type="primary" disabled={!newFieldName.trim()} onClick={addField}>添加</Button>
+                  <Button size="small" onClick={() => { setInlineAnchor(''); setInlineLocator(null); setInlineEditorPosition(null); setNewFieldName(''); setLocatingField(false) }}>取消</Button>
+                </div>
               </div>}
             </div>
           </div>
@@ -779,14 +1015,19 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
           <div style={paneTitle}><span><FileSearchOutlined style={{ color: '#722ed1' }} /> {selectedField || '字段'} · {current.mode === 'ai' ? 'AI扩写' : '字段设置'}</span>{selectedField && <Tag color={current.requirement ? 'success' : 'default'}>{current.requirement ? '已配置' : '待配置'}</Tag>}</div>
           <div style={{ padding: 16, display: 'grid', gap: 15 }}>
             {!selectedField ? <Empty description="请从左侧选择字段" /> : <>
+              <Alert type="info" showIcon message="这里只设置当前占位符的具体要求；所有文档共用的要求请返回模板中心，在“全局规则”中管理。" />
               <div><Text strong>处理方式</Text><Segmented block style={{ marginTop: 7 }} value={current.mode} onChange={value => updateConfig({ mode: value as FillMode })} options={[{ label: '自动填充', value: 'project' }, { label: 'AI扩写', value: 'ai' }, { label: '保持原样', value: 'keep' }]} /></div>
               <div><Text strong>信息来源</Text><Input value={current.source} onChange={event => updateConfig({ source: event.target.value })} style={{ marginTop: 7 }} placeholder="例如：用户输入、项目资料、系统字段" /></div>
-              <div><Text strong>AI 扩写要求 / 自然语言描述</Text><Input.TextArea value={current.requirement} onChange={event => updateConfig({ requirement: event.target.value })} autoSize={{ minRows: 4, maxRows: 7 }} style={{ marginTop: 7 }} placeholder="可直接写规则，也可用自然语言描述，例如：根据检查问题形成正式监理意见，并要求施工单位整改" /></div>
+              <div><Text strong>当前占位符的具体要求</Text><Input.TextArea value={current.requirement} onChange={event => updateConfig({ requirement: event.target.value })} autoSize={{ minRows: 4, maxRows: 7 }} style={{ marginTop: 7 }} placeholder="用简短命令写清内容重点、顺序和禁止事项" /></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div><Text strong>必填性</Text><Segmented block style={{ marginTop: 7 }} value={current.required ? 'required' : 'optional'} onChange={value => updateConfig({ required: value === 'required' })} options={[{ label: '可选', value: 'optional' }, { label: '必填', value: 'required' }]} /></div>
+                <div><Text strong>信息缺失时</Text><Segmented block style={{ marginTop: 7 }} value={current.missingInfoPolicy} onChange={value => updateConfig({ missingInfoPolicy: value as FieldConfig['missingInfoPolicy'] })} options={[{ label: '留空', value: '留空' }, { label: '待确认', value: '待确认' }]} /></div>
+              </div>
               <div><Text strong>建议篇幅</Text><Space style={{ marginTop: 7 }}><InputNumber min={0} value={current.minWords} onChange={value => updateConfig({ minWords: Number(value) || 0 })} />—<InputNumber min={0} value={current.maxWords} onChange={value => updateConfig({ maxWords: Number(value) || 0 })} /> 字</Space></div>
               <div style={{ padding: 12, borderRadius: 8, background: '#fff7e8', display: 'flex', justifyContent: 'space-between' }}><span><CheckCircleFilled style={{ color: '#fa8c16', marginRight: 7 }} />防止编造</span><Switch checked={current.antiFabrication} onChange={value => updateConfig({ antiFabrication: value })} /></div>
               <Space.Compact block>
-                <Button block type="primary" ghost icon={<ThunderboltFilled />} loading={generating} onClick={() => generateSelectedFieldRule('suggest')}>AI 建议规则</Button>
-                <Button block type="primary" icon={<ThunderboltFilled />} loading={generating} onClick={() => generateSelectedFieldRule('polish')} disabled={!current.requirement.trim()}>AI 润色规则</Button>
+                <Button block type="primary" ghost icon={<ThunderboltFilled />} loading={generating} onClick={() => generateSelectedFieldRule('suggest')}>AI 重新生成要求</Button>
+                <Button block type="primary" icon={<ThunderboltFilled />} loading={generating} onClick={() => generateSelectedFieldRule('polish')} disabled={!current.requirement.trim()}>AI 优化当前要求</Button>
               </Space.Compact>
             </>}
           </div>
@@ -795,19 +1036,9 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     </Spin>
 
     <div style={{ borderTop: '1px solid #edf0f3', background: '#fbfcfe' }}>
-      <Collapse ghost items={[{ key: 'constraints', label: <Space><Text strong>全局写作约束</Text><Text type="secondary">反编造铁律、扩写约束和段落格式（点击查看具体内容）</Text></Space>, children: <div style={{ display: 'grid', gap: 12, padding: '0 10px 12px' }}>
-        <Collapse size="small" items={Object.entries(globalDraft).map(([key, rule]) => ({
-          key,
-          label: <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: 8 }}><Text strong>{rule.label || key}</Text><Switch size="small" checked={rule.enabled} onClick={(_, event) => event.stopPropagation()} onChange={enabled => setGlobalDraft(prev => ({ ...prev, [key]: { ...rule, enabled } }))} /></div>,
-          children: <Input.TextArea value={rule.content} onChange={event => setGlobalDraft(prev => ({ ...prev, [key]: { ...rule, content: event.target.value } }))} autoSize={{ minRows: key === 'ANTI_FABRICATION_RULES' ? 10 : 6, maxRows: 16 }} />,
-        }))} />
-      </div> }, { key: 'prompts', label: <Space><Text strong>文种完整提示词</Text><Text type="secondary">供 AI 引擎执行，普通用户通常无需修改</Text></Space>, children: <div style={{ display: 'grid', gap: 12, padding: '0 10px 12px' }}>
-        <div><Space><Text strong>系统提示词</Text><Tag color="blue">字段规则保存时自动同步</Tag></Space><Input.TextArea value={draft?.systemTemplate || ''} onChange={event => setDraft(prev => prev ? { ...prev, systemTemplate: event.target.value } : prev)} autoSize={{ minRows: 6, maxRows: 14 }} style={{ marginTop: 7 }} /></div>
-        <div><Text strong>用户侧要求</Text><Input.TextArea value={draft?.userTemplate || ''} onChange={event => setDraft(prev => prev ? { ...prev, userTemplate: event.target.value } : prev)} autoSize={{ minRows: 4, maxRows: 10 }} style={{ marginTop: 7 }} /></div>
-      </div> }]} />
       <div style={{ borderTop: '1px solid #edf0f3', padding: '12px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Text type="secondary">{template ? `已关联：${template.name} · ${fields.length} 个占位符` : '当前未关联模板文件，请先在模板中心上传并扫描'}</Text>
-        <Space><Button onClick={() => setPromptOpen(true)} icon={<EyeOutlined />}>查看完整规则</Button><Button type="primary" ghost icon={<FileSearchOutlined />} onClick={() => { setStep(3); setPreviewOpen(true) }}>下一步：检查并保存</Button></Space>
+        <Space><Button onClick={() => setPromptOpen(true)} icon={<EyeOutlined />}>查看系统执行详情</Button><Button type="primary" ghost icon={<FileSearchOutlined />} onClick={() => { setStep(3); setPreviewOpen(true) }}>下一步：检查并保存</Button></Space>
       </div>
     </div>
 
@@ -821,7 +1052,25 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
           : <span key={i}>{seg}</span>)}
       </div>}
     </Modal>
-    <Modal title="完整提示词预览" width={820} open={promptOpen} onCancel={() => setPromptOpen(false)} footer={null}><pre style={{ whiteSpace: 'pre-wrap', maxHeight: 560, overflow: 'auto', background: '#f6f8fa', padding: 16 }}>{`【系统提示词】\n${draft?.systemTemplate || ''}\n\n【用户侧要求】\n${draft?.userTemplate || ''}`}</pre></Modal>
+    <Modal title="AI 执行规则（只读）" width={860} open={promptOpen} onCancel={() => setPromptOpen(false)} footer={null}>
+      <Alert type="info" showIcon message={`AI 将按规则填写“${activeItem?.label || activeKey}”的 ${fields.filter(field => configs[field]?.mode === 'ai').length} 个扩写字段；项目资料、系统字段和模板固定内容不会交给 AI 改写。`} style={{ marginBottom: 16 }} />
+      <div className="prompt-execution-summary">
+        <div className="prompt-execution-flow">
+          {['读取可信资料', '识别字段来源', '按专业规则扩写', '防编造检查', '写入实体模板'].map((label, index) => <div key={label} className="prompt-execution-flow__item"><span>{index + 1}</span>{label}</div>)}
+        </div>
+        <div className="prompt-layer-grid">
+          <div className="prompt-layer-card is-locked"><div><LockOutlined /> 系统安全底线</div><Text type="secondary">防编造、输入隔离、审批与签章边界</Text><Tag color="blue">始终启用</Tag></div>
+          <div className="prompt-layer-card"><div><CheckCircleFilled /> 全局文档规则</div><Text type="secondary">模板保护、受控整理、通用交付要求</Text><Tag color="green">3 项</Tag></div>
+          <div className="prompt-layer-card"><div><ApartmentOutlined /> 业务专业规则</div><Text type="secondary">按项目类型加载对应专业 SOP</Text><Tag>{activeItem?.projectType || template?.projectType || '自动匹配'}</Tag></div>
+          <div className="prompt-layer-card"><div><FileSearchOutlined /> 文种与字段规则</div><Text type="secondary">当前文种结构及每个占位符的具体要求</Text><Tag color="purple">{fields.length} 个字段</Tag></div>
+        </div>
+        <Collapse items={[{
+          key: 'raw',
+          label: <Space><Text strong>查看文种与字段原始规则（高级）</Text><Text type="secondary">生成时还会自动叠加上方各层规则</Text></Space>,
+          children: <pre className="prompt-execution-raw">{`【文种与字段执行规则】\n${draft?.systemTemplate || ''}\n\n【任务输入模板】\n${draft?.userTemplate || ''}`}</pre>,
+        }]} />
+      </div>
+    </Modal>
     <Modal title="另存为私人模板" open={saveAsOpen} confirmLoading={saving} onCancel={() => setSaveAsOpen(false)} onOk={() => save(true)} okText="另存" cancelText="取消">
       <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>保存为独立副本，不修改系统、通用或专业模板。当前占位符和扩写规则会一起保留。</Text>
       <Input value={personalTemplateName} onChange={event => setPersonalTemplateName(event.target.value)} placeholder="私人模板名称" onPressEnter={() => save(true)} />

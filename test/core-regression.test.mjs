@@ -11,7 +11,7 @@ import { countEffectiveWords, getMinWordCount } from '../electron/ipc/docValidat
 import { postProcessFabricationGuard, postProcessTimeFields } from '../electron/shared/postProcess.mjs'
 import { buildPlaceholderData, sanitizeFieldValue, sanitizeLetterStyle } from '../electron/templateService.mjs'
 import { computeMonthlyComparison } from '../electron/shared/progressAnalysis.mjs'
-import { stripThinkingContent } from '../src/shared/aiOutput.mjs'
+import { parseAIJsonObject, stripThinkingContent } from '../src/shared/aiOutput.mjs'
 
 const tempDirs = []
 function makeTempDir() {
@@ -27,6 +27,12 @@ test('AI 助手隐藏完整和流式未完成的思考内容', () => {
   assert.equal(stripThinkingContent('<think>内部推理</think>最终回答'), '最终回答')
   assert.equal(stripThinkingContent('<analysis>正在分析'), '')
   assert.equal(stripThinkingContent('结论先行\n<think>后续内部推理'), '结论先行\n')
+})
+
+test('AI JSON 字符串中的未转义换行和控制字符可容错解析', () => {
+  const parsed = parseAIJsonObject('```json\n{"source":"用户输入","requirement":"第一段\n第二段\t要求","minWords":80}\n```')
+  assert.equal(parsed.requirement, '第一段\n第二段\t要求')
+  assert.equal(parsed.minWords, 80)
 })
 
 test('路径校验允许临时目录中的新文件', () => {
@@ -108,6 +114,15 @@ test('具体日期被替换为当天日期', () => {
   assert.match(output, /检查日期为\d{4}年\d{2}月\d{2}日。/)
 })
 
+test('用户明确提供的日期不会被改写成当天', () => {
+  const output = postProcessTimeFields(
+    '【收到时间】2026年08月28日\n【送出时间】2026年08月30日',
+    { sourceText: '收到时间为2026年8月28日，送出时间为2026年8月30日。' },
+  )
+  assert.match(output, /【收到时间】2026年08月28日/)
+  assert.match(output, /【送出时间】2026年08月30日/)
+})
+
 test('周报日期范围保留完整业务周期', () => {
   const input = '【日期范围】2026年8月10日至2026年8月16日\n【周数】33'
   assert.match(postProcessTimeFields(input), /【日期范围】2026年8月10日至2026年8月16日/)
@@ -130,7 +145,10 @@ test('字段清洗移除重复前缀和冒号', () => {
 // v1.x：禁用术语机制已移除，不再有"信息化项目术语守门员"测试
 
 test('信件语体被标记为待清理', () => {
-  assert.match(sanitizeLetterStyle('尊敬的建设单位：\n请处理。\n此致敬礼'), /\{\{待清理：信件语体/)
+  const sanitized = sanitizeLetterStyle('尊敬的建设单位：\n请处理。\n此致敬礼')
+  assert.equal(sanitized, '请处理。')
+  assert.doesNotMatch(sanitized, /\{\{待清理：/)
+  assert.equal(sanitizeLetterStyle('请处理。\n{{待清理：信件语体 - 特此通知}}'), '请处理。')
 })
 
 test('未知参建单位不会被伪造为默认单位', () => {

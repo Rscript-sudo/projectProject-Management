@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { getTemplatePlaceholders, saveDocxTemplatePlaceholders } from '../electron/templateService.mjs'
+import { extractDocxPlaceholdersFromXml, getTemplatePlaceholders, saveDocxTemplatePlaceholders } from '../electron/templateService.mjs'
 import { deleteProfessionalCategory, deleteTemplateFromLibrary, importTemplateToLibrary, listTemplateLibrary, markTemplateRuleConfigured, resolveLibraryTemplate, updateTemplateInLibrary } from '../electron/templateRegistry.mjs'
 
 test('模板占位符可新增、删除并真实写回 DOCX', async t => {
@@ -29,6 +29,31 @@ test('模板占位符可新增、删除并真实写回 DOCX', async t => {
   assert.match(xml, /施工部位：\{\{现场负责人\}\}/, '点选位置新增的占位符应写在锚点后，而不是文末')
 })
 
+test('Word 跨文本片段占位符不会被误判为缺失并重复写入', async t => {
+  const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-template-split-token-'))
+  t.after(() => fs.rmSync(runtimeDir, { recursive: true, force: true }))
+  const target = path.join(runtimeDir, 'split-token.docx')
+  fs.copyFileSync(path.resolve('templates/通用/01_监理日志/监理日志模板.docx'), target)
+  const { default: PizZip } = await import('pizzip')
+  const zip = new PizZip(fs.readFileSync(target))
+  const xmlPath = 'word/document.xml'
+  const originalXml = zip.file(xmlPath).asText()
+  assert.match(originalXml, /\{\{天气\}\}/)
+  const splitXml = originalXml.replace(/\{\{天气\}\}/, '{{</w:t></w:r><w:r><w:t>天气</w:t></w:r><w:r><w:t>}}')
+  zip.file(xmlPath, splitXml)
+  fs.writeFileSync(target, zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' }))
+
+  assert.ok(extractDocxPlaceholdersFromXml(splitXml).includes('天气'))
+  assert.ok((await getTemplatePlaceholders(target)).includes('天气'))
+  await saveDocxTemplatePlaceholders(target, {
+    addFields: ['天气'],
+    placements: [{ field: '天气', paragraphIndex: 0 }],
+  })
+  const savedXml = new PizZip(fs.readFileSync(target)).file(xmlPath).asText()
+  const logicalText = [...savedXml.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)].map(match => match[1]).join('')
+  assert.equal(logicalText.match(/\{\{天气\}\}/g)?.length, 1)
+})
+
 test('空白表格单元格可按表格坐标写入占位符', async t => {
   const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-template-cell-edit-'))
   t.after(() => fs.rmSync(runtimeDir, { recursive: true, force: true }))
@@ -45,6 +70,27 @@ test('空白表格单元格可按表格坐标写入占位符', async t => {
   const firstTable = xml.match(/<w:tbl\b[\s\S]*?<\/w:tbl>/)?.[0] || ''
   const firstCell = firstTable.match(/<w:tc\b[\s\S]*?<\/w:tc>/)?.[0] || ''
   assert.match(firstCell, /\{\{空白单元格字段\}\}/)
+})
+
+test('完全空白段落可按段落坐标写入占位符', async t => {
+  const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-template-blank-paragraph-'))
+  t.after(() => fs.rmSync(runtimeDir, { recursive: true, force: true }))
+  const target = path.join(runtimeDir, 'blank-paragraph.docx')
+  fs.copyFileSync(path.resolve('templates/通用/02_监理周报/监理周报模板.docx'), target)
+  const { default: PizZip } = await import('pizzip')
+  const beforeXml = new PizZip(fs.readFileSync(target)).file('word/document.xml').asText()
+  const paragraphs = beforeXml.match(/<w:p\b[\s\S]*?<\/w:p>/g) || []
+  const paragraphIndex = paragraphs.findIndex(paragraph => !/<w:t\b/.test(paragraph))
+  assert.ok(paragraphIndex >= 0, '测试模板应包含空白段落')
+
+  await saveDocxTemplatePlaceholders(target, {
+    addFields: ['空白段落补充说明'],
+    placements: [{ field: '空白段落补充说明', position: 'after', paragraphIndex }],
+  })
+
+  const afterXml = new PizZip(fs.readFileSync(target)).file('word/document.xml').asText()
+  const afterParagraphs = afterXml.match(/<w:p\b[\s\S]*?<\/w:p>/g) || []
+  assert.match(afterParagraphs[paragraphIndex], /\{\{空白段落补充说明\}\}/)
 })
 
 test('私人模板优先于专业和通用模板参与生成解析', async t => {
@@ -76,7 +122,8 @@ test('用户模板独立记录规则完成状态，替换源文件后自动失�
 
   const replaced = await updateTemplateInLibrary(userDataPath, entry.id, { sourcePath: replacementPath })
   assert.equal(replaced.ok, true)
-  assert.equal(replaced.template.aiRuleConfiguredAt, undefined)
+  assert.ok(replaced.template.aiRuleConfiguredAt, '保留上次配置时间用于区分“从未配置”和“模板变更后失效”')
+  assert.equal(replaced.template.aiRuleNeedsUpdate, true)
 })
 
 test('删除用户模板先移到系统废纸篓，成功后才移除登记', async t => {

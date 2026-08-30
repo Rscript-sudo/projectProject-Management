@@ -23,7 +23,7 @@
  * @param {string} content
  * @returns {string}
  */
-export function postProcessTimeFields(content) {
+export function postProcessTimeFields(content, context = {}) {
   if (!content || typeof content !== 'string') return content
   const now = new Date()
   const year = now.getFullYear()
@@ -33,6 +33,19 @@ export function postProcessTimeFields(content) {
 
   // 顺序很重要：必须先杀后补，否则 AI 编造的日期刚被替换又被清空
   let result = content
+  const protectedSourceDates = []
+  const sourceDateKeys = new Set(
+    [...String(context.sourceText || '').matchAll(/(\d{4})年(\d{1,2})月(\d{1,2})日/g)]
+      .map(match => `${match[1]}-${Number(match[2])}-${Number(match[3])}`)
+  )
+  if (sourceDateKeys.size) {
+    result = result.replace(/(\d{4})年(\d{1,2})月(\d{1,2})日/g, (matched, y, m, d) => {
+      if (!sourceDateKeys.has(`${y}-${Number(m)}-${Number(d)}`)) return matched
+      const token = `__PMS_SOURCE_DATE_${protectedSourceDates.length}__`
+      protectedSourceDates.push(matched)
+      return token
+    })
+  }
   // 周报/月报的日期范围是业务周期数据，不是 AI 随机生成的“具体日期”。
   // 先保护它，避免通用日期清洗把完整周期错误压成当天。
   const protectedRanges = []
@@ -68,7 +81,8 @@ export function postProcessTimeFields(content) {
     result = result.replace(regex, `【${key}】${dateStr}`)
   }
 
-  return result.replace(/__PMS_DATE_RANGE_(\d+)__/g, (_, index) => protectedRanges[Number(index)] || '')
+  result = result.replace(/__PMS_DATE_RANGE_(\d+)__/g, (_, index) => protectedRanges[Number(index)] || '')
+  return result.replace(/__PMS_SOURCE_DATE_(\d+)__/g, (_, index) => protectedSourceDates[Number(index)] || '')
 }
 
 /**

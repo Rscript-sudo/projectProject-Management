@@ -1,6 +1,6 @@
 {
   "name": "project-management-system",
-  "version": "1.3.3",
+  "version": "1.4.0",
   "description": "项目文档管理系统 - AI 文档生成",
   "main": "electron/main.mjs",
   "scripts": {
@@ -13,7 +13,7 @@
     "preview": "electron-builder --dir && open ./dist/mac/项目文档管理系统.app",
     "test": "node --test test/*.test.mjs",
     "test:e2e:smoke": "electron test/e2e.mjs",
-    "test:e2e": "npm run test:e2e:smoke && electron test/completeness-engine.e2e.mjs && electron test/evidence-chain.e2e.mjs && electron test/import-delivery.e2e.mjs && electron test/dashboard-release.e2e.mjs && electron test/project-security.e2e.mjs && electron test/project-template.e2e.mjs && electron test/template-priority.e2e.mjs && electron test/multi-project-template-generation.e2e.mjs && electron test/project-profile-delivery.e2e.mjs && electron test/document-rules.e2e.mjs && electron test/reporting-integrity.e2e.mjs && electron test/system-template-generation.e2e.mjs && electron test/template-ai-full-flow.e2e.mjs && electron test/civil-full-chain.e2e.mjs && electron test/operation-center.e2e.mjs",
+    "test:e2e": "npm run test:e2e:smoke && electron test/completeness-engine.e2e.mjs && electron test/evidence-chain.e2e.mjs && electron test/import-delivery.e2e.mjs && electron test/dashboard-release.e2e.mjs && electron test/project-security.e2e.mjs && electron test/project-template.e2e.mjs && electron test/template-priority.e2e.mjs && electron test/multi-project-template-generation.e2e.mjs && electron test/xlsx-library-template-generation.e2e.mjs && electron test/project-profile-delivery.e2e.mjs && electron test/document-rules.e2e.mjs && electron test/reporting-integrity.e2e.mjs && electron test/filename-governance.e2e.mjs && electron test/system-template-generation.e2e.mjs && electron test/template-ai-full-flow.e2e.mjs && electron test/civil-full-chain.e2e.mjs && electron test/operation-center.e2e.mjs",
     "test:e2e:real-ai": "electron test/civil-ai-expansion.real.e2e.mjs",
     "quality:gate": "npm run verify:ipc && npm run typecheck && npm test && npm run test:e2e && npm run build:renderer && npm audit --omit=dev",
     "typecheck": "tsc --noEmit",

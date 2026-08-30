@@ -14,18 +14,18 @@ export const RULE_PACKS = [
 
   { id: 'weekly_evidence', group: '监理周报', label: '进度数据可追溯', description: '进度、到货、安装、函件统计须来自台账、报验、日报或已归档资料。', default: true, docTypes: ['监理周报'] },
   { id: 'weekly_reported_vs_verified', group: '监理周报', label: '自报与核验分列', description: '施工单位自报数据与监理核验数据不混用，并说明各自来源。', default: true, docTypes: ['监理周报'] },
-  { id: 'weekly_structure', group: '监理周报', label: '五类内容齐全', description: '本周进展、质量安全、问题、下周计划、监理建议均有对应内容。', default: true, docTypes: ['监理周报'], minWords: 1000 },
+  { id: 'weekly_structure', group: '监理周报', label: '五类内容齐全', description: '本周进展、质量安全、问题、下周计划、监理建议均有对应内容。', default: true, docTypes: ['监理周报'], minWords: 650 },
   { id: 'weekly_actions', group: '监理周报', label: '问题与建议可执行', description: '每项问题含场景、处置要求；建议明确执行主体和时限。', default: true, docTypes: ['监理周报'] },
   { id: 'weekly_images_optional', group: '监理周报', label: '影像仅在有资料时附', description: '无归档照片时移除影像附录，不保留空表或虚构图注。', default: true, docTypes: ['监理周报'] },
 
   { id: 'monthly_rollup', group: '监理月报', label: '只汇总当月归档资料', description: '以周报、函件、纪要、进度台账为来源，不重新编造累计数据。', default: true, docTypes: ['监理月报'] },
-  { id: 'monthly_seven_sections', group: '监理月报', label: '七章完整月报', description: '概况、进度、投资、质量、安全、问题建议、下月计划均需有实质内容。', default: true, docTypes: ['监理月报'], minWords: 2000 },
+  { id: 'monthly_seven_sections', group: '监理月报', label: '七章完整月报', description: '概况、进度、投资、质量、安全、问题建议、下月计划均需有实质内容。', default: true, docTypes: ['监理月报'], minWords: 1100 },
   { id: 'monthly_metrics', group: '监理月报', label: '累计指标有计算依据', description: '工程量、进度比例、投资数据应写明来源或计算口径；无数据不填估算。', default: true, docTypes: ['监理月报'] },
   { id: 'monthly_supervision', group: '监理月报', label: '履职记录可核验', description: '巡视、旁站、函件、会议等写具体事项或编号，不只罗列数量。', default: true, docTypes: ['监理月报'] },
 
-  { id: 'notice_three_parts', group: '通知与函件', label: '通知书三段结构', description: '整改/安全通知按问题（或风险）、要求、复核或复工安排组织。', default: true, docTypes: ['整改通知书', '安全通知书', '停工令'], minWords: 800 },
+  { id: 'notice_three_parts', group: '通知与函件', label: '通知书三段结构', description: '整改/安全通知按问题（或风险）、要求、复核或复工安排组织。', default: true, docTypes: ['整改通知书', '安全通知书', '停工令'], minWords: 350 },
   { id: 'notice_deadline', group: '通知与函件', label: '时限必须有依据', description: '仅使用用户提供或已配置的完成期限，不自行编造具体时点。', default: true, docTypes: ['整改通知书', '安全通知书', '停工令'] },
-  { id: 'contact_actionable', group: '通知与函件', label: '联系单写成行动事项', description: '每项写清对象、需配合事项、提交资料或会议安排，不套用整改语气。', default: true, docTypes: ['工程联系单'], minWords: 800 },
+  { id: 'contact_actionable', group: '通知与函件', label: '联系单写成行动事项', description: '每项写清对象、需配合事项、提交资料或会议安排，不套用整改语气。', default: true, docTypes: ['工程联系单'], minWords: 250 },
   { id: 'regulation_controlled', group: '通知与函件', label: '规范条款受控引用', description: '仅引用用户提供或受控规范库中能核验的条款；不能确定就不写条款号。', default: true, docTypes: ['整改通知书', '安全通知书', '停工令'] },
 ]
 
@@ -53,7 +53,7 @@ export function buildDocumentRulesInjection(docType, rules = {}) {
   const packs = getApplicableRulePacks(docType, normalized)
   const lines = packs.map((pack, index) => `${index + 1}. ${pack.label}：${pack.description}`)
   const target = getDocumentRuleMinWords(docType, normalized)
-  if (target) lines.push(`${lines.length + 1}. 正文不得少于 ${target} 字（建议按事实写到 ${target} 字左右）；短通知、联系单可按事实简洁成文，但不得以标题、占位符或重复内容凑数。`)
+  if (target) lines.push(`${lines.length + 1}. 叙述内容以 ${target} 字左右为篇幅建议；事实较少时从简，不得以重复内容凑字数或撑破模板分页。`)
   if (normalized.additionalInstruction) lines.push(`${lines.length + 1}. 项目补充要求：${normalized.additionalInstruction}`)
   return `【本项目文书规则（已选择的能力包）】\n${lines.join('\n')}\n\n交付前静默自查：内容是否有来源、是否符合项目专业、结构是否齐全、每项要求是否可执行。规则不得覆盖“不得编造事实、正式件不得含待核对内容、模板字段契约和专业术语门禁”。`
 }

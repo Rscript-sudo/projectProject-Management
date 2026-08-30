@@ -25,12 +25,12 @@
     "{{天气}}": {
       "source": "param",
       "key": "weather",
-      "default": "晴"
+      "default": ""
     },
     "{{气温}}": {
       "source": "param",
       "key": "temperature",
-      "default": "20℃~28℃"
+      "default": ""
     },
     "{{施工部位}}": {
       "source": "param",
@@ -40,7 +40,7 @@
     "{{参与人员}}": {
       "source": "param",
       "key": "participants",
-      "default": "监理2名,施工人员若干"
+      "default": ""
     },
     "{{今日内容}}": {
       "source": "param",

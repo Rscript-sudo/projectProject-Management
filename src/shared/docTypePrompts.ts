@@ -43,6 +43,9 @@ export interface GlobalRule {
   label: string
   enabled: boolean
   content: string
+  scope?: 'system' | 'global'
+  locked?: boolean
+  summary?: string
 }
 
 export interface MarketplaceTemplate {
@@ -78,7 +81,7 @@ export function hasUsableDocTypePrompt(
 }
 
 /**
- * 合并全局规则：用户覆盖层 enabled=false 时禁用某条规则；content 替换默认
+ * 合并全局规则：系统底线不可关闭或覆盖；普通全局规则允许用户调整。
  */
 export function mergeGlobalRules(
   defaultRules: Record<string, GlobalRule>,
@@ -88,6 +91,7 @@ export function mergeGlobalRules(
   const merged: Record<string, GlobalRule> = { ...defaultRules }
   for (const [key, override] of Object.entries(userOverrides)) {
     if (merged[key]) {
+      if (merged[key].locked || merged[key].scope === 'system') continue
       merged[key] = {
         ...merged[key],
         ...override,
@@ -191,12 +195,13 @@ export function resolveDocTypePromptForAny(
   // 自定义文种（或不在默认 16）：仅有覆盖时以覆盖为准
   const override = userOverrides?.[docType]
   if (override && (override.systemTemplate || override.userTemplate)) {
+    const fieldUserTemplate = '【任务】根据以下用户事实填写当前模板中允许 AI 扩写的字段。\n\n【用户事实】\n${userInput}\n\n只输出模板字段契约要求的【字段名】字段；信息不足时留空或标注“待确认”，不得编造。'
     const merged: DocTypeConfig = {
       key: docType,
       mode: 'B',
       minWords: override.minWords ?? 600,
       systemTemplate: override.systemTemplate ?? '',
-      userTemplate: override.userTemplate ?? '',
+      userTemplate: override.userTemplate?.trim() || ((override.fields?.length || 0) > 0 ? fieldUserTemplate : ''),
       fields: override.fields ?? [],
       hardConstraints: override.hardConstraints ?? [],
       extras: override.extras ?? {},

@@ -1,14 +1,15 @@
 // v1.x：模板库工作区 —— 通用模板 / 专业模板共用
-// 列全：企业模板（可编辑/删除/替换）+ 系统预置模板（只读）
+// 列全：企业模板 + 内置企业基线模板（用户文档目录中的工作副本，可编辑）
 // 支持批量导入、字段识别、打开、配置扩写规则
 import { useEffect, useState, useCallback } from 'react'
 import { AutoComplete, Card, Table, Button, Space, Tag, Empty, App, Typography, Popconfirm, Tooltip, Modal, Input, Alert, Menu } from 'antd'
-import { InboxOutlined, ReloadOutlined, EyeOutlined, DeleteOutlined, EditOutlined, MinusCircleOutlined, PlusOutlined, ScanOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { InboxOutlined, ReloadOutlined, EyeOutlined, DeleteOutlined, EditOutlined, FormatPainterOutlined, MinusCircleOutlined, PlusOutlined, ScanOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { getAllProjectTypes } from '../shared/projectProfile.mjs'
 import { BUILTIN_DOC_TYPES } from '../shared/builtinDocTypes'
 import { getTemplateStatus, TEMPLATE_STATUS } from '../shared/templateReadiness.mjs'
+import TemplateLayoutContractEditor from './TemplateLayoutContractEditor'
 
 const { Text } = Typography
 
@@ -24,6 +25,7 @@ interface Tpl {
   id: string; name: string; docType: string; scope: string; projectType: string
   path: string; sourceName: string; fields?: string[]; readOnly?: boolean; missing?: boolean
   aiRuleConfiguredAt?: string
+  layoutContract?: { status?: string; warningCount?: number; schemaVersion?: number; templateHash?: string }
   customDocTypeCode?: string
   projectTypeLabel?: string
 }
@@ -40,6 +42,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
   const [addTypeOpen, setAddTypeOpen] = useState(false)
   const [newTypeName, setNewTypeName] = useState('')
   const [contextMenu, setContextMenu] = useState<{ template: Tpl; x: number; y: number } | null>(null)
+  const [layoutTemplate, setLayoutTemplate] = useState<Tpl | null>(null)
 
   // 编辑弹窗
   const [editTpl, setEditTpl] = useState<Tpl | null>(null)
@@ -62,8 +65,8 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
       setHiddenCommonDocTypes(hiddenTypes)
       const matchScope = (t: Tpl) => {
         if (scope === 'global') return t.scope === 'global'
-        if (scope === 'other') return t.scope === 'other'
-        if (scope === 'personal') return t.scope === 'personal'
+        if (scope === 'other') return t.scope === 'other' && (!projectType || t.projectType === projectType || t.projectTypeLabel === projectType)
+        if (scope === 'personal') return t.scope === 'personal' && (!projectType || t.projectType === projectType || t.projectTypeLabel === projectType)
         return t.scope === 'professional' && (t.projectType === projectType || t.projectTypeLabel === projectType)
       }
       const enterprise = (all || []).filter(matchScope).map(t => ({ ...t, readOnly: false }))
@@ -123,7 +126,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
       sourcePath,
       docType,
       scope,
-      projectType: scope === 'professional' ? projectType : undefined,
+      projectType: scope === 'professional' || scope === 'other' || scope === 'personal' ? projectType : undefined,
     })
     if (!result.success) throw new Error(result.error || '导入失败')
     return result.template
@@ -156,7 +159,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
       }
       let ok = 0
       for (const f of files) {
-        if (!f.toLowerCase().endsWith('.docx')) continue
+        if (!/\.(docx|xlsx)$/i.test(f)) continue
         await doImport(f, requestedDocType)
         ok++
       }
@@ -258,7 +261,15 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
     else message.error('恢复文种失败')
   }
 
-  const openEdit = (tpl: Tpl) => { setEditTpl(tpl); setEditName(tpl.docType); }
+  const openEdit = async (tpl: Tpl) => {
+    if (tpl.readOnly && tpl.path) {
+      const result = await window.electronAPI.openFile(tpl.path)
+      if (result?.success) message.info('已打开内置模板工作副本；保存后点击“扫描模板字段”刷新')
+      else message.error(result?.error || '无法打开模板文件')
+      return
+    }
+    setEditTpl(tpl); setEditName(tpl.docType)
+  }
 
   const handleEditSubmit = async () => {
     if (!editTpl) return
@@ -322,7 +333,14 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
         if (status === TEMPLATE_STATUS.MISSING_FILE) return <Tag color="error">文件缺失</Tag>
         if (status === TEMPLATE_STATUS.PENDING_FIELDS) return <Tag color="warning">待识别占位符</Tag>
         if (status === TEMPLATE_STATUS.PENDING_RULES) return <Tag color="gold">待配置规则</Tag>
-        return <Tag color="success">可使用</Tag>
+        return <Space size={4} wrap style={{ justifyContent: 'center' }}>
+          <Tag color="success" style={{ margin: 0 }}>可使用</Tag>
+          {!r.readOnly && r.layoutContract?.status === 'ready' && (
+            <Tooltip title={r.layoutContract.warningCount ? `版式合同已生成，存在 ${r.layoutContract.warningCount} 项需复核` : '已自动提取占位符格式，并保护页眉、页脚和 Logo 资产'}>
+              <Tag color={r.layoutContract.warningCount ? 'orange' : 'cyan'} style={{ margin: 0 }}>版式已识别</Tag>
+            </Tooltip>
+          )}
+        </Space>
       },
     },
     {
@@ -349,6 +367,9 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
           <Tooltip title="扫描模板字段">
             <Button size="small" type="text" disabled={r.missing} icon={<ScanOutlined />} onClick={() => handleScanFields(r)} />
           </Tooltip>
+          <Tooltip title={/\.docx$/i.test(r.path || r.sourceName || '') ? '查看或编辑版式合同' : '版式合同目前适用于 DOCX'}>
+            <Button size="small" type="text" disabled={r.missing || !/\.docx$/i.test(r.path || r.sourceName || '')} icon={<FormatPainterOutlined />} onClick={() => setLayoutTemplate(r)} />
+          </Tooltip>
           <Popconfirm disabled={r.missing} title="确定删除该模板？" okText="删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => handleDelete(r)}>
             <Tooltip title="删除">
               <Button size="small" type="text" danger disabled={r.missing} icon={<DeleteOutlined />} />
@@ -369,8 +390,8 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
   return (
     <Card
       title={<Text strong style={{ fontSize: 16 }}>{title}</Text>}
-      style={{ borderRadius: 8 }}
-      extra={<Space>
+      className="app-content-card template-library-card"
+      extra={<Space wrap size={8}>
         {scope === 'global' && display === 'all' && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddTypeOpen(true)}>新增文种</Button>
         )}
@@ -383,19 +404,19 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
         <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
       </Space>}
     >
-      {display !== 'system' && <Space style={{ marginBottom: 12, width: '100%' }} wrap>
+      {display !== 'system' && <div className="app-card-toolbar">
         <AutoComplete
           value={importDocType}
           onChange={setImportDocType}
-          style={{ width: 200 }}
+          style={{ width: 220 }}
           options={allDocTypes.map(d => ({ value: d, label: d }))}
           filterOption={(input, option) => String(option?.value || '').toLowerCase().includes(input.toLowerCase())}
           placeholder="输入或选择文种"
         />
         <Button type="primary" icon={<InboxOutlined />} loading={importing} onClick={handleImport}>添加模板</Button>
-        {scope === 'professional' && projectType && <Text type="secondary">导入到专业：{projectType}</Text>}
-        <Text type="secondary" style={{ fontSize: 12 }}>支持多选 .docx，自动识别字段</Text>
-      </Space>}
+        {(scope === 'professional' || scope === 'other' || scope === 'personal') && projectType && <Text type="secondary">导入到文件夹：{projectType}</Text>}
+        <Text className="app-card-toolbar__hint">支持多选 .docx / .xlsx，导入后自动识别字段</Text>
+      </div>}
       {scope === 'global' && display === 'all' && (
         <Alert
           type="info" showIcon
@@ -441,6 +462,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
       </div>}
 
       {/* 编辑 / 替换弹窗 */}
+      <TemplateLayoutContractEditor open={Boolean(layoutTemplate)} template={layoutTemplate ? { ...layoutTemplate, readOnly: false } : null} onClose={() => setLayoutTemplate(null)} onSaved={load} />
       <Modal
         title={`${editTpl?.missing ? '添加' : '编辑'}模板：${editTpl?.docType || ''}`}
         open={!!editTpl}

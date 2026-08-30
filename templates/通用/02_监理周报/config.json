@@ -56,12 +56,12 @@
     "{{集采部分内容}}": {
       "source": "param",
       "key": "centralized_procurement",
-      "default": "数据待核对"
+      "default": ""
     },
     "{{非集采部分内容}}": {
       "source": "param",
       "key": "non_centralized_procurement",
-      "default": "数据待核对"
+      "default": ""
     },
     "{{到货安装统计}}": {
       "source": "param",
@@ -88,14 +88,14 @@
       "key": "supervisor_suggestions",
       "default": ""
     },
-    "{{图1路径}}": { "source": "param", "key": "image1_path", "default": "数据待核对" },
-    "{{图1说明}}": { "source": "param", "key": "image1_caption", "default": "数据待核对" },
-    "{{图2路径}}": { "source": "param", "key": "image2_path", "default": "数据待核对" },
-    "{{图2说明}}": { "source": "param", "key": "image2_caption", "default": "数据待核对" },
-    "{{图3路径}}": { "source": "param", "key": "image3_path", "default": "数据待核对" },
-    "{{图3说明}}": { "source": "param", "key": "image3_caption", "default": "数据待核对" },
-    "{{图4路径}}": { "source": "param", "key": "image4_path", "default": "数据待核对" },
-    "{{图4说明}}": { "source": "param", "key": "image4_caption", "default": "数据待核对" }
+    "{{图1路径}}": { "source": "param", "key": "image1_path", "default": "" },
+    "{{图1说明}}": { "source": "param", "key": "image1_caption", "default": "" },
+    "{{图2路径}}": { "source": "param", "key": "image2_path", "default": "" },
+    "{{图2说明}}": { "source": "param", "key": "image2_caption", "default": "" },
+    "{{图3路径}}": { "source": "param", "key": "image3_path", "default": "" },
+    "{{图3说明}}": { "source": "param", "key": "image3_caption", "default": "" },
+    "{{图4路径}}": { "source": "param", "key": "image4_path", "default": "" },
+    "{{图4说明}}": { "source": "param", "key": "image4_caption", "default": "" }
   },
   "triggers": [
     "监理周报",

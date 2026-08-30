@@ -119,3 +119,22 @@ export function ensureProfessionalCategory(userDataPath, label) {
   fs.mkdirSync(directory, { recursive: true })
   return { ok: true, directory }
 }
+
+export function listTemplateCategories(userDataPath, scope = 'other') {
+  if (!['professional', 'personal', 'other'].includes(scope)) return []
+  const root = getTemplateScopeDir(userDataPath, scope)
+  if (!fs.existsSync(root)) return []
+  return fs.readdirSync(root, { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== '清理归档')
+    .map(entry => ({ name: entry.name, path: path.join(root, entry.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+}
+
+export function ensureTemplateCategory(userDataPath, scope, label) {
+  if (!['professional', 'personal', 'other'].includes(scope)) throw new Error('模板分类无效')
+  const safeLabel = String(label || '').trim()
+  if (!safeLabel || /[\\/:*?"<>|]/.test(safeLabel) || safeLabel === '.' || safeLabel === '..') throw new Error('文件夹名称为空或包含非法字符')
+  const directory = path.join(getTemplateScopeDir(userDataPath, scope), safeLabel)
+  fs.mkdirSync(directory, { recursive: true })
+  return { ok: true, name: safeLabel, directory }
+}

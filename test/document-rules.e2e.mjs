@@ -26,9 +26,9 @@ async function main() {
   assert.deepEqual(config.documentRules.rulePackIds, rules.rulePackIds)
   assert.equal(config.documentRules.additionalInstruction, rules.additionalInstruction)
   const { getDocumentRuleMinWords, buildDocumentRulesInjection } = await import('../src/shared/documentRules.mjs')
-  assert.equal(getDocumentRuleMinWords('监理周报', config.documentRules), 1000)
+  assert.equal(getDocumentRuleMinWords('监理周报', config.documentRules), 650)
   assert.match(buildDocumentRulesInjection('监理周报', config.documentRules), /进度数据可追溯/)
-  assert.match(buildDocumentRulesInjection('监理周报', config.documentRules), /不得少于 1000 字/)
+  assert.match(buildDocumentRulesInjection('监理周报', config.documentRules), /650 字左右为篇幅建议/)
   console.log('DOCUMENT RULES E2E PASS')
 }
 

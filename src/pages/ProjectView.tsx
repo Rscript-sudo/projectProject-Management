@@ -9,6 +9,9 @@ import { countEffectiveWords, getMinWordCount } from '../shared/docTypeMinWords'
 import { getDocumentRuleMinWords } from '../shared/documentRules.mjs'
 import { stripThinkingContent } from '../shared/aiOutput.mjs'
 import { hasUsableDocTypePrompt } from '../shared/docTypePrompts'
+import { buildTemplateRuleEditorUrl } from '../shared/templateRuleNavigation.mjs'
+import { getTemplateInputPlaceholder } from '../shared/templateInputGuidance.mjs'
+import { getTemplateStatusBadge, isTemplateReady } from '../shared/templateReadiness.mjs'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { normalizeStructuredDocument, validateStructuredDocument } from '../shared/structuredGeneration'
 import type { SessionMode } from '../services/aiService'
@@ -44,6 +47,8 @@ interface GenerationTemplate {
   path: string
   sourceName?: string
   aiRuleConfiguredAt?: string
+  aiRuleNeedsUpdate?: boolean
+  missing?: boolean
   fields?: string[]
   readOnly?: boolean
 }
@@ -133,6 +138,8 @@ const AUTO_FILLED_TEMPLATE_FIELDS = new Set([
   '致单位', '致送单位', '建设单位', '业主单位', '业主', '甲方', '甲方单位',
   '施工单位', '承建单位', '乙方', '乙方单位', '监理单位', '监理公司', '监理机构',
   '总监理工程师', '总监姓名', '总监理', '编制人', '审核人', '批准人',
+  '施工单位签名', '监理单位签名', '建设单位签名', '签名日期',
+  '局点名称', '表格行规格型号', '表格行备注', '表格行其它情况',
 ])
 
 function validateGeneratedOutput(docType: string, content: string, templateFields: string[]) {
@@ -159,13 +166,20 @@ function sanitizeFullPipeline(
   let result = stripThinkingContent(rawContent)
   result = stripCalibrationStatement(result)
   const guardResult = postProcessFabricationGuard(result)
-  result = postProcessTimeFields(guardResult.content, { docType: ctx.docType, holidayType: ctx.holidayType })
+  result = postProcessTimeFields(guardResult.content, { docType: ctx.docType, holidayType: ctx.holidayType, sourceText: ctx.sourceText })
   if (ctx.isDocMode) {
     result = result.replace(
       /【(事由|主题|标题|摘要)】\s*([\s\S]*?)(?=【|$)/g,
       (_m, k, v) => `【${k}】${sanitizeFieldValue(String(v).trim())}`
     )
     result = sanitizeLetterStyle(result)
+    // 文档生成与审批分离：这些字段可以存在于模板中，但 AI 生成阶段不得代替
+    // 审批人作出流程决定。保留字段名并清空值，供后续独立审批流程填写。
+    const decisionFields = '(?:审批意见|审批结论|审核结论|批准意见|是否同意|支付结论|是否进入下道工序)'
+    result = result.replace(
+      new RegExp(`【(${decisionFields})】[\\s\\S]*?(?=【|$)`, 'g'),
+      (_match, field) => `【${field}】`,
+    )
   }
   if (ctx.docType === '监理日志') {
     result = sanitizeUnsupportedLogParticipants(result, ctx.sourceText || '')
@@ -427,23 +441,29 @@ export default function ProjectView() {
     }
   }, [templateCatalog])
 
-  // 消费 URL ?docType= 参数，预填输入框
+  // 项目配置是模板选择的真相源。返回生成页或重启应用后恢复高亮，避免界面选中项与实际渲染模板脱节。
+  useEffect(() => {
+    if (!activeDocumentType || generationTemplates.length === 0) return
+    const configuredId = projectConfig.templateSelections?.[activeDocumentType]
+    if (configuredId) {
+      setSelectedGenerationTemplateId(configuredId)
+      return
+    }
+    if (configuredId === null) {
+      const systemTemplate = generationTemplates.find(item => item.docType === activeDocumentType && item.scope === 'system')
+      setSelectedGenerationTemplateId(systemTemplate?.id)
+    }
+  }, [activeDocumentType, generationTemplates, projectConfig.templateSelections])
+
+  // 消费从规则页返回时携带的上下文。只有真实用户输入才恢复到编辑框；
+  // 文种名称本身不再作为可发送内容预填，避免误发空任务。
   useEffect(() => {
     const docType = searchParams.get('docType')
     const prefill = searchParams.get('input')
     const generationTemplateId = searchParams.get('generationTemplateId')
     if (docType) setActiveDocumentType(docType)
     if (generationTemplateId) setSelectedGenerationTemplateId(generationTemplateId)
-    if (prefill) {
-      setInput(prefill)
-    } else if (docType) {
-      const templateDocTypes = ['整改通知书', '安全通知书', '工程联系单', '停工令', '会议纪要', '监理周报', '监理月报', '监理日志']
-      if (templateDocTypes.includes(docType)) {
-        setInput(`生成一份${docType}`)
-      } else {
-        setInput(docType)
-      }
-    }
+    if (prefill) setInput(prefill)
   }, [searchParams])
 
   const loadTemplateCatalog = async () => {
@@ -488,8 +508,7 @@ export default function ProjectView() {
         : { start: now.startOf('month').format('YYYY-MM-DD'), end: now.endOf('month').format('YYYY-MM-DD') })
     }
     setSelectedGenerationTemplateId(template.id)
-    setInput(previous => previous.trim() || `请使用“${template.name || template.docType}”模板生成一份${template.docType}：`)
-    message.success(`已选择“${template.name || template.docType}”，请补充要求后发送`)
+    message.success(`已选择“${template.name || template.docType}”，请输入事实或上传资料`)
   }
 
   const handleAttachFolder = async () => {
@@ -578,14 +597,28 @@ export default function ProjectView() {
       return
     }
 
-    const trimmedInput = input.trim()
-    if (!trimmedInput || loading) return
+    if (loading) return
+    const trimmedInput = input.trim() || (attachedItems.length > 0
+      ? `请根据已上传的资料填写当前${activeDocumentType || '文档'}，只使用可核验事实。`
+      : '')
+    if (!trimmedInput) {
+      message.warning(activeDocumentType ? getTemplateInputPlaceholder(activeDocumentType) : '请输入需求，或先上传相关资料')
+      return
+    }
     autoFollowOutputRef.current = true
 
     // 先完成文种与模板规则门禁，再检查 AI 服务，避免无规则模板先发起网络请求。
     const identified = identifyMode(trimmedInput)
     let { mode, docType, dataToolIds } = identified
-    if (activeDocumentType && (mode === 'CHAT' || (mode === 'DOC' && docType === '通用文档'))) {
+    const explicitlySelectedTemplate = generationTemplates.find(item => item.id === selectedGenerationTemplateId)
+    // 用户在模板资源中点选的实体模板是本次生成文种的最高优先级真相源。
+    // 不能再让关键词识别把“网络系统工程设计方案审核意见表”等专业文种降级为
+    // 泛化的“方案审核意见”，否则会绕开该模板刚保存的字段合同和 AI 规则。
+    if (explicitlySelectedTemplate && activeDocumentType === explicitlySelectedTemplate.docType) {
+      mode = 'DOC'
+      docType = explicitlySelectedTemplate.docType
+      dataToolIds = []
+    } else if (activeDocumentType && (mode === 'CHAT' || (mode === 'DOC' && docType === '通用文档'))) {
       mode = 'DOC'
       docType = activeDocumentType
       dataToolIds = []
@@ -601,19 +634,20 @@ export default function ProjectView() {
       const promptKey = settingsState.customDocTypes.find(item => item.label === effectiveDocType)?.code || effectiveDocType
       const selectedTemplate = generationTemplates.find(item => item.id === selectedGenerationTemplateId)
       const hasDocTypeRule = hasUsableDocTypePrompt(promptKey, settingsState.docTypePromptOverrides)
-      const hasTemplateRule = !selectedTemplate || selectedTemplate.scope === 'system' || Boolean(selectedTemplate.aiRuleConfiguredAt)
+      const hasTemplateRule = !selectedTemplate || isTemplateReady({ ...selectedTemplate, readOnly: selectedTemplate.scope === 'system' })
       if (!hasDocTypeRule || !hasTemplateRule) {
-        const returnParams = new URLSearchParams(location.search)
-        returnParams.set('docType', effectiveDocType)
-        returnParams.set('input', trimmedInput)
-        if (selectedTemplate?.id) returnParams.set('generationTemplateId', selectedTemplate.id)
-        const returnTo = `${location.pathname}?${returnParams.toString()}`
         Modal.confirm({
           title: '模板尚未配置 AI 扩写规则',
           content: `“${selectedTemplate?.name || effectiveDocType}”尚未完成这份模板的 AI 扩写规则配置。请先确认字段和扩写规则，保存后系统会返回当前项目继续生成。`,
           okText: '去配置规则',
           cancelText: '暂不生成',
-          onOk: () => navigate(`/template-center?rules=${encodeURIComponent(effectiveDocType)}${selectedTemplate?.id ? `&templateId=${encodeURIComponent(selectedTemplate.id)}` : ''}&returnTo=${encodeURIComponent(returnTo)}`),
+          onOk: () => navigate(buildTemplateRuleEditorUrl({
+            pathname: location.pathname,
+            search: location.search,
+            docType: effectiveDocType,
+            templateId: selectedTemplate?.id,
+            input: trimmedInput,
+          })),
         })
         return
       }
@@ -1217,7 +1251,7 @@ export default function ProjectView() {
         height: '100%',
       }}>
         {/* 树头部 */}
-        <div style={{
+        <div className="ai-output-toolbar" style={{
           padding: '8px 12px',
           borderBottom: '1px solid #e8e8e8',
           display: 'flex',
@@ -1313,7 +1347,7 @@ export default function ProjectView() {
           </div>
         )}
         {/* 聊天头部 — 模式感知 */}
-        <div style={{
+        <div className="ai-output-toolbar" style={{
           padding: '8px 16px',
           borderBottom: '1px solid #f0f0f0',
           display: 'flex',
@@ -1322,14 +1356,15 @@ export default function ProjectView() {
           flexShrink: 0,
         }}>
           <span className="ai-output-icon"><RobotOutlined /></span>
-          <Text strong style={{ fontSize: 14 }}>AI 扩写结果</Text>
+          <Text strong className="ai-output-title" style={{ fontSize: 14 }}>AI 扩写结果</Text>
           {loading && <span className="ai-stream-status"><span className="ai-live-dot" />正在生成…</span>}
           {/* 项目选择器：决定所有 AI 辅助的工作项目 */}
           <Select
             size="small"
             value={currentProject?.path || undefined}
             placeholder="选定项目"
-            style={{ minWidth: 160, maxWidth: 220 }}
+            className="ai-project-selector"
+            style={{ minWidth: 120, width: 220, maxWidth: '100%' }}
             onChange={(path) => {
               const proj = projects.find(p => p.path === path)
               if (proj) setCurrentProject(proj)
@@ -1362,11 +1397,13 @@ export default function ProjectView() {
               {progressStage === 'analyzing' ? '分析中' : progressStage === 'generating' ? '生成中' : '处理中'}
             </Tag>
           )}
-          <div style={{ flex: 1 }} />
-          {loading && <Button size="small" onClick={stopStreaming}>停止生成</Button>}
-          <Button size="small" icon={<HistoryOutlined />} onClick={() => { setSessionModalOpen(true); void loadChatSessions('') }}>会话</Button>
-          <Button size="small" onClick={copyLatestAssistant}>复制</Button>
-          <Button size="small" className="ai-apply-button" disabled={!previewContent} onClick={handleSave}>应用到文档</Button>
+          <div className="ai-output-toolbar-spacer" />
+          <div className="ai-output-actions">
+            {loading && <Button size="small" onClick={stopStreaming}>停止生成</Button>}
+            <Button size="small" icon={<HistoryOutlined />} onClick={() => { setSessionModalOpen(true); void loadChatSessions('') }}>会话</Button>
+            <Button size="small" onClick={copyLatestAssistant}>复制</Button>
+            <Button size="small" className="ai-apply-button" disabled={!previewContent} onClick={handleSave}>应用到文档</Button>
+          </div>
         </div>
 
         <Modal title="项目会话" open={sessionModalOpen} onCancel={() => setSessionModalOpen(false)} footer={null} width={620}>
@@ -1549,29 +1586,47 @@ export default function ProjectView() {
             background: '#fff',
             border: '1px solid #e4e9f0',
             borderRadius: 12,
-            padding: '7px 8px 7px 12px',
+            padding: '7px 8px',
             transition: 'border-color 0.2s',
             boxShadow: '0 1px 2px rgba(15, 23, 42, 0.02)',
           }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#91caff' }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e4e9f0' }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 26, paddingBottom: 4, borderBottom: '1px solid #f0f2f5' }}>
-              <Text type="secondary" style={{ fontSize: 11 }}><PictureOutlined style={{ marginRight: 4 }} />可拖入图片识别；写文书时请选择文种</Text>
-              <Button size="small" type="text" onClick={() => { setRightPanelTab('templates'); setRightPanelCollapsed(false) }} style={{ borderRadius: 6, fontSize: 11, height: 25, color: '#1677ff' }}>
-                {activeDocumentType ? `当前模板：${activeDocumentType}` : '从右侧选择模板'}
-              </Button>
-            </div>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', paddingTop: 6 }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', minWidth: 0 }}>
+              <Tooltip title={activeDocumentType ? `当前模板：${activeDocumentType}，点击更换` : '选择生成模板'}>
+                <Button
+                  size="small"
+                  type={activeDocumentType ? 'default' : 'dashed'}
+                  icon={<BookOutlined />}
+                  onClick={() => { setRightPanelTab('templates'); setRightPanelCollapsed(false) }}
+                  aria-label={activeDocumentType ? `当前模板：${activeDocumentType}，点击更换` : '选择模板'}
+                  style={{
+                    height: 32,
+                    maxWidth: 154,
+                    flexShrink: 1,
+                    borderRadius: 8,
+                    color: activeDocumentType ? '#1677ff' : '#64748b',
+                    borderColor: activeDocumentType ? '#bae0ff' : '#d9d9d9',
+                    background: activeDocumentType ? '#f0f7ff' : '#fff',
+                    paddingInline: 9,
+                  }}
+                >
+                  <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {activeDocumentType || '选择模板'}
+                  </span>
+                </Button>
+              </Tooltip>
               <TextArea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onPressEnter={(e) => { if (!e.shiftKey) { e.preventDefault(); handleSend() } }}
-                placeholder={recognizingImages ? '正在识别图片…' : activeDocumentType ? `填写${activeDocumentType}的现场事实、事项和要求…` : '输入需求，或直接拖入现场图片…'}
+                placeholder={recognizingImages ? '正在识别图片…' : getTemplateInputPlaceholder(activeDocumentType)}
                 disabled={recognizingImages}
                 autoSize={{ minRows: 1, maxRows: 4 }}
                 variant="borderless"
-                style={{ fontSize: 13, padding: '2px 0', resize: 'none' }}
+                aria-label="文档生成要求"
+                style={{ fontSize: 13, padding: '5px 4px', resize: 'none', minWidth: 80 }}
               />
               <Dropdown menu={{ items: [{ key: 'folder', icon: <FolderOpenOutlined />, label: '选择文件夹' }, { key: 'file', icon: <FileTextOutlined />, label: '选择文件' }], onClick: ({ key }) => { if (key === 'folder') handleAttachFolder(); else handleAttachFiles() } }} trigger={['click']}>
                 <Button icon={<FolderOpenOutlined />} title="选择文件或文件夹" style={{ height: 32, width: 32, borderRadius: 7, flexShrink: 0, color: attachedItems.length > 0 ? '#1677ff' : '#94a3b8', border: 'none', background: 'transparent', fontSize: 14 }} />
@@ -1943,18 +1998,26 @@ export default function ProjectView() {
                       const searchMatch = !keyword || `${item.name}${item.docType}${item.projectType || ''}`.toLowerCase().includes(keyword)
                       return professionalMatch && searchMatch
                     })
+                    const statusPriority: Record<string, number> = { needs_update: 0, missing_file: 0, pending_fields: 1, pending_rules: 1, ready: 2, system: 3 }
+                    const sortByStatus = (items: GenerationTemplate[]) => [...items].sort((a, b) => {
+                      const aStatus = getTemplateStatusBadge({ ...a, readOnly: a.scope === 'system' })
+                      const bStatus = getTemplateStatusBadge({ ...b, readOnly: b.scope === 'system' })
+                      return (statusPriority[aStatus.key] ?? 9) - (statusPriority[bStatus.key] ?? 9) || String(a.name || a.docType).localeCompare(String(b.name || b.docType), 'zh-CN')
+                    })
                     const groups = [
                       { key: 'personal', label: '私人模板库', items: visible.filter(item => item.scope === 'personal') },
                       { key: 'general', label: '通用模板', items: visible.filter(item => item.scope === 'global' || item.scope === 'system') },
                       { key: 'professional', label: `当前项目模板库${currentType ? ` · ${currentType}` : ''}`, items: visible.filter(item => item.scope === 'professional') },
                       { key: 'other', label: '其他模板', items: visible.filter(item => item.scope === 'other') },
-                    ].filter(group => group.key === 'personal' || group.items.length)
+                    ].map(group => ({ ...group, items: sortByStatus(group.items) })).filter(group => group.key === 'personal' || group.items.length)
                     if (!groups.length) return <div style={{ padding: 28, textAlign: 'center', color: '#999', fontSize: 12 }}>没有匹配的模板</div>
                     const treeData = groups.map(group => ({
                       key: `group:${group.key}`,
                       selectable: false,
                       title: <Space size={6}><Text strong style={{ fontSize: 12 }}>{group.label}</Text><Text type="secondary" style={{ fontSize: 10 }}>{group.items.length}</Text></Space>,
-                      children: group.items.length ? group.items.map(template => ({
+                      children: group.items.length ? group.items.map(template => {
+                        const badge = getTemplateStatusBadge({ ...template, readOnly: template.scope === 'system' })
+                        return ({
                         key: template.id,
                         isLeaf: true,
                         title: <Dropdown
@@ -1966,7 +2029,13 @@ export default function ProjectView() {
                           ], onClick: ({ key, domEvent }) => {
                             domEvent.stopPropagation()
                             if (key === 'preview') window.electronAPI.openTemplatePreview(template.path, template.sourceName || template.name)
-                            if (key === 'rules') navigate(`/template-center?rules=${encodeURIComponent(template.docType)}&templateId=${encodeURIComponent(template.id)}`)
+                            if (key === 'rules') navigate(buildTemplateRuleEditorUrl({
+                              pathname: location.pathname,
+                              search: location.search,
+                              docType: template.docType,
+                              templateId: template.id,
+                              input,
+                            }))
                             if (key === 'delete') void window.electronAPI.deleteLibraryTemplate(template.id).then(async result => {
                               if (!result.ok) return message.error(result.error || '删除模板失败')
                               if (selectedGenerationTemplateId === template.id) setSelectedGenerationTemplateId('')
@@ -1977,12 +2046,15 @@ export default function ProjectView() {
                         >
                           <div onContextMenu={event => event.stopPropagation()} style={{ display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 }}>
                             <Text ellipsis style={{ flex: 1, minWidth: 0, fontSize: 12 }}>{template.name || template.docType}</Text>
-                            <Text type="secondary" style={{ marginLeft: 8, flexShrink: 0, fontSize: 10 }}>{template.docType}{template.fields?.length ? ` · ${template.fields.length}` : ''}</Text>
+                            <Tag color={badge.color} title={badge.title} style={{ margin: '0 0 0 6px', padding: '0 5px', lineHeight: '17px', height: 18, fontSize: 9, flexShrink: 0 }}>{badge.label}</Tag>
                           </div>
                         </Dropdown>,
-                      })) : [{ key: `empty:${group.key}`, selectable: false, disabled: true, isLeaf: true, title: <Text type="secondary" style={{ fontSize: 11 }}>暂无私人模板，可在模板中心另存</Text> }],
+                      })}) : [{ key: `empty:${group.key}`, selectable: false, disabled: true, isLeaf: true, title: <Text type="secondary" style={{ fontSize: 11 }}>暂无私人模板，可在模板中心另存</Text> }],
                     }))
-                    return <Tree
+                    const badges = visible.map(template => getTemplateStatusBadge({ ...template, readOnly: template.scope === 'system' }))
+                    const readyCount = badges.filter(item => item.key === 'ready' || item.key === 'system').length
+                    const pendingCount = badges.length - readyCount
+                    return <><div style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '0 2px 8px', fontSize: 10, color: '#8c8c8c' }}><span>{visible.length} 个模板</span><span>·</span><span style={{ color: '#389e0d' }}>{readyCount} 已就绪</span>{pendingCount > 0 && <><span>·</span><span style={{ color: '#d46b08' }}>{pendingCount} 待处理</span></>}</div><Tree
                       blockNode
                       showLine={{ showLeafIcon: false }}
                       defaultExpandedKeys={[]}
@@ -1994,7 +2066,7 @@ export default function ProjectView() {
                         if (template) selectGenerationTemplate(template)
                       }}
                       style={{ fontSize: 12 }}
-                    />
+                    /></>
                   })()}
                   <Button block type="text" size="small" onClick={() => navigate('/template-center')} style={{ marginTop: 6, color: '#64748b' }}>管理模板</Button>
                 </div>

@@ -7,6 +7,7 @@ import path from 'path'
 import fs from 'fs'
 import { safeCall } from './safe.mjs'
 import { getProjectDataPath, ensureDir } from './shared.mjs'
+import { generateProjectCodeFromName } from './filename.mjs'
 
 // 项目级写锁，防止 getAndIncrementNumber 的 TOCTOU 竞态
 const projectLocks = new Map()
@@ -156,8 +157,8 @@ function getProjectCode(projectName) {
   if (fs.existsSync(configPath)) {
     try { configured = JSON.parse(fs.readFileSync(configPath, 'utf8')).projectCode || '' } catch (e) { console.warn('[numbering] project.config.json 解析失败，用 fallback:', e.message) }
   }
-  const fallback = String(projectName || 'PROJECT').replace(/[^A-Za-z0-9\u4e00-\u9fff]/g, '').slice(0, 16)
-  return String(configured || fallback || 'PROJECT').replace(/[^A-Za-z0-9\u4e00-\u9fff-]/g, '').toUpperCase()
+  const fallback = generateProjectCodeFromName(projectName)
+  return String(configured || fallback).replace(/[^A-Za-z0-9_-]/g, '').toUpperCase()
 }
 
 function attachProjectCode(number, projectName) {

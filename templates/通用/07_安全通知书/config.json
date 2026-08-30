@@ -25,7 +25,7 @@
     "{{事由}}": {
       "source": "param",
       "key": "subject",
-      "default": "关于{节日名称}期间施工现场安全管理要求"
+      "default": ""
     },
     "{{正文内容}}": {
       "source": "param",
@@ -43,7 +43,7 @@
     "{{节日名称}}": {
       "source": "param",
       "key": "holiday_name",
-      "default": "春节"
+      "default": ""
     },
     "{{放假日期}}": {
       "source": "param",

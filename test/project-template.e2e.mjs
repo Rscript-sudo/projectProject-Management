@@ -21,6 +21,7 @@ async function main() {
   registerAll(ipcMain, null)
 
   const root = path.join(runtimeDir, 'projects')
+  assert.equal((await call('settings:set', { projectRoot: root })).success, true)
   const projectName = '模板隔离验收项目'
   const created = await call('fs:createProject', root, projectName, '通信工程')
   assert.equal(created.success, true)
@@ -58,7 +59,7 @@ async function main() {
 【图3路径】
 【图3说明】
 【图4路径】
-【图4说明】`.repeat(8)
+【图4说明】`
   const saved = await call('fs:saveDoc', {
     projectPath: created.path, docType: '监理周报', projectName,
     content: weeklyText, customSummary: '模板隔离验收', userInput: '验收测试',

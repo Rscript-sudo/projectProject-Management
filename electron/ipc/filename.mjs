@@ -131,8 +131,14 @@ export function generateProjectCodeFromName(projectName) {
   // 纯字母数字：取前8位
   const alphanum = projectName.slice(0, 8).replace(/[^A-Za-z0-9]/g, '')
   if (alphanum) return alphanum.toUpperCase()
-  // 兜底
-  return 'PROJECT'
+  // 纯中文名称没有可直接使用的字母数字时，生成稳定的短哈希，避免所有项目都
+  // 退化成 PROJECT 而发生文件名碰撞。
+  let hash = 0x811c9dc5
+  for (const char of String(projectName)) {
+    hash ^= char.codePointAt(0)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return `PJ${hash.toString(16).toUpperCase().padStart(8, '0').slice(0, 8)}`
 }
 
 function sanitizeCode(code) {

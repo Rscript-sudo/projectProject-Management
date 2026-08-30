@@ -1,22 +1,28 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { App, Button, Form, Input, Layout, Modal, Select, Space, Tree, Typography } from 'antd'
-import { AppstoreOutlined, DeleteOutlined, FolderOpenOutlined, FolderOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { App, Button, Form, Input, Layout, Menu, Modal, Space, Tree, Typography } from 'antd'
+import { AppstoreOutlined, DeleteOutlined, FolderAddOutlined, FolderOpenOutlined, FolderOutlined, PlusOutlined, SafetyCertificateOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import TemplateLibraryZone from '../components/TemplateLibraryZone'
 import DocTypePromptEditor from '../components/DocTypePromptEditorV2'
+import GlobalRulesCenter from '../components/GlobalRulesCenter'
 import { PROJECT_TYPE_OPTIONS } from '../shared/projectProfile.mjs'
 import { useSettingsStore } from '../stores/useSettingsStore'
 
 const { Sider, Content } = Layout
-const { Text } = Typography
+const { Text, Title } = Typography
 
 export default function TemplateCenter() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const customProjectTypes = useSettingsStore(state => state.customProjectTypes)
   const [hiddenProfessionalCodes, setHiddenProfessionalCodes] = useState<string[]>([])
   const [templateRoot, setTemplateRoot] = useState('')
+  const [customCategories, setCustomCategories] = useState<Array<{ name: string; path: string }>>([])
+  const [customCategory, setCustomCategory] = useState('')
+  const [treeContext, setTreeContext] = useState<{ key: string; x: number; y: number } | null>(null)
+  const [categoryOpen, setCategoryOpen] = useState(false)
+  const [newCategoryName, setNewCategoryName] = useState('')
   const projectTypes = useMemo(() => [
     ...PROJECT_TYPE_OPTIONS.filter(item => item.code !== 'unclassified'),
     ...customProjectTypes,
@@ -27,6 +33,7 @@ export default function TemplateCenter() {
     const docType = searchParams.get('rules')
     return docType ? { docType, templateId: searchParams.get('templateId') || undefined } : null
   })
+  const [globalRulesOpen, setGlobalRulesOpen] = useState(false)
   const [specialtyOpen, setSpecialtyOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [deletingSpecialty, setDeletingSpecialty] = useState(false)
@@ -36,12 +43,31 @@ export default function TemplateCenter() {
   const returnTo = requestedReturnTo.startsWith('/project/') ? requestedReturnTo : ''
   const leaveRuleEditor = () => returnTo ? navigate(returnTo) : setEditingRule(null)
 
+  const loadTemplateNavigation = async () => {
+    const [settings, workspace, categoryResult] = await Promise.all([
+      window.electronAPI.getSettings(),
+      window.electronAPI.getTemplateWorkspaceInfo(),
+      window.electronAPI.listTemplateCategories('other'),
+    ])
+    setHiddenProfessionalCodes(Array.isArray(settings.hiddenProfessionalTemplateTypes) ? settings.hiddenProfessionalTemplateTypes : [])
+    setTemplateRoot(workspace.root)
+    if (!categoryResult?.success) throw new Error(categoryResult?.error || '加载模板文件夹失败')
+    const categories = Array.isArray(categoryResult.categories) ? categoryResult.categories : []
+    setCustomCategories(categories)
+    setCustomCategory(current => current && categories.some(item => item.name === current) ? current : (categories[0]?.name || ''))
+  }
+
   useEffect(() => {
-    void Promise.all([window.electronAPI.getSettings(), window.electronAPI.getTemplateWorkspaceInfo()]).then(([settings, workspace]) => {
-      setHiddenProfessionalCodes(Array.isArray(settings.hiddenProfessionalTemplateTypes) ? settings.hiddenProfessionalTemplateTypes : [])
-      setTemplateRoot(workspace.root)
-    })
+    void loadTemplateNavigation()
   }, [])
+
+  useEffect(() => {
+    if (!treeContext) return
+    const close = () => setTreeContext(null)
+    window.addEventListener('click', close)
+    window.addEventListener('blur', close)
+    return () => { window.removeEventListener('click', close); window.removeEventListener('blur', close) }
+  }, [treeContext])
 
   const deleteSpecialty = async () => {
     if (!selectedProjectType) return
@@ -62,34 +88,23 @@ export default function TemplateCenter() {
   }
 
   const renderContent = () => {
+    if (globalRulesOpen) return <GlobalRulesCenter onBack={() => setGlobalRulesOpen(false)} />
     if (editingRule) {
       return <DocTypePromptEditor key={`${editingRule.docType}:${editingRule.templateId || ''}`} initialDocType={editingRule.docType} templateId={editingRule.templateId} onBack={leaveRuleEditor} onSaved={returnTo ? () => navigate(returnTo) : undefined} />
-    }
-    if (section === 'general-rules') {
-      return <DocTypePromptEditor key="general-rules" onBack={() => setSection('general-templates')} />
     }
     if (section === 'general-templates') {
       return <TemplateLibraryZone scope="global" display="all" title="通用模板" onGoRules={(docType, templateId) => setEditingRule({ docType, templateId })} />
     }
-    if (section === 'other-templates') {
-      return <TemplateLibraryZone scope="other" display="enterprise" title="其他模板" onGoRules={(docType, templateId) => setEditingRule({ docType, templateId })} />
+    if (section === 'custom-templates') {
+      return customCategory
+        ? <TemplateLibraryZone key={customCategory} scope="other" display="enterprise" projectType={customCategory} title={`自定义模板 · ${customCategory}`} onGoRules={(docType, templateId) => setEditingRule({ docType, templateId })} />
+        : <div className="template-empty-category"><FolderAddOutlined /><Text type="secondary">右键“自定义模板”新建第一个模板文件夹</Text></div>
     }
     if (section === 'personal-templates') {
       return <TemplateLibraryZone scope="personal" display="enterprise" title="私人模板库" onGoRules={(docType, templateId) => setEditingRule({ docType, templateId })} />
     }
     return (
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Space>
-          <Text strong>选择专业：</Text>
-          <Select
-            value={selectedProjectType?.code}
-            onChange={setProjectTypeCode}
-            style={{ width: 220 }}
-            options={projectTypes.map(item => ({ value: item.code, label: item.label }))}
-          />
-          <Button icon={<PlusOutlined />} onClick={() => setSpecialtyOpen(true)}>添加专业</Button>
-          <Button danger icon={<DeleteOutlined />} onClick={() => setDeleteConfirmOpen(true)}>删除专业</Button>
-        </Space>
         {selectedProjectType && (
           <TemplateLibraryZone
             key={selectedProjectType.code}
@@ -105,33 +120,40 @@ export default function TemplateCenter() {
   }
 
   return (
-    <Layout style={{ height: '100%' }}>
-      {!editingRule && <Sider width={220} theme="light" style={{ borderRight: '1px solid #f0f0f0', padding: '12px 8px' }}>
-        <Space size={6} style={{ padding: '0 8px 12px' }}>
+    <Layout style={{ height: '100%', background: '#f7f8fa' }}>
+      {!editingRule && !globalRulesOpen && <Sider width={220} theme="light" style={{ borderRight: '1px solid #e8ebef', padding: '16px 10px', background: '#fff' }}>
+        <Space size={8} style={{ padding: '0 8px 16px' }}>
           <AppstoreOutlined style={{ color: '#1677ff' }} />
           <Text strong>模板中心</Text>
         </Space>
         <Tree
+          className="template-center-tree"
           showIcon
           defaultExpandAll
-          selectedKeys={[section === 'professional' ? `specialty-${projectTypeCode}` : section]}
+          selectedKeys={[section === 'professional' ? `specialty-${projectTypeCode}` : section === 'custom-templates' ? `custom:${customCategory}` : section]}
           onSelect={keys => {
             if (!keys.length) return
             const key = String(keys[0])
             if (key.startsWith('specialty-')) {
               setProjectTypeCode(key.slice('specialty-'.length))
               setSection('professional')
+            } else if (key.startsWith('custom:')) {
+              setCustomCategory(key.slice('custom:'.length))
+              setSection('custom-templates')
             } else {
               setSection(key)
             }
             setEditingRule(null)
+          }}
+          onRightClick={({ event, node }) => {
+            event.preventDefault()
+            setTreeContext({ key: String(node.key), x: event.clientX, y: event.clientY })
           }}
           treeData={[
             {
               key: 'general-group', title: '通用模板', selectable: false, icon: <FolderOutlined />,
               children: [
                 { key: 'general-templates', title: '模板文件', icon: <FolderOutlined /> },
-                { key: 'general-rules', title: 'AI 扩写规则', icon: <ThunderboltOutlined /> },
               ],
             },
             {
@@ -144,25 +166,65 @@ export default function TemplateCenter() {
                 { key: 'personal-templates', title: '我的模板', icon: <FolderOutlined /> },
               ],
             },
-            { key: 'other-templates', title: '其他模板', icon: <FolderOutlined /> },
+            {
+              key: 'custom-group', title: '自定义模板', selectable: false, icon: <FolderOutlined />,
+              children: customCategories.map(item => ({ key: `custom:${item.name}`, title: item.name, icon: <FolderOutlined /> })),
+            },
           ]}
         />
+        <Text type="secondary" style={{ display: 'block', padding: '12px 10px 0', fontSize: 12 }}>右键文件夹可新增或删除</Text>
       </Sider>}
-      <Content style={{ padding: editingRule ? 0 : 16, overflow: 'auto', background: editingRule ? '#fff' : '#fafafa' }}>
-        {!editingRule && (
-          <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 12 }}>
-            <Button icon={<FolderOpenOutlined />} onClick={() => window.electronAPI.openPath(templateRoot)} disabled={!templateRoot} title={templateRoot}>打开模板库目录</Button>
-            <Button
-              type="primary"
-              icon={<ThunderboltOutlined />}
-              onClick={() => setEditingRule({ docType: '监理日志' })}
-            >
-              AI 扩写规则
-            </Button>
-          </Space>
-        )}
-        {renderContent()}
+      <Content style={{ padding: 0, overflow: 'auto', background: editingRule || globalRulesOpen ? '#fff' : '#f7f8fa' }}>
+        {editingRule || globalRulesOpen ? renderContent() : <div className="app-page app-page--wide">
+          <header className="app-page-header">
+            <div className="app-page-heading">
+              <span className="app-page-heading__icon"><AppstoreOutlined /></span>
+              <div className="app-page-heading__copy">
+                <Title level={3} className="app-page-heading__title">模板中心</Title>
+                <Text className="app-page-heading__description">统一管理模板文件、占位符与 AI 扩写规则</Text>
+              </div>
+            </div>
+            <div className="app-page-actions">
+              <Button icon={<FolderOpenOutlined />} onClick={() => window.electronAPI.openPath(templateRoot)} disabled={!templateRoot} title={templateRoot}>打开模板库</Button>
+              <Button icon={<SafetyCertificateOutlined />} onClick={() => setGlobalRulesOpen(true)}>全局规则</Button>
+              <Button type="primary" icon={<ThunderboltOutlined />} onClick={() => setEditingRule({ docType: '监理日志' })}>AI 扩写中心</Button>
+            </div>
+          </header>
+          {renderContent()}
+        </div>}
       </Content>
+      {treeContext && <div style={{ position: 'fixed', left: treeContext.x, top: treeContext.y, zIndex: 4000, minWidth: 190, borderRadius: 8, overflow: 'hidden', background: '#fff', boxShadow: '0 8px 28px rgba(0,0,0,.18)' }} onClick={event => event.stopPropagation()}>
+        <Menu selectable={false} items={treeContext.key === 'custom-group'
+          ? [{ key: 'create-custom', label: '新建模板文件夹', icon: <FolderAddOutlined /> }, { key: 'open-root', label: '打开模板库', icon: <FolderOpenOutlined /> }]
+          : treeContext.key.startsWith('custom:')
+            ? [{ key: 'open-custom', label: '进入文件夹并添加模板', icon: <PlusOutlined /> }, { type: 'divider' as const }, { key: 'delete-custom', label: '删除文件夹及全部模板', icon: <DeleteOutlined />, danger: true }]
+            : treeContext.key === 'professional-group'
+              ? [{ key: 'create-professional', label: '新建专业文件夹', icon: <FolderAddOutlined /> }]
+              : treeContext.key.startsWith('specialty-')
+                ? [{ key: 'open-professional', label: '进入专业并添加模板', icon: <PlusOutlined /> }, { type: 'divider' as const }, { key: 'delete-professional', label: '删除专业及全部模板', icon: <DeleteOutlined />, danger: true }]
+                : [{ key: 'open-root', label: '打开模板库', icon: <FolderOpenOutlined /> }]}
+          onClick={({ key }) => {
+            const contextKey = treeContext.key
+            setTreeContext(null)
+            if (key === 'create-custom') { setNewCategoryName(''); setCategoryOpen(true) }
+            else if (key === 'open-root') void window.electronAPI.openPath(templateRoot)
+            else if (key === 'open-custom') { setCustomCategory(contextKey.slice('custom:'.length)); setSection('custom-templates') }
+            else if (key === 'delete-custom') {
+              const name = contextKey.slice('custom:'.length)
+              modal.confirm({ title: `删除模板文件夹“${name}”？`, content: '文件夹和其中全部模板将移到系统废纸篓。', okText: '删除', okType: 'danger', onOk: async () => { const result = await window.electronAPI.deleteTemplateCategory('other', name); if (!result.ok) throw new Error(result.error || '删除失败'); message.success('文件夹已移到废纸篓'); await loadTemplateNavigation(); setSection('general-templates') } })
+            } else if (key === 'create-professional') setSpecialtyOpen(true)
+            else if (key === 'open-professional') { setProjectTypeCode(contextKey.slice('specialty-'.length)); setSection('professional') }
+            else if (key === 'delete-professional') { setProjectTypeCode(contextKey.slice('specialty-'.length)); window.setTimeout(() => setDeleteConfirmOpen(true), 0) }
+          }} />
+      </div>}
+      <Modal title="新建模板文件夹" open={categoryOpen} okText="创建" cancelText="取消" onCancel={() => setCategoryOpen(false)} onOk={async () => {
+        const name = newCategoryName.trim()
+        if (!name) { message.warning('请输入文件夹名称'); return }
+        if (customCategories.some(item => item.name === name)) { message.warning('该文件夹已存在'); return }
+        const result = await window.electronAPI.createTemplateCategory('other', name)
+        if (!result.ok) { message.error(result.error || '创建失败'); return }
+        setCategoryOpen(false); setCustomCategory(name); setSection('custom-templates'); await loadTemplateNavigation(); message.success('模板文件夹已创建')
+      }}><Input value={newCategoryName} onChange={event => setNewCategoryName(event.target.value)} onPressEnter={() => undefined} placeholder="例如：水利专用表单" autoFocus /></Modal>
       <Modal
         title={selectedProjectType ? `删除专业“${selectedProjectType.label}”？` : '删除专业？'}
         open={deleteConfirmOpen}

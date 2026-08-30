@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, screen, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
@@ -99,6 +99,7 @@ function createWindow() {
     height: 900,
     minWidth: 1100,
     minHeight: 700,
+    show: false,
     title: '项目文档管理系统',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -118,6 +119,17 @@ function createWindow() {
 
   win.webContents.on('did-finish-load', () => {
     console.log('[Main] Page loaded successfully')
+  })
+
+  // 页面信息密度较高：主窗口启动后始终占满当前显示器工作区。
+  // 小屏幕只做有限缩放，避免工具栏和三栏内容被截断；大屏保持 100%，
+  // 不通过全局缩小字体牺牲可读性。缩放下限 85% 仍符合桌面端可读范围。
+  win.once('ready-to-show', () => {
+    const { width, height } = screen.getDisplayMatching(win.getBounds()).workAreaSize
+    const zoomFactor = Math.max(0.85, Math.min(1, width / 1400, height / 900))
+    win.webContents.setZoomFactor(zoomFactor)
+    win.maximize()
+    win.show()
   })
 
   // 渲染页面不允许导航到外部站点；合法 http(s) 链接交给系统浏览器。

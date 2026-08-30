@@ -3,8 +3,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { cleanTemplateDocType, listTemplateLibrary, normalizeTemplateLibrary } from '../electron/templateRegistry.mjs'
-import { archiveLegacyTemplateLibrary, archiveUnapprovedGeneralTemplates, configureTemplateWorkspace } from '../electron/templateWorkspace.mjs'
+import { cleanTemplateDocType, deleteTemplateCategory, listTemplateLibrary, normalizeTemplateLibrary } from '../electron/templateRegistry.mjs'
+import { archiveLegacyTemplateLibrary, archiveUnapprovedGeneralTemplates, configureTemplateWorkspace, ensureTemplateCategory, listTemplateCategories } from '../electron/templateWorkspace.mjs'
 
 test('安装后模板统一迁移到用户文档目录并使用中文分类和正式文件名', t => {
   const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-template-workspace-'))
@@ -63,4 +63,24 @@ test('通用目录把未验收重复底稿移入清理归档，同时保留用�
   assert.ok(fs.existsSync(path.join(workspace.root, '内置模板', '通用', '01_监理日志', '监理日志模板.docx')))
   assert.ok(fs.existsSync(userTemplate))
   assert.ok(result.targets[0].includes('清理归档'))
+})
+
+test('自定义模板文件夹可创建、列出并安全移到废纸篓', async t => {
+  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-template-category-'))
+  t.after(() => fs.rmSync(runtime, { recursive: true, force: true }))
+  const userDataPath = path.join(runtime, 'user-data')
+  const documentsPath = path.join(runtime, 'Documents')
+  configureTemplateWorkspace({ userDataPath, documentsPath, bundledTemplatesDir: path.resolve('templates') })
+
+  const created = ensureTemplateCategory(userDataPath, 'other', '水利专用表单')
+  assert.ok(fs.existsSync(created.directory))
+  assert.deepEqual(listTemplateCategories(userDataPath, 'other').map(item => item.name), ['水利专用表单'])
+
+  const trashDir = path.join(runtime, 'trash')
+  const deleted = await deleteTemplateCategory(userDataPath, 'other', '水利专用表单', {
+    trashItem: async target => fs.renameSync(target, trashDir),
+  })
+  assert.equal(deleted.ok, true)
+  assert.ok(fs.existsSync(trashDir))
+  assert.deepEqual(listTemplateCategories(userDataPath, 'other'), [])
 })

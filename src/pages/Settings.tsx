@@ -282,17 +282,15 @@ export default function Settings() {
 
   // ============= 顶部标题（仅展示，无按钮） =============
   const PageHeader = (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '4px 0 16px',
-      }}
-    >
-      <SettingOutlined style={{ fontSize: 20, color: '#1677ff' }} />
-      <Title level={4} style={{ margin: 0 }}>系统设置</Title>
-    </div>
+    <header className="app-page-header">
+      <div className="app-page-heading">
+        <span className="app-page-heading__icon"><SettingOutlined /></span>
+        <div className="app-page-heading__copy">
+          <Title level={3} className="app-page-heading__title">系统设置</Title>
+          <Text className="app-page-heading__description">管理 AI 服务、项目路径、更新与数据维护</Text>
+        </div>
+      </div>
+    </header>
   )
 
   // ============= Tab 底部操作栏（返回 + 保存设置） =============

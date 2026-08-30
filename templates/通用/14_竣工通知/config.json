@@ -30,7 +30,7 @@
     "{{附件清单}}": {
       "source": "param",
       "key": "attachments",
-      "default": "无"
+      "default": ""
     },
     "{{监理单位}}": {
       "source": "env",

@@ -446,8 +446,14 @@ export interface ElectronAPI {
   deleteProfessionalTemplateCategory: (projectType: string, projectTypeCode: string) => Promise<{ ok: boolean; removedTemplates?: number; customProjectTypes?: any[]; hiddenProfessionalTemplateTypes?: string[]; error?: string }>
   getTemplateWorkspaceInfo: () => Promise<{ root: string; categories: Record<string, string> }>
   createProfessionalTemplateCategory: (projectType: string) => Promise<{ ok: boolean; directory?: string; error?: string }>
+  listTemplateCategories: (scope?: 'professional' | 'personal' | 'other') => Promise<{ success: boolean; categories?: Array<{ name: string; path: string }>; error?: string }>
+  createTemplateCategory: (scope: 'personal' | 'other', name: string) => Promise<{ ok: boolean; name?: string; directory?: string; error?: string }>
+  deleteTemplateCategory: (scope: 'personal' | 'other', name: string) => Promise<{ ok: boolean; removedTemplates?: number; trashed?: boolean; error?: string }>
   updateLibraryTemplate: (payload: { id: string; name?: string; sourcePath?: string }) => Promise<{ ok: boolean; template?: any; error?: string }>
   markTemplateRuleConfigured: (id: string) => Promise<{ ok: boolean; template?: any; error?: string }>
+  getTemplateLayoutContract: (filePath: string, docType: string) => Promise<any>
+  saveTemplateLayoutContract: (filePath: string, docType: string, fields: Record<string, any>) => Promise<any>
+  resetTemplateLayoutContract: (filePath: string, docType: string) => Promise<any>
   saveTemplateContent: (payload: { path: string; addFields?: string[]; removeFields?: string[]; renameMap?: Record<string, string>; placements?: Array<{ field: string; anchor?: string; position?: 'before' | 'after'; tableIndex?: number; rowIndex?: number; cellIndex?: number }>; docType?: string; templateId?: string; saveAsPersonal?: boolean; name?: string }) => Promise<{ ok: boolean; path?: string; fields?: string[]; clonedToLibrary?: any; error?: string }>
   listSystemTemplates: () => Promise<any[]>
   listTemplatesByProjectType: (params: { projectType?: string; docType?: string; scope?: string }) => Promise<any[]>

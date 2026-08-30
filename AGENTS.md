@@ -58,6 +58,7 @@ npm run build:win         # Windows 构建——本地 macOS 跑会卡住，只�
 
 ## 关键约定
 
+- **本机安装是代码任务的必做收尾步骤**：每次完成任何代码修改、Bug 修复或新功能后，无需用户再次提醒，必须执行 `npm run install:mac:latest`，完整构建当前源码、替换 `/Applications/项目文档管理系统.app` 中的旧程序、校验安装内容并启动新程序确认运行。安装失败时保留或恢复旧程序，不得留下不完整安装。
 - **数据实事求是**：禁止 AI 在周报/月报里估算百分比；数据不足先问，禁止凑数。
 - **用户输入是信息源不是逐字稿**：AI 必须归纳，禁止照抄。`extractSubject` (aiService.ts) 清理头尾命令词。
 - **文件名统一走** `electron/ipc/filename.mjs`：`{YYYYMMDD}_{typeCode}_{projectCode}_{summary}_{version}.docx`，禁止各模块自己拼。
@@ -66,4 +67,4 @@ npm run build:win         # Windows 构建——本地 macOS 跑会卡住，只�
 - **项目类型 SOP 路由**：`PROJECT_TYPE_ROUTER` 按 7 类项目加载不同 SOP，**禁止跨类型混用术语**（信息化项目禁用塔吊/扬尘/木工等土建术语），`sanitizeForbiddenTerms` 做兜底。
 - **占位符白名单**：`placeholderScan.mjs` 管三套（合法残留 / 12 项必填 / FieldRegistry alias），不在白名单的 `{{xxx}}` → 阻止保存。
 - **模板策略（统一模板模型）**：只内置 `templates/通用/` 中已完成“实体文件 + 占位符 + AI 规则”的通用模板；专业/私人模板由用户上传。正式生成不再按文种走代码版式，DOCX/XLSX 均使用实体模板渲染；用户模板规则未完成时不得参与生成。
-- **发布默认不做**（除非老板特别说明）：修 bug / 完成新功能后只做 `npm run build` 本地构建 + `git commit` 代码提交，**不 push、不打 tag、不 `./release.sh`、不建 Release**。推 GitHub / 出 Windows EXE 一律等老板明确指示。
+- **发布默认不做**（除非老板特别说明）：修 bug / 完成新功能后做本机完整构建、`git commit` 代码提交和上述 macOS 旧版替换安装，**不 push、不打 tag、不 `./release.sh`、不建 Release**。推 GitHub / 出 Windows EXE 一律等老板明确指示。

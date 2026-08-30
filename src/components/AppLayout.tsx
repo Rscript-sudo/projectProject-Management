@@ -46,7 +46,8 @@ export default function AppLayout() {
   const [loading, setLoading] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [operationCenterOpen, setOperationCenterOpen] = useState(false)
-  const [navCollapsed, setNavCollapsed] = useState(false)
+  // 文档工作台同时包含项目树、编辑区和预览区，启动时为主任务优先让出横向空间。
+  const [navCollapsed, setNavCollapsed] = useState(true)
 
   // 键盘快捷键 Cmd+K / Ctrl+K 打开搜索
   useEffect(() => {
@@ -96,22 +97,34 @@ export default function AppLayout() {
   return (
     <Layout style={{ height: '100dvh', width: '100%', minWidth: 0, overflow: 'hidden' }}>
       {/* 左侧栏 */}
+      <div style={{ width: 56, flex: '0 0 56px', position: 'relative', zIndex: 20 }}>
       <Sider
         width={196}
         collapsedWidth={56}
         collapsed={navCollapsed}
         theme="light"
         style={{
+          position: 'absolute',
+          inset: '0 auto 0 0',
+          height: '100%',
           borderRight: '1px solid #f0f0f0',
+          boxShadow: navCollapsed ? 'none' : '8px 0 24px rgba(15, 23, 42, 0.10)',
           zIndex: 10,
           transition: 'all .2s ease',
         }}
       >
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div style={{ height: 52, display: 'flex', alignItems: 'center', padding: navCollapsed ? '0 8px' : '0 12px', borderBottom: '1px solid #f0f0f0', color: '#1677ff', gap: 10, flex: 'none' }}>
-            <ProjectOutlined style={{ fontSize: 20, flex: 'none' }} />
-            {!navCollapsed && <Text strong ellipsis style={{ flex: 1 }}>项目文档管理系统</Text>}
-          </div>
+          <button
+            type="button"
+            className={`app-nav-toggle${navCollapsed ? ' app-nav-toggle--collapsed' : ''}`}
+            onClick={() => setNavCollapsed(value => !value)}
+            title={navCollapsed ? '展开主菜单' : '收起主菜单'}
+            aria-label={navCollapsed ? '展开主菜单' : '收起主菜单'}
+          >
+            {navCollapsed ? <MenuUnfoldOutlined className="app-nav-toggle__menu-icon" /> : <ProjectOutlined className="app-nav-toggle__brand-icon" />}
+            {!navCollapsed && <Text strong ellipsis className="app-nav-toggle__title">项目文档管理系统</Text>}
+            {!navCollapsed && <MenuFoldOutlined className="app-nav-toggle__collapse-icon" />}
+          </button>
 
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, padding: 8 }}>
           <Button
@@ -172,16 +185,10 @@ export default function AppLayout() {
             style={{ height: 40, justifyContent: navCollapsed ? 'center' : 'flex-start' }}
             title="运行与诊断中心"
           >{!navCollapsed && '运行与诊断'}</Button>
-          <Button
-            type="text"
-            icon={navCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-            onClick={() => setNavCollapsed(value => !value)}
-            style={{ height: 40, justifyContent: navCollapsed ? 'center' : 'flex-start', borderTop: '1px solid #f0f0f0', borderRadius: 0 }}
-            title={navCollapsed ? '展开菜单' : '收起菜单'}
-          >{!navCollapsed && '收起菜单'}</Button>
           </div>
         </div>
       </Sider>
+      </div>
 
       {/* 新建项目弹窗 */}
       <Modal

@@ -14,4 +14,7 @@ test('自定义文种必须保存完整扩写规则后才能生成', () => {
   assert.equal(hasUsablePromptConfig(undefined, {
     systemTemplate: '只有系统规则', userTemplate: '',
   }), false)
+  assert.equal(hasUsablePromptConfig(undefined, {
+    systemTemplate: '按字段契约填写', userTemplate: '', fields: [{ key: '工程量明细行', required: true }],
+  }), true)
 })

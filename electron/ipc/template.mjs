@@ -5,13 +5,14 @@ import fs from 'fs'
 import path from 'path'
 import { safeCall } from './safe.mjs'
 import { app, shell } from 'electron'
-import { listTemplatesByProjectType, deleteTemplateFromLibrary, deleteProfessionalCategory, updateTemplateInLibrary, listTemplateLibrary, getTemplateRegistryPath, refreshTemplateLibraryEntry, markTemplateRuleConfigured } from '../templateRegistry.mjs'
+import { listTemplatesByProjectType, deleteTemplateFromLibrary, deleteProfessionalCategory, deleteTemplateCategory, updateTemplateInLibrary, listTemplateLibrary, getTemplateRegistryPath, refreshTemplateLibraryEntry, markTemplateRuleConfigured } from '../templateRegistry.mjs'
 import { getTemplatePlaceholders, saveDocxTemplatePlaceholders, saveXlsxTemplatePlaceholders } from '../templateService.mjs'
 import { isPathSafe } from '../shared/pathSafety.mjs'
-import { ensureProfessionalCategory, getRuntimeSystemTemplatesDir, getTemplateScopeDir, getTemplateWorkspaceInfo } from '../templateWorkspace.mjs'
+import { ensureProfessionalCategory, ensureTemplateCategory, getRuntimeSystemTemplatesDir, getTemplateScopeDir, getTemplateWorkspaceInfo, listTemplateCategories } from '../templateWorkspace.mjs'
 import { removeProfessionalCategoryFromSettings } from '../professionalCategory.mjs'
 import { getSettings, saveSettings } from './shared.mjs'
 import { setCustomProjectTypes } from '../../src/shared/projectProfile.mjs'
+import { loadOrCreateTemplateLayoutContract, resetTemplateLayoutContract, saveTemplateLayoutContract } from '../templateLayoutContract.mjs'
 
 function isRuntimeSystemTemplate(filePath) {
   const root = getRuntimeSystemTemplatesDir()
@@ -69,6 +70,14 @@ export function register(ipcMain) {
 
   ipcMain.handle('template:workspaceInfo', safeCall(() => getTemplateWorkspaceInfo(app.getPath('userData'))))
   ipcMain.handle('template:createProfessional', safeCall((_, { projectType }) => ensureProfessionalCategory(app.getPath('userData'), projectType)))
+  // 显式返回命名字段，避免 safeCall 对数组统一包成 { success, data }
+  // 后渲染层误把响应对象当数组调用 map。
+  ipcMain.handle('template:listCategories', safeCall((_, { scope = 'other' } = {}) => ({
+    success: true,
+    categories: listTemplateCategories(app.getPath('userData'), scope),
+  })))
+  ipcMain.handle('template:createCategory', safeCall((_, { scope = 'other', name }) => ensureTemplateCategory(app.getPath('userData'), scope, name)))
+  ipcMain.handle('template:deleteCategory', safeCall(async (_, { scope = 'other', name }) => deleteTemplateCategory(app.getPath('userData'), scope, name, { trashItem: target => shell.trashItem(target) })))
 
   // v1.x：更新企业模板（重命名 / 替换文件 / 重扫字段）
   ipcMain.handle('template:updateLibrary', safeCall(async (_, { id, name, sourcePath }) => {
@@ -80,9 +89,30 @@ export function register(ipcMain) {
     return markTemplateRuleConfigured(app.getPath('userData'), id)
   }))
 
-  // v1.3.4（2026-08-27）：把占位符变更写回原模板文件（docx / xlsx）
-  // 系统预置模板（路径在应用包内，isPathSafe 不通过）会先复制到 userData 企业库再写回
-  // 返回 { ok, path, fields, clonedToLibrary? } —— path 是实际写入的路径（可能是新克隆的）
+  ipcMain.handle('template:getLayoutContract', safeCall(async (_, { path: filePath, docType = '' }) => {
+    if (!filePath || !fs.existsSync(filePath) || path.extname(filePath).toLowerCase() !== '.docx') return { ok: false, error: '请选择有效的 DOCX 模板' }
+    if (!isPathSafe(filePath) && !isRuntimeSystemTemplate(filePath)) return { ok: false, error: '模板路径不安全' }
+    const result = await loadOrCreateTemplateLayoutContract(filePath, { docType, write: true })
+    return { ok: true, ...result }
+  }))
+
+  ipcMain.handle('template:saveLayoutContract', safeCall(async (_, { path: filePath, docType = '', fields = {} }) => {
+    if (!filePath || !fs.existsSync(filePath) || path.extname(filePath).toLowerCase() !== '.docx') return { ok: false, error: '请选择有效的 DOCX 模板' }
+    if (!isPathSafe(filePath)) return { ok: false, error: '模板路径不安全' }
+    const contract = await saveTemplateLayoutContract(filePath, { docType, fields })
+    return { ok: true, contract }
+  }))
+
+  ipcMain.handle('template:resetLayoutContract', safeCall(async (_, { path: filePath, docType = '' }) => {
+    if (!filePath || !fs.existsSync(filePath) || path.extname(filePath).toLowerCase() !== '.docx') return { ok: false, error: '请选择有效的 DOCX 模板' }
+    if (!isPathSafe(filePath)) return { ok: false, error: '模板路径不安全' }
+    const contract = await resetTemplateLayoutContract(filePath, { docType })
+    return { ok: true, contract }
+  }))
+
+  // v1.3.4（2026-08-27）：把占位符变更写回原模板文件（docx / xlsx）。
+  // 内置模板的运行时工作副本位于用户文档目录，可原位写回；只有明确另存为
+  // 私人模板时才复制。返回的 path 始终是实际写入路径。
   ipcMain.handle('template:saveContent', safeCall(async (_, payload = {}) => {
     const { path: filePath, addFields, removeFields, renameMap, placements, docType, templateId, saveAsPersonal, name } = payload
     if (!filePath || typeof filePath !== 'string') return { ok: false, error: '缺少模板路径' }
@@ -98,8 +128,9 @@ export function register(ipcMain) {
     let configPath = null
     let clonedToLibrary = null
 
-    // 系统模板或用户明确“另存为私人模板”时，始终复制到 personal，绝不改系统原件。
-    if (saveAsPersonal || isRuntimeSystemTemplate(filePath)) {
+    // 运行时内置模板位于用户文档目录，允许直接编辑。只有用户明确“另存为私人模板”
+    // 时才复制；安装包内的只读种子从不作为本接口的写入目标。
+    if (saveAsPersonal) {
       const userDataPath = app.getPath('userData')
       const safeDocType = String(docType || '通用模板').replace(/[\\/:*?"<>|]/g, '_')
       const targetDir = path.join(getTemplateScopeDir(userDataPath, 'personal'), '通用', safeDocType)
@@ -156,11 +187,19 @@ export function register(ipcMain) {
     }
 
     // 物理文件与 registry 保持同一份字段真相，模板资源树刷新后立即可见。
-    const registryId = clonedToLibrary?.id || templateId
+    // system:xxx 是内置工作副本标识，不存在于企业模板 registry；原位编辑时
+    // 已完成物理文件扫描，不能再拿系统 id 去刷新企业登记。
+    const registryId = clonedToLibrary?.id || (templateId && !String(templateId).startsWith('system:') ? templateId : null)
     if (registryId) {
       const refreshed = await refreshTemplateLibraryEntry({ userDataPath: app.getPath('userData'), templateId: registryId })
       fields = refreshed.fields
       if (clonedToLibrary) clonedToLibrary = refreshed
+    }
+
+    // 模板字段编辑会改变 document.xml 和模板指纹；写回完成后立即重建版式合同，
+    // 避免用户第一次生成时才发现合同过期或编辑器仍展示旧字段。
+    if (ext === '.docx') {
+      await resetTemplateLayoutContract(targetPath, { docType: docType || clonedToLibrary?.docType || '' })
     }
 
     return { ok: true, path: targetPath, fields, clonedToLibrary }

@@ -31,6 +31,23 @@ test('所有内置文种均具备模板、占位符和专属 AI 扩写规则', a
   }
 })
 
+test('通用模板不得用默认值补造用户未提供的业务事实', async () => {
+  const templates = await listSystemTemplates('templates')
+  for (const template of templates) {
+    const configPath = path.join(path.dirname(template.path), 'config.json')
+    if (!fs.existsSync(configPath)) continue
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+    for (const [placeholder, rule] of Object.entries(config.placeholders || {})) {
+      if (!rule?.default) continue
+      assert.equal(
+        rule.default,
+        'TODAY',
+        `${template.docType}.${placeholder} 存在会补造事实的默认值：${rule.default}`,
+      )
+    }
+  }
+})
+
 test('所有通用模板都能按实体文件完成占位符渲染', async () => {
   const templates = await listSystemTemplates('templates')
   for (const template of templates) {
@@ -53,6 +70,22 @@ test('所有通用模板都能按实体文件完成占位符渲染', async () =>
       const PizZip = (await import('pizzip')).default
       const xml = new PizZip(buffer).file('word/document.xml')?.asText() || ''
       assert.doesNotMatch(xml, /\{\{[^}]+\}\}/, `${template.docType} 生成后仍残留占位符`)
+    }
+  }
+})
+
+test('XLSX 字段没有事实时也会清除对应模板占位符', async () => {
+  const template = (await listSystemTemplates('templates')).find(item => item.docType === '工程变更单')
+  const config = JSON.parse(fs.readFileSync(path.join(path.dirname(template.path), 'config.json'), 'utf8'))
+  const names = Object.keys(config.placeholders || {}).map(key => key.replace(/^\{\{|\}\}$/g, '').trim())
+  const mappings = config.placeholder_cells.map((cell, index) => ({ cell, field: names[index] }))
+  const buffer = await renderXlsxTemplate(template.path, { 项目名称: '空字段清理测试', 致单位: '测试单位' }, mappings)
+  const XLSX = await loadXlsx()
+  const workbook = XLSX.read(buffer, { type: 'buffer' })
+  for (const worksheet of Object.values(workbook.Sheets)) {
+    for (const [cellRef, cell] of Object.entries(worksheet)) {
+      if (cellRef.startsWith('!')) continue
+      assert.doesNotMatch(String(cell?.v || ''), /\{\{[^{}]+\}\}/, `${cellRef} 不得残留占位符`)
     }
   }
 })

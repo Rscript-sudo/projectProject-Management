@@ -23,6 +23,65 @@
   font-size: 15px;
 }
 
+.ai-output-toolbar {
+  container-type: inline-size;
+  min-width: 0;
+  flex-wrap: wrap;
+  row-gap: 8px !important;
+  overflow: hidden;
+}
+
+.ai-output-title,
+.ai-stream-status,
+.ai-project-selector,
+.ai-output-actions {
+  flex: 0 0 auto;
+}
+
+.ai-project-selector {
+  flex: 1 1 180px;
+  max-width: 220px !important;
+}
+
+.ai-output-toolbar-spacer { flex: 1 1 12px; }
+
+.ai-output-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+@media (max-width: 1180px) {
+  .ai-output-actions {
+    width: 100%;
+  }
+  .ai-output-toolbar-spacer { display: none; }
+}
+
+/* 右侧模板库可拖拽改变宽度，窗口媒体查询无法反映中间面板的真实宽度。
+   使用容器查询，确保工具栏按自身可用空间换行。 */
+@container (max-width: 760px) {
+  .ai-output-actions {
+    order: 10;
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .ai-output-toolbar-spacer { display: none; }
+}
+
+@container (max-width: 520px) {
+  .ai-project-selector {
+    order: 9;
+    flex-basis: calc(100% - 34px);
+    max-width: none !important;
+  }
+  .ai-output-actions > .ant-btn {
+    padding-inline: 9px;
+  }
+}
+
 .ai-stream-status {
   display: inline-flex;
   align-items: center;
@@ -63,13 +122,22 @@
 }
 
 .ai-question-output {
-  width: min(82%, 720px);
-  padding: 13px 16px;
+  width: fit-content;
+  max-width: min(82%, 720px);
+  padding: 9px 13px;
   border: 1px solid #d7e6dc;
   border-radius: 10px 10px 3px 10px;
   background: #edf5f0;
   color: #30483a;
   box-shadow: 0 1px 4px rgba(54, 47, 36, .025);
+}
+
+.ai-question-output p {
+  margin: 0;
+}
+
+.ai-question-output p + p {
+  margin-top: 6px;
 }
 
 .ai-chat-image-grid {

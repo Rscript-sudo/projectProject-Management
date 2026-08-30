@@ -36,7 +36,7 @@
     "{{参加人员}}": {
       "source": "param",
       "key": "attendees",
-      "default": "见签到表"
+      "default": ""
     },
     "{{记录人}}": {
       "source": "param",
