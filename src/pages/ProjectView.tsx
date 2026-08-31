@@ -13,7 +13,7 @@ import { buildTemplateRuleEditorUrl } from '../shared/templateRuleNavigation.mjs
 import { getTemplateInputPlaceholder } from '../shared/templateInputGuidance.mjs'
 import { getTemplateStatusBadge, isTemplateReady } from '../shared/templateReadiness.mjs'
 import { useSettingsStore } from '../stores/useSettingsStore'
-import { normalizeStructuredDocument, validateStructuredDocument } from '../shared/structuredGeneration'
+import { normalizeStructuredDocument } from '../shared/structuredGeneration'
 import type { SessionMode } from '../services/aiService'
 import DirTree from '../components/DirTree'
 import type { DirNode, TemplateItem } from '../vite-env'
@@ -165,9 +165,10 @@ function validateGeneratedOutput(docType: string, content: string, templateField
   const envelope = normalizeStructuredDocument(docType, cleaned)
   const parsed = envelope.fields
   const required = templateFields.filter(field => !AUTO_FILLED_TEMPLATE_FIELDS.has(field))
-  const validation = validateStructuredDocument(envelope, required)
-  if (!validation.valid) return { valid: false, error: `${docType}${validation.errors.join('；')}`, envelope }
-  return { valid: true, envelope }
+  const missing = required.filter(field => !String(parsed[field] || '').trim())
+  // 模板字段缺失不能阻断内容生成：事实字段由系统/用户后续补充，叙述字段由 AI
+  // 尽量围绕已知事实扩写。这里只拦截完全空白的结果，缺字段降级为交付前软提醒。
+  return { valid: true, envelope, missing }
 }
 
 /**
@@ -360,12 +361,12 @@ export default function ProjectView() {
     }
   }, [settings.hasApiKey, settings.apiKeyDecryptError, loadSettings])
 
-  // 加载目录树（显示所有项目）
+  // 加载当前项目目录树；项目工作台应直接展示四阶段结构，而不是再套一层项目根目录。
   useEffect(() => {
-    if (projectRoot && apiReady) {
-      loadDirTree(projectRoot)
+    if (currentProject?.path && apiReady) {
+      loadDirTree(currentProject.path)
     }
-  }, [projectRoot, apiReady, loadDirTree])
+  }, [currentProject?.path, apiReady, loadDirTree])
 
   // 加载项目配置
   useEffect(() => {
@@ -1042,6 +1043,7 @@ export default function ProjectView() {
         if (mode === 'DOC' || mode === 'HYBRID') {
           const validation = validateGeneratedOutput(docType || '通用文档', accumulated, generationTemplateFields)
           if (!validation.valid) throw new Error(`生成结果验收未通过：${validation.error}`)
+          if (validation.missing?.length) message.warning(`以下字段尚未取得明确事实，已保留生成结果，可在保存前补充：${validation.missing.join('、')}`, 6)
           const quality = await window.electronAPI.scoreDocumentQuality(docType || '通用文档', accumulated)
           if (quality.quality && !quality.quality.passed) message.warning(`文档质量评分 ${quality.quality.score}，建议检查后再保存`)
           setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: accumulated } : m))
@@ -1114,6 +1116,7 @@ export default function ProjectView() {
       if (mode === 'DOC' || mode === 'HYBRID') {
         const validation = validateGeneratedOutput(docType || '通用文档', aiContent, generationTemplateFields)
         if (!validation.valid) throw new Error(`生成结果验收未通过：${validation.error}`)
+        if (validation.missing?.length) message.warning(`以下字段尚未取得明确事实，已保留生成结果，可在保存前补充：${validation.missing.join('、')}`, 6)
         const quality = await window.electronAPI.scoreDocumentQuality(docType || '通用文档', aiContent)
         if (quality.quality && !quality.quality.passed) message.warning(`文档质量评分 ${quality.quality.score}，建议检查后再保存`)
         setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: aiContent } : m))
@@ -1228,7 +1231,7 @@ export default function ProjectView() {
       const result = await window.electronAPI.deleteFile(filePath)
       if (result.success) {
         // 刷新目录树
-        if (projectRoot) loadDirTree(projectRoot)
+        if (currentProject?.path) loadDirTree(currentProject.path)
         return true
       }
       message.error('删除失败：' + (result.error || '未知错误'))
@@ -1287,7 +1290,7 @@ export default function ProjectView() {
               type="text"
               size="small"
               icon={<ReloadOutlined />}
-              onClick={() => loadDirTree(projectRoot)}
+              onClick={() => currentProject?.path && loadDirTree(currentProject.path)}
               title="刷新"
             />
           </Space>
@@ -1300,7 +1303,7 @@ export default function ProjectView() {
               dirTree={dirTree}
               onFileClick={handleFileClick}
               onFileDelete={handleFileDelete}
-              onRefresh={() => loadDirTree(projectRoot)}
+              onRefresh={() => currentProject?.path && loadDirTree(currentProject.path)}
             />
           ) : (
             <div style={{ textAlign: 'center', padding: 24, color: '#999' }}>

@@ -208,6 +208,7 @@ export interface ElectronAPI {
   getRoot: () => Promise<string>
   selectDir: () => Promise<string | null>
   selectFiles: () => Promise<string[] | null>
+  selectTemplateFiles: () => Promise<string[] | null>
   getPathForFile: (file: File) => string
   readFileContent: (filePath: string) => Promise<{
     success: boolean

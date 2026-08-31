@@ -35,6 +35,15 @@ test('全局规则把文种篇幅和段落要求下沉到字段级合同', () =>
   assert.match(expansion, /标量字段只输出一个直接值/)
 })
 
+test('字段缺失和项目类型只约束内容边界，不阻断模板生成', () => {
+  const structure = config.globalRules.THREE_SEGMENT_RULES.content
+  const expansion = config.globalRules.COMMON_EXPANSION_RULES.content
+  assert.match(structure, /单个字段缺失都不得阻止内容生成/)
+  assert.match(expansion, /不得反问后停止或拒绝生成/)
+  assert.match(expansion, /项目类型只用于约束专业术语、适用工序和控制要点/)
+  assert.match(expansion, /不得以项目类型或字段不完整为由限制生成/)
+})
+
 test('所有模板生成都与后续审批流程分离', () => {
   const delivery = config.globalRules.PARAGRAPH_FORMAT_RULES.content
   assert.match(delivery, /内容生成与审批流程分离/)

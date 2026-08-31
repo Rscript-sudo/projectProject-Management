@@ -135,7 +135,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
   const handleImport = async () => {
     const requestedDocType = importDocType.trim()
     if (!requestedDocType) { message.warning('请输入或选择文种'); return }
-    const files = await window.electronAPI.selectFiles()  // 批量
+    const files = await window.electronAPI.selectTemplateFiles()
     if (!files || files.length === 0) return
     setImporting(true)
     try {
@@ -160,11 +160,13 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
       let ok = 0
       let firstPendingTemplate: Tpl | null = null
       for (const f of files) {
-        if (!/\.(docx|xlsx)$/i.test(f)) continue
+        if (!/\.(docx|xlsx)$/i.test(f)) throw new Error(`不支持的模板格式：${f.split(/[\\/]/).pop()}。请使用 .docx 或 .xlsx 文件`)
         const imported = await doImport(f, requestedDocType)
+        if (!imported?.id || !imported?.path) throw new Error(`模板未写入模板库：${f.split(/[\\/]/).pop()}`)
         if (!imported?.fields?.length && !firstPendingTemplate) firstPendingTemplate = imported
         ok++
       }
+      if (ok === 0) throw new Error('未识别到可导入模板，请选择 .docx 或 .xlsx 文件')
       if (firstPendingTemplate) {
         message.warning('模板已导入，但源文件没有 {{字段名}}。系统将进入结构分析，自动建议可填写位置和字段规则。')
       } else {

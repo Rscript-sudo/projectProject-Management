@@ -1693,7 +1693,7 @@ function buildGenericDocPrompt(
 
   const templateContract = templateFields.length > 0
     ? `【模板字段契约】本项目当前${docType}模板要求以下字段：${templateFields.map(f => `【${f}】`).join('、')}。
-必须逐项输出；字段无已核验数据时仅输出字段名并留空（例如【建设单位】），不得写"数据待核对"、undefined、模板符号，也不得自行补造事实。除这些字段外，不要新增会被模板忽略的结构化字段。`
+尽量逐项输出，但任何单个字段缺失都不得拒绝或中止生成。事实型字段无已核验数据时仅输出字段名并留空（例如【建设单位】）；叙述型字段必须围绕用户已提供的事实完成归纳、书面化和通用扩写。不得写 undefined、模板符号，也不得自行补造事实。除这些字段外，不要新增会被模板忽略的结构化字段。`
     : ''
 
   const system = [
@@ -1775,7 +1775,7 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
 
   const templateContract = templateFields.length > 0
     ? `【模板字段契约】本项目当前${docType}模板要求以下字段：${templateFields.map(field => `【${field}】`).join('、')}。
-必须逐项输出；字段无已核验数据时仅输出字段名并留空（例如【建设单位】），不得写“数据待核对”、undefined、模板符号，也不得自行补造事实。除这些字段外，不要新增会被模板忽略的结构化字段。`
+尽量逐项输出，但任何单个字段缺失都不得拒绝或中止生成。事实型字段无已核验数据时仅输出字段名并留空（例如【建设单位】）；叙述型字段必须围绕用户已提供的事实完成归纳、书面化和通用扩写。不得写 undefined、模板符号，也不得自行补造事实。除这些字段外，不要新增会被模板忽略的结构化字段。`
     : ''
 
   // 添加项目信息前缀
@@ -1806,16 +1806,13 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
     : buildSOPInjection(resolvedType, docType)
 
   // ============================================================
-  // v1.2.0 用户输入反问机制（老板拍板 · 2026-06-28）
-  // 信息不足 → 强制反问，禁止 AI 凑字数/脑补场景
+  // 信息缺口只用于约束事实边界，不能阻断生成。
   // ============================================================
   const inputAnalysis = analyzeUserInput(userInput)
   const clarificationPrompt = inputAnalysis.missingElements.length > 0
-    ? `【反问机制 — 信息不足，禁止生成】
+    ? `【信息不足时仍须生成】
 你的用户输入缺少以下关键要素：${inputAnalysis.missingElements.join('、')}
-【铁律】禁止使用占位符或模糊表述凑数，必须先用一段简短的话列出缺失要素，请用户补充后再继续生成。
-例如：「请补充：①时间（何时发现/发生）②地点（哪个部位/分部分项）③事件（具体问题描述）④原因（初步原因分析）」
-如果用户已在历史对话中补充过这些信息，可继续生成并在文末【信息缺口提示】中列出。`
+【铁律】不得反问后停止、不得拒绝生成。先用已有事实完成全部可扩写的叙述字段；缺失的时间、地点、人员、原因等事实型字段留空，不得猜测。项目类型仅用于选择正确专业术语、工序和控制要点，不得成为限制生成的理由。`
     : ''
 
   const dateStr = new Date().toISOString().split('T')[0]
@@ -1848,7 +1845,7 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
       globalRuleContent('PARAGRAPH_FORMAT_RULES'),
       documentRulesInjection,
       sopInjection,  // v1.2.0 新增：项目类型 SOP 强制注入
-      clarificationPrompt,  // v1.2.0 新增：用户输入反问机制
+      clarificationPrompt,  // 信息缺口不阻断生成
       typeRules,
       templateContract,
       `【内容生成与审批分离——最终硬约束】

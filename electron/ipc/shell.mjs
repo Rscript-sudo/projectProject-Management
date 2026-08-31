@@ -140,6 +140,17 @@ export function register(ipcMain, mainWindow) {
     return result.filePaths
   })
 
+  ipcMain.handle('dialog:selectTemplateFiles', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: '可导入模板（Word / Excel）', extensions: ['docx', 'xlsx'] },
+      ],
+    })
+    if (result.canceled) return null
+    return result.filePaths
+  })
+
   // 读取文件内容（供 AI 分析使用）
   ipcMain.handle('fs:readFileContent', safeCall(async (_, filePath) => {
     // 打包后的系统模板位于 /Applications/.../Resources/templates，常规用户路径
