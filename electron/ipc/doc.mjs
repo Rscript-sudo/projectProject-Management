@@ -14,6 +14,7 @@ import { recordIssuedDocument, saveDocumentMasterSnapshot, getCurrentMasterProfi
 // v1.2.0：主进程接入反编造铁律后处理（单一真相源：electron/shared/postProcess.mjs）
 import { postProcessTimeFields, postProcessFabricationGuard } from '../shared/postProcess.mjs'
 import { getRuntimeSystemTemplatesDir } from '../templateWorkspace.mjs'
+import { findProfessionalForbiddenTerms } from '../shared/professionalTerms.mjs'
 
 // ESM 模块无 __dirname，手动推导
 const __filename = fileURLToPath(import.meta.url)
@@ -26,18 +27,6 @@ function getTemplatesDir() {
     return path.join(process.resourcesPath, 'templates')
   }
   return path.join(__dirname, '..', '..', 'templates')
-}
-
-function findProfessionalForbiddenTerms(projectTypeCode, content) {
-  if (!['civil', 'municipal', 'building', 'information', 'landscape', 'steel', 'decoration'].includes(projectTypeCode)) return []
-  const sopPath = path.join(__dirname, '..', '..', 'src', 'shared', 'sop', projectTypeCode, 'safety-notice.json')
-  if (!fs.existsSync(sopPath)) return []
-  const sop = JSON.parse(fs.readFileSync(sopPath, 'utf8'))
-  const terms = [
-    ...(sop._禁用条款 || []),
-    ...Object.values(sop.sections || {}).flatMap(section => section?.禁用术语 || []),
-  ]
-  return [...new Set(terms.filter(term => term && String(content).includes(term)))]
 }
 
 export function register(ipcMain) {

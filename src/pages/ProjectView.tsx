@@ -12,6 +12,7 @@ import { hasUsableDocTypePrompt } from '../shared/docTypePrompts'
 import { buildTemplateRuleEditorUrl } from '../shared/templateRuleNavigation.mjs'
 import { getTemplateInputPlaceholder } from '../shared/templateInputGuidance.mjs'
 import { getTemplateStatusBadge, isTemplateReady } from '../shared/templateReadiness.mjs'
+import { buildTemplateResourceGroups, matchesCurrentProfessionalTemplate } from '../shared/templateResources.mjs'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { normalizeStructuredDocument } from '../shared/structuredGeneration'
 import { buildFactPool, buildFieldConfigsFromPrompt, buildFieldResolutionPlan, formatResolutionContext, getPendingFieldPlan, mergeResolvedFields, retainTemplateFields, setStructuredFieldValue, updateFieldPlanValue } from '../shared/fieldResolution.mjs'
@@ -62,6 +63,7 @@ interface GenerationTemplate {
   missing?: boolean
   fields?: string[]
   readOnly?: boolean
+  resourceKind?: 'document' | 'site-package'
 }
 
 function createMessageId(role: 'user' | 'assistant') {
@@ -509,14 +511,11 @@ export default function ProjectView() {
         window.electronAPI.listSystemTemplates(),
       ])
       setTemplateCatalog(catalog || [])
-      // 只有用户添加的“通用模板”才覆盖同文种系统模板。
-      // 专业/项目/私人模板属于独立资源树节点，不能让系统内置项从通用模板中消失。
-      const globalLibraryDocTypes = new Set(
-        (library || []).filter(item => item.scope === 'global').map(item => item.docType),
-      )
+      // 内置基线、专业、私人和用户自定义模板必须分别展示。用户上传的通用
+      // 副本可以在生成时被选中，但不能让对应内置模板从资源树中消失。
       setGenerationTemplates([
         ...(library || []),
-        ...(system || []).filter(item => !globalLibraryDocTypes.has(item.docType)),
+        ...(system || []),
       ] as GenerationTemplate[])
     } catch (e) {
       console.error('[ProjectView] Failed to load template catalog:', e)
@@ -2191,11 +2190,9 @@ export default function ProjectView() {
                 <div>
                   {(() => {
                     const keyword = templateSearch.trim().toLowerCase()
-                    const currentType = projectConfig.projectType || ''
+                    const currentType = projectConfig.projectTypeCode || projectConfig.projectType || ''
                     const visible = generationTemplates.filter(item => {
-                      const professionalMatch = item.scope !== 'professional'
-                        || item.projectType === currentType
-                        || item.projectTypeLabel === currentType
+                      const professionalMatch = matchesCurrentProfessionalTemplate(item, currentType)
                       const searchMatch = !keyword || `${item.name}${item.docType}${item.projectType || ''}`.toLowerCase().includes(keyword)
                       return professionalMatch && searchMatch
                     })
@@ -2205,12 +2202,8 @@ export default function ProjectView() {
                       const bStatus = getTemplateStatusBadge({ ...b, readOnly: b.scope === 'system' })
                       return (statusPriority[aStatus.key] ?? 9) - (statusPriority[bStatus.key] ?? 9) || String(a.name || a.docType).localeCompare(String(b.name || b.docType), 'zh-CN')
                     })
-                    const groups = [
-                      { key: 'personal', label: '私人模板库', items: visible.filter(item => item.scope === 'personal') },
-                      { key: 'general', label: '通用模板', items: visible.filter(item => item.scope === 'global' || item.scope === 'system') },
-                      { key: 'professional', label: `当前项目模板库${currentType ? ` · ${currentType}` : ''}`, items: visible.filter(item => item.scope === 'professional') },
-                      { key: 'other', label: '其他模板', items: visible.filter(item => item.scope === 'other') },
-                    ].map(group => ({ ...group, items: sortByStatus(group.items) })).filter(group => group.key === 'personal' || group.items.length)
+                    const groups = buildTemplateResourceGroups(visible, currentType)
+                      .map(group => ({ ...group, items: sortByStatus(group.items as GenerationTemplate[]) }))
                     if (!groups.length) return <div style={{ padding: 28, textAlign: 'center', color: '#999', fontSize: 12 }}>没有匹配的模板</div>
                     const treeData = groups.map(group => ({
                       key: `group:${group.key}`,
@@ -2250,7 +2243,7 @@ export default function ProjectView() {
                             <Tag color={badge.color} title={badge.title} style={{ margin: '0 0 0 6px', padding: '0 5px', lineHeight: '17px', height: 18, fontSize: 9, flexShrink: 0 }}>{badge.label}</Tag>
                           </div>
                         </Dropdown>,
-                      })}) : [{ key: `empty:${group.key}`, selectable: false, disabled: true, isLeaf: true, title: <Text type="secondary" style={{ fontSize: 11 }}>暂无私人模板，可在模板中心另存</Text> }],
+                      })}) : [{ key: `empty:${group.key}`, selectable: false, disabled: true, isLeaf: true, title: <Text type="secondary" style={{ fontSize: 11 }}>{group.emptyText}</Text> }],
                     }))
                     const badges = visible.map(template => getTemplateStatusBadge({ ...template, readOnly: template.scope === 'system' }))
                     const readyCount = badges.filter(item => item.key === 'ready' || item.key === 'system').length

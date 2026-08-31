@@ -117,7 +117,9 @@
 
 ### 项目类型 → SOP 路由
 
-`PROJECT_TYPE_ROUTER`（aiService.ts 顶部）按 7 类项目（土建/市政/房建/信息化/园林/钢结构/装饰）加载不同 SOP。**禁止跨类型混用术语**（信息化项目禁用塔吊/扬尘/木工等土建术语），`sanitizeForbiddenTerms` 做兜底。SOP 素材在 `src/shared/sop/<type>/safety-notice.json`。
+`PROJECT_TYPE_ROUTER`（aiService.ts 顶部）按 9 类项目（土建/市政/房建/信息化/通信/电力/园林/钢结构/装饰）加载不同 SOP。项目专业画像优先于模板来源和模板内旧样例；内置通用、当前项目专业、私人、用户自定义以及后续站点资料包均注入同一专业强制约束。**禁止跨类型混用术语**，主进程保存前再次按 `src/shared/sop/<type>/safety-notice.json` 扫描禁用术语。
+
+AI 文档助手的模板资源固定分为“内置通用模板 / 当前项目专业模板库 / 私人模板库 / 用户自定义模板 / 站点资料包”。专业库按项目类型 code 自动过滤且空库也显示；未手动选择时模板优先级为“项目专属覆盖 → 当前项目显式选择 → 当前项目专业模板 → 私人模板 → 用户通用模板 → 内置通用模板”。`resourceKind=site-package` 已作为资料包资源分组入口，完整多表单解析和渲染按后续资料包模型扩展。
 
 ### 占位符白名单（`placeholderScan.mjs`）
 

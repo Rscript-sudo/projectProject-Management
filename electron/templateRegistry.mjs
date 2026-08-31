@@ -97,6 +97,7 @@ export async function reconcileTemplateLibraryFiles(userDataPath) {
         projectTypeLabel: categoryLabel,
         path: filePath,
         sourceName: path.basename(filePath),
+        resourceKind: 'document',
         fields,
         // 内置文种的规则按文种随应用交付。复制为私人副本后直接继承，
         // 只有新增自定义字段或自定义文种才需要重新配置。
@@ -329,12 +330,13 @@ export function getSupportedDocTypes() {
 // v1.x：自定义文种运行时缓存
 let customDocTypesCache = []
 
-export async function importTemplateToLibrary({ userDataPath, sourcePath, docType, scope = 'professional', projectType = '通用', name }) {
+export async function importTemplateToLibrary({ userDataPath, sourcePath, docType, scope = 'professional', projectType = '通用', name, resourceKind = 'document' }) {
     // v1.x：用运行时全量文种（含 customDocTypes）做校验
   const supported = getSupportedDocTypes()
   if (!supported.includes(docType)) throw new Error(`不支持的文种：${docType}`)
   if (!fs.existsSync(sourcePath) || !/\.(docx|xlsx)$/i.test(sourcePath)) throw new Error('请选择有效的 Word 或 Excel 模板文件')
   if (!['global', 'professional', 'other', 'personal'].includes(scope)) throw new Error('模板范围无效')
+  if (!['document', 'site-package'].includes(resourceKind)) throw new Error('模板资源类型无效')
 
   const registry = readRegistry(userDataPath)
   const id = `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -381,6 +383,7 @@ export async function importTemplateToLibrary({ userDataPath, sourcePath, docTyp
     projectTypeLabel: categoryLabel,  // UI 显示用
     path: targetPath,
     sourceName: `${safeDocType}模板${extension}`,
+    resourceKind,
     fields,
     layoutContract: layoutContract ? {
       path: getTemplateLayoutContractPath(targetPath),
@@ -429,12 +432,13 @@ export function resolveLibraryTemplate(userDataPath, { docType, projectType, sel
   const readyTemplates = templates.filter(isTemplateReady)
   // v1.x：projectType 兼容 label 和 code（normalizeProjectType 都处理）
   const targetCode = normalizeProjectType(projectType)
-  // 优先级：personal（个人私有库，用户自己配）> professional（专业库）> global（通用库）
-  return readyTemplates.find(item => item.scope === 'personal')
-    || readyTemplates.find(item =>
+  // 自动路由优先选择当前项目的专业模板；私人/自定义模板仍可由用户显式选择，
+  // 但不能在无选择时压过项目专业，造成通信项目误用其他专业或通用私人模板。
+  return readyTemplates.find(item =>
       item.scope === 'professional' &&
       (item.projectType === targetCode || normalizeProjectType(item.projectType) === targetCode)
-    ) || readyTemplates.find(item => item.scope === 'global') || null
+    ) || readyTemplates.find(item => item.scope === 'personal')
+    || readyTemplates.find(item => item.scope === 'global') || null
 }
 
 /**

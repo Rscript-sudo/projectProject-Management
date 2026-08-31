@@ -13,6 +13,8 @@ const fixtures = [
   ['landscape', '园林', '苗木长势正常，灌溉排水系统运行正常。[来源:E1]'],
   ['steel', '钢结构', '焊缝外观已检查，高强螺栓终拧已复核。[来源:E1]'],
   ['decoration', '装饰', '吊顶龙骨连接牢固，墙地砖空鼓抽检合格。[来源:E1]'],
+  ['communication', '通信', '光缆规格和到货数量已按材料清单核对。[来源:E1]'],
+  ['power', '电力', '电力电缆规格和到货数量已按材料清单核对。[来源:E1]'],
 ]
 
 for (const [code, label, content] of fixtures) {

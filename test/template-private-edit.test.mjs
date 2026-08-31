@@ -117,19 +117,23 @@ test('完全空白段落可按段落坐标写入占位符', async t => {
   assert.match(afterParagraphs[paragraphIndex], /\{\{空白段落补充说明\}\}/)
 })
 
-test('私人模板优先于专业和通用模板参与生成解析', async t => {
+test('当前项目专业模板自动优先，私人模板仍可显式选择', async t => {
   const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-private-template-'))
   t.after(() => fs.rmSync(userDataPath, { recursive: true, force: true }))
   const sourcePath = path.resolve('templates/通用/01_监理日志/监理日志模板.docx')
 
   const global = await importTemplateToLibrary({ userDataPath, sourcePath, docType: '监理日志', scope: 'global', projectType: '通用', name: '通用版本' })
   const personal = await importTemplateToLibrary({ userDataPath, sourcePath, docType: '监理日志', scope: 'personal', projectType: '通用', name: '我的私人版本' })
+  const professional = await importTemplateToLibrary({ userDataPath, sourcePath, docType: '监理日志', scope: 'professional', projectType: '通信工程', name: '通信专业版本' })
   markTemplateRuleConfigured(userDataPath, global.id)
   markTemplateRuleConfigured(userDataPath, personal.id)
-  const resolved = resolveLibraryTemplate(userDataPath, { docType: '监理日志', projectType: '土建工程' })
+  markTemplateRuleConfigured(userDataPath, professional.id)
+  const resolved = resolveLibraryTemplate(userDataPath, { docType: '监理日志', projectType: '通信工程' })
 
-  assert.equal(resolved.id, personal.id)
-  assert.equal(resolved.scope, 'personal')
+  assert.equal(resolved.id, professional.id)
+  assert.equal(resolved.scope, 'professional')
+  const selected = resolveLibraryTemplate(userDataPath, { docType: '监理日志', projectType: '通信工程', selectedTemplateId: personal.id })
+  assert.equal(selected.id, personal.id)
 })
 
 test('内置文种用户模板自动继承规则，替换源文件后自动失效', async t => {

@@ -143,6 +143,7 @@ export async function listSystemTemplates(templatesDir) {
       fields,
       readOnly: true,
       configurationStatus: 'ready',
+      resourceKind: 'document',
     })
   }
   return entries

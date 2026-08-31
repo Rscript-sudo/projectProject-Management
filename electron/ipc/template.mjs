@@ -157,6 +157,7 @@ export function register(ipcMain) {
         projectTypeLabel: '通用',
         path: targetPath,
         sourceName: path.basename(filePath),
+        resourceKind: 'document',
         fields: fields0,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),

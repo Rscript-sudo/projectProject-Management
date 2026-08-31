@@ -14,6 +14,7 @@ import { buildDocumentRulesInjection, normalizeDocumentRules } from '../shared/d
 import { getDefaultPrompts, resolveDocTypePromptForAny } from '../shared/docTypePrompts'
 import { parseAIJsonObject, stripThinkingContent } from '../shared/aiOutput.mjs'
 import { clampTemplateFieldRule, normalizeTemplateFieldSuggestions } from '../shared/templateFieldSuggestions.mjs'
+import { buildProfessionalScopeConstraint } from '../shared/professionalConstraint.mjs'
 import { DOC_TYPE_MIN_WORDS } from '../shared/docTypeMinWords'
 
 // 全局规则的唯一运行时真相源。任何生成路径（含自定义文种和兜底路径）
@@ -110,9 +111,10 @@ const PROJECT_TYPE_ROUTER: { 默认类型兜底: ProjectTypeKey; [k: string]: Pr
   },
 }
 
-function resolveProjectType(configuredType: string | undefined | null): ProjectTypeKey {
+function resolveProjectType(configuredType: string | undefined | null): string {
   const route: Record<string, ProjectTypeKey> = { civil: '土建', municipal: '市政', building: '房建', information: '信息化', communication: '通信', power: '电力', landscape: '园林', steel: '钢结构', decoration: '装饰', unclassified: '未分类' }
-  return route[normalizeProjectType(configuredType)] || '未分类'
+  const code = normalizeProjectType(configuredType)
+  return route[code] || code || '未分类'
 }
 
 function loadProjectTypeSOP(projectType: ProjectTypeKey | string): ProjectTypeSOP {
@@ -133,7 +135,7 @@ function loadProjectTypeSOP(projectType: ProjectTypeKey | string): ProjectTypeSO
   }
 }
 
-function buildSOPInjection(projectType: ProjectTypeKey, docType: string): string {
+function buildSOPInjection(projectType: string, docType: string): string {
   const sop = loadProjectTypeSOP(projectType)
   const minWords = sop.minWordsByDocType[docType] ?? 600
   return `【项目类型 SOP 强制注入 — v1.2.0】
@@ -156,7 +158,7 @@ ${sop.disabledSections.map(s => `   - ${s}`).join('\n')}
  * AI 不需要自己脑补 SOP 内容（解决之前 SOP 是死文件的问题）
  */
 function buildSOPMaterialization(
-  projectType: ProjectTypeKey,
+  projectType: string,
   docType: string,
   sopData: {
     found: boolean
@@ -220,7 +222,7 @@ ${sectionForbidden}` : ''}
 【硬约束】本文档必须按上述「必含要点」逐节展开；如误启用了任何「禁用条款/术语」，整篇文档作废，必须重写。`
 }
 
-function buildCalibrationStatement(projectType: ProjectTypeKey, docType: string, actualWordCount: number): string {
+function buildCalibrationStatement(projectType: string, docType: string, actualWordCount: number): string {
   const sop = loadProjectTypeSOP(projectType)
   const minWords = sop.minWordsByDocType[docType] ?? 600
   const wordCountOk = actualWordCount >= minWords
@@ -1712,9 +1714,10 @@ function buildGenericDocPrompt(
 - 总监理工程师：${projectInfo.chiefEngineer || '未配置（文书中留空）'}
 ` : ''
 
+  const resolvedType = resolveProjectType(projectInfo?.projectTypeCode || projectInfo?.projectType)
   const sopInjection = sopData
-    ? buildSOPMaterialization(resolveProjectType(projectInfo?.projectTypeCode || projectInfo?.projectType), docType, sopData)
-    : ''
+    ? buildSOPMaterialization(resolvedType, docType, sopData)
+    : buildSOPInjection(resolvedType, docType)
 
   const templateContract = templateFields.length > 0
     ? `【模板字段契约】本项目当前${docType}模板要求以下字段：${templateFields.map(f => `【${f}】`).join('、')}。
@@ -1722,6 +1725,7 @@ function buildGenericDocPrompt(
     : ''
 
   const system = [
+    buildProfessionalScopeConstraint(projectInfo),
     `【项目事实合同】只能把"项目画像、用户输入、已归档资料"当作事实来源。专业标签和项目特点未填写时，写"数据待核对"或提示补充；不得以其他专业的常识补造事实。只允许使用与项目类型、标签和建设范围相符的术语。`,
     defaultGlobalRuleContent('ANTI_FABRICATION_RULES'),
     defaultGlobalRuleContent('THREE_SEGMENT_RULES'),
@@ -1863,6 +1867,7 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
       return rule.enabled === false ? '' : rule.content
     }
     const parts: string[] = [
+      buildProfessionalScopeConstraint(projectInfo),
       `【项目事实合同】只能把“项目画像、用户输入、已归档资料”当作事实来源。专业标签和项目特点未填写时，写“数据待核对”或提示补充；不得以土建、通信、电力等其他专业的常识补造事实。只允许使用与项目类型、标签和建设范围相符的术语。`,
       globalRuleContent('ANTI_FABRICATION_RULES'),
       globalRuleContent('THREE_SEGMENT_RULES'),
