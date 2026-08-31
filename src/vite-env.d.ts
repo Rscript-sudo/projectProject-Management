@@ -209,6 +209,7 @@ export interface ElectronAPI {
   selectDir: () => Promise<string | null>
   selectFiles: () => Promise<string[] | null>
   selectTemplateFiles: () => Promise<string[] | null>
+  resolveTemplateContext: (payload: { input: string; project: Record<string, unknown>; fields: string[] }) => Promise<{ success: boolean; businessDate?: string; values?: Record<string, string>; provenance?: Record<string, unknown>; warnings?: string[]; error?: string }>
   getPathForFile: (file: File) => string
   readFileContent: (filePath: string) => Promise<{
     success: boolean

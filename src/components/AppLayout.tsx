@@ -234,7 +234,7 @@ export default function AppLayout() {
           <Text strong style={{ display: 'block', margin: '12px 0 6px', fontSize: 13 }}>项目基础信息</Text>
           <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 11 }}>一次建档，后续自动写入模板和 AI 上下文；未确认的信息可暂留空，但正式件不能使用待核对字段。</Text>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <Input value={newImplementationArea} onChange={e => setNewImplementationArea(e.target.value)} placeholder="实施区域（如：广州市天河区）" />
+            <Input value={newImplementationArea} onChange={e => setNewImplementationArea(e.target.value)} placeholder="实施区域（如：广州市天河区，用于天气等自动取数）" />
             <Input value={newProjectCode} onChange={e => setNewProjectCode(e.target.value)} placeholder="项目编码（可留空自动生成）" />
             <Input value={newOwnerUnit} onChange={e => setNewOwnerUnit(e.target.value)} placeholder="建设单位" />
             <Input value={newContractor} onChange={e => setNewContractor(e.target.value)} placeholder="施工单位" />

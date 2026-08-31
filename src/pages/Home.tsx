@@ -654,7 +654,7 @@ export default function Home() {
                       <Input.TextArea rows={2} placeholder="只填写已知事实；AI 不会自行补造。" />
                     </Form.Item>
                     <Form.Item name="implementationArea" label="实施区域" style={{ marginBottom: 8 }}>
-                      <Input placeholder="如：广州市天河区；用于项目上下文，不据此猜测天气" />
+                      <Input placeholder="如：广州市天河区；用于专业上下文和天气等外部数据自动查询" />
                     </Form.Item>
                     <Space style={{ width: '100%' }}>
                       <Button type="primary" size="small" htmlType="button" onClick={handleSaveConfig} style={{ flex: 1 }}>

@@ -21,6 +21,7 @@ import { register as registerOperations } from './operations.mjs'
 import { register as registerDelivery } from './delivery.mjs'
 import { register as registerDashboard } from './dashboard.mjs'
 import { register as registerRelease } from './release.mjs'
+import { register as registerField } from './field.mjs'
 import { getSettings } from './shared.mjs'
 import { setCustomProjectTypes } from '../../src/shared/projectProfile.mjs'
 import { setCustomDocTypes } from '../templateRegistry.mjs'
@@ -52,6 +53,7 @@ export function registerAll(ipcMain, mainWindow, shellApi) {
   registerDelivery(ipcMain)
   registerDashboard(ipcMain)
   registerRelease(ipcMain)
+  registerField(ipcMain)
 
   // v1.x：主进程启动时把 settings 里的 customProjectTypes / customDocTypes 注入运行时
   // （getSettings 内部已经会注入一次，这里再注入一次防 race）

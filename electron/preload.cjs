@@ -5,6 +5,7 @@ const api = {
   selectDir: () => ipcRenderer.invoke('dialog:selectDir'),
   selectFiles: () => ipcRenderer.invoke('dialog:selectFiles'),
   selectTemplateFiles: () => ipcRenderer.invoke('dialog:selectTemplateFiles'),
+  resolveTemplateContext: (payload) => ipcRenderer.invoke('field:resolveTemplateContext', payload),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   readClipboardText: () => ipcRenderer.invoke('shell:readClipboardText'),
   readFileContent: (filePath) => ipcRenderer.invoke('fs:readFileContent', filePath),

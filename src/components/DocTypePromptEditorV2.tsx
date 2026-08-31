@@ -18,6 +18,7 @@ import type { SuggestedField } from '../services/aiService'
 import { stripThinkingContent } from '../shared/aiOutput.mjs'
 import { buildTemplateStructureMap, deriveTemplateFieldSuggestions, reconcileTemplateFieldPlacements } from '../shared/templateStructureMap.mjs'
 import { mergeTemplateAnalysisFields, resolveReloadedTemplateFields, suggestPlaceholderNames } from '../shared/templateFieldSuggestions.mjs'
+import { buildFieldContract } from '../shared/fieldResolution.mjs'
 
 const { Text, Title } = Typography
 
@@ -31,6 +32,14 @@ type FieldConfig = {
   maxWords: number
   antiFabrication: boolean
   missingInfoPolicy: '留空' | '待确认'
+  semanticType?: string
+  fillMode?: string
+  expansionLevel?: 'exact' | 'normalize' | 'summarize' | 'contextual' | 'advisory' | 'none'
+  requiredForGeneration?: boolean
+  requiredForDelivery?: boolean
+  sourcePriority?: string[]
+  dependencies?: string[]
+  forbiddenAssertions?: string[]
 }
 
 type PlaceholderPlacement = {
@@ -44,6 +53,7 @@ type PlaceholderPlacement = {
 }
 
 const SYSTEM_FIELDS = ['日期', '日期范围', '周数', '月份', '星期几', '当前时间', '编制日期']
+const EXTERNAL_FIELDS = ['天气', '气温', '温度']
 const HUMAN_SIGNOFF_FIELDS = ['施工单位签名', '监理单位签名', '建设单位签名', '监理单位签章', '施工单位签章', '签名日期']
 // 项目通用字段：新建项目时已写入项目基本信息，生成时直接从项目资料读取，不调 AI
 const PROJECT_FIELDS = [
@@ -64,36 +74,50 @@ const FIELD_HINTS: Record<string, string> = {
   项目名称: '从项目资料读取正式全称，不得改写或推测。',
   日期: '优先采用用户提供或项目资料中的日期；缺失时标注待确认。',
   星期几: '根据已确认日期计算，不得自行假定日期。',
-  天气: '仅整理用户输入或现场资料中明确记录的天气。',
-  气温: '保留原始数值和单位，缺失时标注待确认。',
-  施工部位: '写明楼栋、楼层、轴线或具体作业面，信息不足不得补造。',
+  天气: '优先采用用户或现场资料中的实况；未提供时根据项目实施区域和业务日期自动查询。历史实况、当日数据和预报必须区分，不得猜测。',
+  气温: '优先保留现场记录的原始数值和单位；未提供时根据项目实施区域和业务日期自动查询最低/最高气温。',
+  施工部位: '从用户事实归纳实际作业范围；可写“光缆线路沿线及交接箱安装点位”等类别性部位，不得补造楼栋、道路、桩号或精确地址。',
   参与人员: '列出已提供的单位、岗位与姓名，不增加未出现人员。',
   今日内容: '按时间或工序归纳当天完成事项，突出可核验事实。',
-  核心工作落实: '围绕质量、进度、安全的检查结果和落实情况展开。',
-  协调解决情况: '写明问题、协调对象、处理结论及后续责任。',
-  其他事项: '仅记录不属于前述栏目但确有依据的重要事项。',
+  核心工作落实: '围绕已知施工内容简单扩写控制重点；已实施检查必须有事实来源，没有检查事实时只能写后续关注点或建议核对事项。',
+  协调解决情况: '优先整理已知协调事实；未提供协调对象或结果时不得补造，可留空或写成后续需要关注的接口衔接事项。',
+  其他事项: '可结合当前工序补充成品保护、资料整理、安全关注和后续工作建议，但不得写成已经完成的检查或整改事实。',
 }
 
 function normalizeTemplateFieldConfig(field: string, config: FieldConfig): FieldConfig {
+  const enrich = (value: FieldConfig): FieldConfig => {
+    const contract = buildFieldContract(field, value)
+    return {
+      ...value,
+      semanticType: contract.semanticType,
+      fillMode: contract.fillMode,
+      expansionLevel: contract.expansionLevel,
+      requiredForGeneration: contract.requiredForGeneration,
+      requiredForDelivery: contract.requiredForDelivery,
+      sourcePriority: contract.sourcePriority,
+      dependencies: contract.dependencies,
+      forbiddenAssertions: contract.forbiddenAssertions,
+    }
+  }
   if (HUMAN_SIGNOFF_FIELDS.includes(field)) {
-    return { ...config, mode: 'keep', source: '人工签章', requirement: '', required: false, minWords: 0, maxWords: 0, missingInfoPolicy: '留空' }
+    return enrich({ ...config, mode: 'keep', fillMode: 'manual', expansionLevel: 'none', source: '人工签章', requirement: '', required: false, minWords: 0, maxWords: 0, missingInfoPolicy: '留空' })
   }
   if (field.startsWith('表格行')) {
     const label = field.replace(/^表格行/, '')
     const requirement = label === '其它情况'
       ? '仅根据用户已提供事实填写差异或其它情况；没有明确说明时留空，不得推测原因。'
       : `仅提取当前明细行的“${label}”原始值，保留数值和单位；用户未提供时留空，不得补造。`
-    return { ...config, mode: 'ai', source: '用户输入中的明确事实', requirement, required: false, minWords: 0, maxWords: label === '其它情况' ? 120 : 40, antiFabrication: true, missingInfoPolicy: '留空' }
+    return enrich({ ...config, mode: 'ai', fillMode: 'fact-extraction', expansionLevel: label === '其它情况' ? 'summarize' : 'exact', source: '用户输入中的明确事实', requirement, required: false, minWords: 0, maxWords: label === '其它情况' ? 120 : 40, antiFabrication: true, missingInfoPolicy: '留空' })
   }
   // 文件路径是用户选择/上传的资源引用，不是可由模型“扩写”的正文。
   // 强制归为自动填充，避免模型生成不存在的本地路径。
   if (/^(?:图|图片|照片|附件)\d*(?:文件)?路径$/.test(field)) {
-    return { ...config, mode: 'project', source: '用户上传附件或项目资料', requirement: '只使用用户已选择或项目中已归档的真实文件路径；没有对应文件时留空。', required: false, minWords: 0, maxWords: 0, antiFabrication: true, missingInfoPolicy: '留空' }
+    return enrich({ ...config, mode: 'project', fillMode: 'fact-extraction', expansionLevel: 'exact', source: '用户上传附件或项目资料', requirement: '只使用用户已选择或项目中已归档的真实文件路径；没有对应文件时留空。', required: false, minWords: 0, maxWords: 0, antiFabrication: true, missingInfoPolicy: '留空' })
   }
   if (field === '局点名称') {
-    return { ...config, requirement: '仅提取用户明确提供的局点名称；未提供时留空，不得用项目名称代替。', required: false, minWords: 0, maxWords: 40, missingInfoPolicy: '留空' }
+    return enrich({ ...config, requirement: '仅提取用户明确提供的局点名称；未提供时留空，不得用项目名称代替。', required: false, minWords: 0, maxWords: 40, missingInfoPolicy: '留空' })
   }
-  return config
+  return enrich(config)
 }
 
 function escapeHtmlAttribute(value: string) {
@@ -172,15 +196,15 @@ function injectMappedPlaceholder(html: string, placement: PlaceholderPlacement, 
 }
 
 function defaultFieldConfig(field: string): FieldConfig {
-  const mode: FillMode = SYSTEM_FIELDS.includes(field) ? 'system' : PROJECT_FIELDS.includes(field) ? 'project' : 'ai'
-  return {
+  const mode: FillMode = SYSTEM_FIELDS.includes(field) || EXTERNAL_FIELDS.includes(field) ? 'system' : PROJECT_FIELDS.includes(field) ? 'project' : 'ai'
+  return normalizeTemplateFieldConfig(field, {
     ...EMPTY_CONFIG,
     mode,
-    source: mode === 'system' ? '系统自动计算' : mode === 'project' ? '项目资料' : '用户输入与项目资料',
+    source: EXTERNAL_FIELDS.includes(field) ? '现场记录优先；缺失时按项目位置和业务日期自动查询' : mode === 'system' ? '系统自动计算' : mode === 'project' ? '项目资料' : '用户输入与项目资料',
     requirement: FIELD_HINTS[field] || `围绕“${field}”提取可核验事实，按模板语气整理；信息不足时标注待确认。`,
     required: false,
     missingInfoPolicy: mode === 'ai' ? '留空' : '留空',
-  }
+  })
 }
 
 function extractFieldContext(content: string, field: string, radius = 900) {
@@ -572,7 +596,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
     const nextConfigs = { ...configs }
     for (const f of picked) {
       const existed = fields.includes(f.name)
-      nextConfigs[f.name] = {
+      nextConfigs[f.name] = normalizeTemplateFieldConfig(f.name, {
         mode: f.mode,
         requirement: f.rule?.requirement || f.hint,
         required: f.rule?.required === true,
@@ -581,7 +605,15 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
         antiFabrication: f.rule?.antiFabrication !== false,
         missingInfoPolicy: f.rule?.missingInfoPolicy || (f.mode === 'ai' ? '待确认' : '留空'),
         source: f.rule?.source || (f.mode === 'system' ? '系统自动计算' : f.mode === 'project' ? '项目资料' : '用户输入与项目资料'),
-      }
+        semanticType: f.rule?.semanticType,
+        fillMode: f.rule?.fillMode,
+        expansionLevel: f.rule?.expansionLevel,
+        requiredForGeneration: f.rule?.requiredForGeneration === true,
+        requiredForDelivery: f.rule?.requiredForDelivery === true || f.rule?.required === true,
+        sourcePriority: f.rule?.sourcePriority,
+        dependencies: f.rule?.dependencies,
+        forbiddenAssertions: f.rule?.forbiddenAssertions,
+      })
       if (existed) refreshedCount += 1
       else newFields.push(f.name)
     }
@@ -802,6 +834,9 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
         maxWords: result.rule.maxWords,
         antiFabrication: result.rule.antiFabrication,
         missingInfoPolicy: current.missingInfoPolicy,
+        expansionLevel: result.rule.expansionLevel || current.expansionLevel,
+        requiredForGeneration: result.rule.requiredForGeneration === true,
+        requiredForDelivery: result.rule.requiredForDelivery === true,
       })
       message.success(mode === 'suggest' ? `已建议“${selectedField}”字段规则` : `已润色“${selectedField}”字段规则`)
     } catch (error: any) { message.error(`字段规则生成失败：${error?.message || error}`) }
@@ -1016,11 +1051,23 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
           <div style={{ padding: 16, display: 'grid', gap: 15 }}>
             {!selectedField ? <Empty description="请从左侧选择字段" /> : <>
               <Alert type="info" showIcon message="这里只设置当前占位符的具体要求；所有文档共用的要求请返回模板中心，在“全局规则”中管理。" />
-              <div><Text strong>处理方式</Text><Segmented block style={{ marginTop: 7 }} value={current.mode} onChange={value => updateConfig({ mode: value as FillMode })} options={[{ label: '自动填充', value: 'project' }, { label: 'AI扩写', value: 'ai' }, { label: '保持原样', value: 'keep' }]} /></div>
+              <div><Text strong>处理方式</Text><Segmented block style={{ marginTop: 7 }} value={current.mode} onChange={value => {
+                const mode = value as FillMode
+                updateConfig({ mode, fillMode: mode === 'ai' ? 'ai-expansion' : mode === 'keep' ? 'manual' : mode === 'system' ? 'system-computed' : 'project-data' })
+              }} options={[{ label: '自动填充', value: 'project' }, { label: '系统计算', value: 'system' }, { label: 'AI扩写', value: 'ai' }, { label: '人工留空', value: 'keep' }]} /></div>
+              <div style={{ padding: 12, borderRadius: 8, background: '#f6f8fa', display: 'grid', gap: 5, fontSize: 12 }}>
+                <div><Text strong>字段语义：</Text>{current.semanticType || buildFieldContract(selectedField, current).semanticType}</div>
+                <div><Text strong>实际取数：</Text>{current.fillMode || buildFieldContract(selectedField, current).fillMode}</div>
+                {!!current.dependencies?.length && <div><Text strong>依赖：</Text>{current.dependencies.join('、')}</div>}
+              </div>
               <div><Text strong>信息来源</Text><Input value={current.source} onChange={event => updateConfig({ source: event.target.value })} style={{ marginTop: 7 }} placeholder="例如：用户输入、项目资料、系统字段" /></div>
+              {current.mode === 'ai' && <div><Text strong>允许的扩写级别</Text><Select value={current.expansionLevel || 'contextual'} onChange={value => updateConfig({ expansionLevel: value })} style={{ marginTop: 7, width: '100%' }} options={[
+                { value: 'exact', label: '仅原样提取' }, { value: 'normalize', label: '规范化表达' }, { value: 'summarize', label: '归纳重组' },
+                { value: 'contextual', label: '结合项目特点简单扩写' }, { value: 'advisory', label: '可补充建议与后续关注点' },
+              ]} /></div>}
               <div><Text strong>当前占位符的具体要求</Text><Input.TextArea value={current.requirement} onChange={event => updateConfig({ requirement: event.target.value })} autoSize={{ minRows: 4, maxRows: 7 }} style={{ marginTop: 7 }} placeholder="用简短命令写清内容重点、顺序和禁止事项" /></div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div><Text strong>必填性</Text><Segmented block style={{ marginTop: 7 }} value={current.required ? 'required' : 'optional'} onChange={value => updateConfig({ required: value === 'required' })} options={[{ label: '可选', value: 'optional' }, { label: '必填', value: 'required' }]} /></div>
+                <div><Text strong>缺失是否阻断</Text><Select style={{ marginTop: 7, width: '100%' }} value={current.requiredForGeneration ? 'generation' : current.requiredForDelivery || current.required ? 'delivery' : 'optional'} onChange={value => updateConfig({ requiredForGeneration: value === 'generation', requiredForDelivery: value === 'delivery' || value === 'generation', required: value !== 'optional' })} options={[{ label: '不阻断，仅提示', value: 'optional' }, { label: '交付前建议补充', value: 'delivery' }, { label: '生成前必须有（高风险）', value: 'generation' }]} /></div>
                 <div><Text strong>信息缺失时</Text><Segmented block style={{ marginTop: 7 }} value={current.missingInfoPolicy} onChange={value => updateConfig({ missingInfoPolicy: value as FieldConfig['missingInfoPolicy'] })} options={[{ label: '留空', value: '留空' }, { label: '待确认', value: '待确认' }]} /></div>
               </div>
               <div><Text strong>建议篇幅</Text><Space style={{ marginTop: 7 }}><InputNumber min={0} value={current.minWords} onChange={value => updateConfig({ minWords: Number(value) || 0 })} />—<InputNumber min={0} value={current.maxWords} onChange={value => updateConfig({ maxWords: Number(value) || 0 })} /> 字</Space></div>

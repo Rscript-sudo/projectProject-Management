@@ -14,6 +14,8 @@ import { getTemplateInputPlaceholder } from '../shared/templateInputGuidance.mjs
 import { getTemplateStatusBadge, isTemplateReady } from '../shared/templateReadiness.mjs'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { normalizeStructuredDocument } from '../shared/structuredGeneration'
+import { buildFactPool, buildFieldConfigsFromPrompt, buildFieldResolutionPlan, formatResolutionContext, mergeResolvedFields } from '../shared/fieldResolution.mjs'
+import { getDefaultPrompts, mergeDocTypePrompt } from '../shared/docTypePrompts'
 import type { SessionMode } from '../services/aiService'
 import DirTree from '../components/DirTree'
 import type { DirNode, TemplateItem } from '../vite-env'
@@ -745,10 +747,7 @@ export default function ProjectView() {
       return
     }
     if ((mode === 'DOC' || mode === 'HYBRID') && normalizeProjectType(projectConfig.projectTypeCode || projectConfig.projectType) === 'unclassified') {
-      message.warning('请先在“项目配置”中选择项目类型；未分类项目不能生成正式文档', 4)
-      setLoading(false)
-      setProgressStage('')
-      return
+      message.info('项目类型未配置，将按通用工程规则生成；项目类型只影响专业术语，不限制生成', 4)
     }
 
     // 添加用户消息
@@ -816,6 +815,8 @@ export default function ProjectView() {
         projectTags: normalizeTags(projectConfig.projectTags),
         projectFeatures: projectConfig.projectFeatures || undefined,
         projectPhase: projectConfig.projectPhase || undefined,
+        implementationArea: projectConfig.implementationArea || undefined,
+        projectCode: (projectConfig as any).projectCode || undefined,
         documentRules: projectConfig.documentRules,
       } : undefined
 
@@ -864,7 +865,8 @@ export default function ProjectView() {
       // ==== 按模式构建 messages ====
       let aiMessages: { role: string; content: string }[]
       let generationTemplateFields: string[] = []
-      const userContent = attachContext ? trimmedInput + attachContext : trimmedInput
+      let generationFieldPlan: any[] = []
+      let userContent = attachContext ? trimmedInput + attachContext : trimmedInput
       const extractedSubject = extractSubject(trimmedInput)  // 提取事由摘要，不让 AI 照抄原始输入
 
       switch (mode) {
@@ -891,6 +893,33 @@ export default function ProjectView() {
             }
           } catch (e) {
             console.warn('[ProjectView] 模板字段契约读取失败，继续使用文种规则:', e)
+          }
+          try {
+            const automatic = await window.electronAPI.resolveTemplateContext({
+              input: trimmedInput,
+              project: projectInfo || {},
+              fields: templateFields,
+            })
+            if (automatic.warnings?.length) message.info(`自动取数提示：${automatic.warnings.join('；')}`, 5)
+            const promptOverrides = useSettingsStore.getState().docTypePromptOverrides || {}
+            const promptKey = Object.keys(promptOverrides).find(key => key === docType || promptOverrides[key]?.key === docType)
+            const defaults = getDefaultPrompts().docTypes[docType || '']
+            const effectivePrompt = defaults
+              ? mergeDocTypePrompt(defaults, promptKey ? promptOverrides[promptKey] : undefined)
+              : (promptKey ? promptOverrides[promptKey] : undefined)
+            const fieldConfigs = buildFieldConfigsFromPrompt(effectivePrompt || {}, templateFields)
+            const factPool = buildFactPool(trimmedInput, {
+              project: projectInfo || {},
+              autoValues: automatic.values || {},
+              provenance: automatic.provenance || {},
+            })
+            generationFieldPlan = buildFieldResolutionPlan(templateFields, { fieldConfigs, factPool })
+            const hardMissing = generationFieldPlan.filter(item => item.contract.requiredForGeneration && !item.value && item.status !== 'expand')
+            if (hardMissing.length) throw new Error(`以下高风险字段必须先提供明确数据：${hardMissing.map(item => item.field).join('、')}`)
+            userContent = `${userContent}\n\n${formatResolutionContext(factPool, generationFieldPlan)}`
+          } catch (e) {
+            if (e instanceof Error && e.message.startsWith('以下高风险字段')) throw e
+            console.warn('[ProjectView] 字段解析计划失败，按现有模板规则继续生成:', e)
           }
           const { system, user } = buildDocPrompt(docType || '通用文档', userContent, projectInfo, extractedSubject, sopData, templateFields)
           aiMessages = [
@@ -976,6 +1005,7 @@ export default function ProjectView() {
           isDocMode: mode === 'DOC' || mode === 'HYBRID',
         })
         accumulated = mainSanitized.content
+        accumulated = mergeResolvedFields(accumulated, generationFieldPlan)
         if (mainSanitized.warnings.length > 0) {
           message.warning(`⚠️ ${mainSanitized.warnings.join('；')}，已替换为占位符请补充`, 5)
         }
@@ -1025,6 +1055,7 @@ export default function ProjectView() {
                   isDocMode: mode === 'DOC' || mode === 'HYBRID',
                 })
                 accumulated = finalResult.content
+                accumulated = mergeResolvedFields(accumulated, generationFieldPlan)
                 setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: accumulated } : m))
               }
             } catch (e) {
@@ -1052,7 +1083,7 @@ export default function ProjectView() {
         // DOC / HYBRID 模式显示文档预览
         if (mode === 'DOC' || mode === 'HYBRID') {
           setProgressStage('processing')
-          setPreviewContent({ docType: docType || '通用文档', content: accumulated, userInput: trimmedInput })
+          setPreviewContent({ docType: docType || '通用文档', content: accumulated, userInput: trimmedInput, meta: { fieldPlan: generationFieldPlan } })
           setSavedPath('')
         } else if (mode === 'DATA_QUERY' && currentProject && dataToolIds?.length) {
           setPreviewContent(null)
@@ -1100,6 +1131,7 @@ export default function ProjectView() {
         isDocMode: mode === 'DOC' || mode === 'HYBRID',
       })
       let aiContent = nonStreamSanitized.content
+      aiContent = mergeResolvedFields(aiContent, generationFieldPlan)
       if (nonStreamSanitized.warnings.length > 0) {
         message.warning(`⚠️ ${nonStreamSanitized.warnings.join('；')}，已替换为占位符请补充`, 5)
       }
@@ -1124,7 +1156,7 @@ export default function ProjectView() {
 
       if (mode === 'DOC' || mode === 'HYBRID') {
         setProgressStage('processing')
-        setPreviewContent({ docType: docType || '通用文档', content: aiContent, userInput: trimmedInput })
+        setPreviewContent({ docType: docType || '通用文档', content: aiContent, userInput: trimmedInput, meta: { fieldPlan: generationFieldPlan } })
         setSavedPath('')
       } else if (mode === 'DATA_QUERY' && currentProject && dataToolIds?.length) {
         setPreviewContent(null)
@@ -1916,6 +1948,17 @@ export default function ProjectView() {
               <div style={{ padding: 16 }}>
                 {previewContent ? (
                   <>
+                    {Array.isArray(previewContent.meta?.fieldPlan) && previewContent.meta.fieldPlan.length > 0 && (() => {
+                      const plan = previewContent.meta.fieldPlan as any[]
+                      const resolved = plan.filter(item => item.status === 'resolved').length
+                      const expanded = plan.filter(item => item.status === 'expand').length
+                      const unresolved = plan.filter(item => item.status === 'unresolved').length
+                      const manual = plan.filter(item => item.status === 'manual').length
+                      return <div style={{ background: '#f6f8fa', borderRadius: 8, padding: '9px 12px', marginBottom: 12 }}>
+                        <Space size={6} wrap><Text strong style={{ fontSize: 12 }}>字段解析</Text><Tag color="green">自动取得 {resolved}</Tag><Tag color="blue">AI扩写 {expanded}</Tag>{unresolved > 0 && <Tag color="orange">待补充 {unresolved}</Tag>}{manual > 0 && <Tag>人工字段 {manual}</Tag>}</Space>
+                        <Text type="secondary" style={{ display: 'block', marginTop: 5, fontSize: 11 }}>普通字段缺失不阻止生成；自动值和用户事实优先，AI仅扩写允许的叙述字段。</Text>
+                      </div>
+                    })()}
                     {savedPath && (
                       <div style={{
                         background: '#f6ffed',

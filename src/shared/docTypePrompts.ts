@@ -34,6 +34,8 @@ export interface DocTypeConfig {
     decisionTree?: boolean
     proofExample?: string
     regulationHints?: boolean
+    fieldConfigs?: Record<string, Record<string, unknown>>
+    fieldRules?: Record<string, string>
   }
   dynamicVars?: Record<string, string>
 }
