@@ -319,7 +319,7 @@ export interface ElectronAPI {
   selectSavePath: (defaultPath: string) => Promise<string | null>
   selectTemplateFile: () => Promise<string | null>
   getProjectDataPath: (projectPath: string) => Promise<string>
-  readProjectConfig: (projectPath: string) => Promise<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; projectTypeCode?: string; projectTags?: string[]; projectFeatures?: string; projectPhase?: string; projectCode?: string; documentRules?: { rulePackIds?: string[]; additionalInstruction?: string }; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }>; templateSelections?: Record<string, string | null> }>
+  readProjectConfig: (projectPath: string) => Promise<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; projectTypeCode?: string; projectTags?: string[]; projectFeatures?: string; projectPhase?: string; implementationArea?: string; projectCode?: string; documentRules?: { rulePackIds?: string[]; additionalInstruction?: string }; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }>; templateSelections?: Record<string, string | null> }>
   writeProjectConfig: (projectPath: string, config: object) => Promise<{ success: boolean; error?: string }>
   readProjectChatHistory: (projectPath: string) => Promise<{ success: boolean; sessionId?: string; messages?: Array<Record<string, any>>; error?: string }>
   writeProjectChatHistory: (projectPath: string, messages: Array<Record<string, any>>) => Promise<{ success: boolean; count?: number; error?: string }>

@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { cleanTemplateDocType, deleteTemplateCategory, listTemplateLibrary, normalizeTemplateLibrary } from '../electron/templateRegistry.mjs'
+import { cleanTemplateDocType, deleteTemplateCategory, listTemplateLibrary, normalizeTemplateLibrary, reconcileTemplateLibraryFiles } from '../electron/templateRegistry.mjs'
 import { archiveLegacyTemplateLibrary, archiveUnapprovedGeneralTemplates, configureTemplateWorkspace, ensureTemplateCategory, listTemplateCategories } from '../electron/templateWorkspace.mjs'
 
 test('安装后模板统一迁移到用户文档目录并使用中文分类和正式文件名', t => {
@@ -83,4 +83,24 @@ test('自定义模板文件夹可创建、列出并安全移到废纸篓', async
   assert.equal(deleted.ok, true)
   assert.ok(fs.existsSync(trashDir))
   assert.deepEqual(listTemplateCategories(userDataPath, 'other'), [])
+})
+
+test('刷新模板库会登记用户直接复制的私人模板并继承内置文种规则', async t => {
+  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-template-reconcile-'))
+  t.after(() => fs.rmSync(runtime, { recursive: true, force: true }))
+  const userDataPath = path.join(runtime, 'user-data')
+  const documentsPath = path.join(runtime, 'Documents')
+  const workspace = configureTemplateWorkspace({ userDataPath, documentsPath, bundledTemplatesDir: path.resolve('templates') })
+  const targetDir = path.join(workspace.root, '私人模板', '通用', '监理日志')
+  fs.mkdirSync(targetDir, { recursive: true })
+  const target = path.join(targetDir, '监理日志模板.docx')
+  fs.copyFileSync(path.resolve('templates/通用/01_监理日志/监理日志模板.docx'), target)
+
+  const result = await reconcileTemplateLibraryFiles(userDataPath)
+  const [entry] = listTemplateLibrary(userDataPath)
+  assert.equal(result.added, 1)
+  assert.equal(entry.scope, 'personal')
+  assert.equal(entry.docType, '监理日志')
+  assert.ok(entry.fields.includes('天气'))
+  assert.ok(entry.aiRuleConfiguredAt)
 })

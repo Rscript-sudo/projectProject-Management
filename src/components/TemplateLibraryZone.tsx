@@ -158,14 +158,21 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
         await useSettingsStore.getState().loadCustomTypes()
       }
       let ok = 0
+      let firstPendingTemplate: Tpl | null = null
       for (const f of files) {
         if (!/\.(docx|xlsx)$/i.test(f)) continue
-        await doImport(f, requestedDocType)
+        const imported = await doImport(f, requestedDocType)
+        if (!imported?.fields?.length && !firstPendingTemplate) firstPendingTemplate = imported
         ok++
       }
-      message.success(`已批量导入 ${ok} 个模板（自动识别字段）`)
+      if (firstPendingTemplate) {
+        message.warning('模板已导入，但源文件没有 {{字段名}}。系统将进入结构分析，自动建议可填写位置和字段规则。')
+      } else {
+        message.success(`已导入 ${ok} 个模板，字段和内置规则已自动关联`)
+      }
       setImporting(false)
-      load()
+      await load()
+      if (firstPendingTemplate && onGoRules) onGoRules(requestedDocType, firstPendingTemplate.id)
     } catch (e: any) {
       setImporting(false)
       message.error('导入失败：' + (e?.message || '未知错误'))

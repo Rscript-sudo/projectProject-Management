@@ -286,7 +286,8 @@ export function register(ipcMain) {
   }))
 
   ipcMain.handle('fs:listTemplateLibrary', async () => {
-    const { listTemplateLibrary } = await import('../templateRegistry.mjs')
+    const { listTemplateLibrary, reconcileTemplateLibraryFiles } = await import('../templateRegistry.mjs')
+    await reconcileTemplateLibraryFiles(app.getPath('userData'))
     return listTemplateLibrary(app.getPath('userData'))
   })
 

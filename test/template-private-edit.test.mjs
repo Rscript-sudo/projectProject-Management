@@ -108,14 +108,14 @@ test('私人模板优先于专业和通用模板参与生成解析', async t => 
   assert.equal(resolved.scope, 'personal')
 })
 
-test('用户模板独立记录规则完成状态，替换源文件后自动失效', async t => {
+test('内置文种用户模板自动继承规则，替换源文件后自动失效', async t => {
   const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-template-rule-state-'))
   t.after(() => fs.rmSync(userDataPath, { recursive: true, force: true }))
   const sourcePath = path.resolve('templates/通用/01_监理日志/监理日志模板.docx')
   const replacementPath = path.resolve('templates/通用/02_监理周报/监理周报模板.docx')
   const entry = await importTemplateToLibrary({ userDataPath, sourcePath, docType: '监理日志', scope: 'personal', projectType: '通用', name: '规则状态模板' })
 
-  assert.equal(entry.aiRuleConfiguredAt, undefined)
+  assert.ok(entry.aiRuleConfiguredAt, '内置文种模板应继承随应用交付的字段规则')
   const marked = markTemplateRuleConfigured(userDataPath, entry.id)
   assert.equal(marked.ok, true)
   assert.ok(marked.template.aiRuleConfiguredAt)

@@ -57,6 +57,7 @@ export default function Home() {
   const [newProjectType, setNewProjectType] = useState<string>()
   const [newProjectTags, setNewProjectTags] = useState<string[]>([])
   const [newProjectFeatures, setNewProjectFeatures] = useState('')
+  const [newImplementationArea, setNewImplementationArea] = useState('')
   const [newProjectCode, setNewProjectCode] = useState('')
   const [newOwnerUnit, setNewOwnerUnit] = useState('')
   const [newContractor, setNewContractor] = useState('')
@@ -65,7 +66,7 @@ export default function Home() {
   const [creating, setCreating] = useState(false)
 
   // Project config
-  const [projectConfig, setProjectConfig] = useState({ contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '未分类', projectTypeCode: 'unclassified', projectTags: [] as string[], projectFeatures: '', projectPhase: '', projectCode: 'PROJECT' })
+  const [projectConfig, setProjectConfig] = useState({ contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '未分类', projectTypeCode: 'unclassified', projectTags: [] as string[], projectFeatures: '', projectPhase: '', implementationArea: '', projectCode: 'PROJECT' })
   const [editMode, setEditMode] = useState(false)
   const [configForm] = Form.useForm()
 
@@ -91,7 +92,7 @@ export default function Home() {
       setProjectConfig({ projectCode: 'PROJECT', ...(config as any) })
       configForm.setFieldsValue(config)
     } catch (e) {
-      const defaults = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '未分类', projectTypeCode: 'unclassified', projectTags: [] as string[], projectFeatures: '', projectPhase: '', projectCode: 'PROJECT' }
+      const defaults = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '未分类', projectTypeCode: 'unclassified', projectTags: [] as string[], projectFeatures: '', projectPhase: '', implementationArea: '', projectCode: 'PROJECT' }
       setProjectConfig(defaults)
       configForm.setFieldsValue(defaults)
     }
@@ -121,7 +122,7 @@ export default function Home() {
       return
     }
     setCreating(true)
-    const result = await createProject(newProjectName.trim(), newProjectType, { projectTags: normalizeTags(newProjectTags), projectFeatures: newProjectFeatures, projectCode: newProjectCode, ownerUnit: newOwnerUnit, contractor: newContractor, supervisorUnit: newSupervisorUnit, chiefEngineer: newChiefEngineer })
+    const result = await createProject(newProjectName.trim(), newProjectType, { projectTags: normalizeTags(newProjectTags), projectFeatures: newProjectFeatures, implementationArea: newImplementationArea, projectCode: newProjectCode, ownerUnit: newOwnerUnit, contractor: newContractor, supervisorUnit: newSupervisorUnit, chiefEngineer: newChiefEngineer })
     setCreating(false)
     if (result.success) {
       setCreateModalOpen(false)
@@ -129,6 +130,7 @@ export default function Home() {
       setNewProjectType(undefined)
       setNewProjectTags([])
       setNewProjectFeatures('')
+      setNewImplementationArea('')
       setNewProjectCode(''); setNewOwnerUnit(''); setNewContractor(''); setNewSupervisorUnit(''); setNewChiefEngineer('')
       await loadProjects()
       loadDirTree(projectRoot)
@@ -154,7 +156,7 @@ export default function Home() {
           configForm.setFieldsValue(cfg)
         })
         .catch(() => {
-          const defaults = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '未分类', projectTypeCode: 'unclassified', projectTags: [] as string[], projectFeatures: '', projectPhase: '', projectCode: 'PROJECT' }
+          const defaults = { contractor: '', ownerUnit: '', supervisorUnit: '', chiefEngineer: '', projectType: '未分类', projectTypeCode: 'unclassified', projectTags: [] as string[], projectFeatures: '', projectPhase: '', implementationArea: '', projectCode: 'PROJECT' }
           setProjectConfig(defaults)
           configForm.setFieldsValue(defaults)
         })
@@ -651,6 +653,9 @@ export default function Home() {
                     <Form.Item name="projectFeatures" label="项目特点 / 建设范围" style={{ marginBottom: 8 }}>
                       <Input.TextArea rows={2} placeholder="只填写已知事实；AI 不会自行补造。" />
                     </Form.Item>
+                    <Form.Item name="implementationArea" label="实施区域" style={{ marginBottom: 8 }}>
+                      <Input placeholder="如：广州市天河区；用于项目上下文，不据此猜测天气" />
+                    </Form.Item>
                     <Space style={{ width: '100%' }}>
                       <Button type="primary" size="small" htmlType="button" onClick={handleSaveConfig} style={{ flex: 1 }}>
                         保存
@@ -679,6 +684,7 @@ export default function Home() {
                       { label: '施工单位', value: projectConfig.contractor },
                       { label: '监理单位', value: projectConfig.supervisorUnit },
                       { label: '总监理工程师', value: projectConfig.chiefEngineer },
+                      { label: '实施区域', value: projectConfig.implementationArea },
                     ].map(item => (
                       <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 12 }}>
                         <Text type="secondary" style={{ fontSize: 11 }}>{item.label}</Text>
@@ -720,7 +726,7 @@ export default function Home() {
         title="新建项目"
         open={createModalOpen}
         onOk={handleCreateProject}
-        onCancel={() => { setCreateModalOpen(false); setNewProjectName(''); setNewProjectType(undefined); setNewProjectTags([]); setNewProjectFeatures(''); setNewProjectCode(''); setNewOwnerUnit(''); setNewContractor(''); setNewSupervisorUnit(''); setNewChiefEngineer('') }}
+        onCancel={() => { setCreateModalOpen(false); setNewProjectName(''); setNewProjectType(undefined); setNewProjectTags([]); setNewProjectFeatures(''); setNewImplementationArea(''); setNewProjectCode(''); setNewOwnerUnit(''); setNewContractor(''); setNewSupervisorUnit(''); setNewChiefEngineer('') }}
         confirmLoading={creating}
         okText="创建"
         width={560}
@@ -752,6 +758,7 @@ export default function Home() {
           <Text strong style={{ display: 'block', margin: '12px 0 6px', fontSize: 13 }}>项目基础信息</Text>
           <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 11 }}>创建时一次建档，后续自动写入模板及 AI 上下文。</Text>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <Input value={newImplementationArea} onChange={e => setNewImplementationArea(e.target.value)} placeholder="实施区域（如：广州市天河区）" />
             <Input value={newProjectCode} onChange={e => setNewProjectCode(e.target.value)} placeholder="项目编码（可空自动生成）" />
             <Input value={newOwnerUnit} onChange={e => setNewOwnerUnit(e.target.value)} placeholder="建设单位" />
             <Input value={newContractor} onChange={e => setNewContractor(e.target.value)} placeholder="施工单位" />

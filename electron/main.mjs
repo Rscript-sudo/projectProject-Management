@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url'
 import { registerAll, bootstrapCustomTypes } from './ipc/register.mjs'
 import { getDb, closeDb } from './db/database.mjs'
 import { runMigrations } from './db/migrations.mjs'
-import { listTemplateLibrary, migrateBuiltinProfessionalTemplates, normalizeTemplateLibrary } from './templateRegistry.mjs'
+import { listTemplateLibrary, migrateBuiltinProfessionalTemplates, normalizeTemplateLibrary, reconcileTemplateLibraryFiles } from './templateRegistry.mjs'
 import { listSystemTemplates } from './templateService.mjs'
 import { archiveLegacyTemplateLibrary, archiveUnapprovedGeneralTemplates, configureTemplateWorkspace } from './templateWorkspace.mjs'
 import { getSettings, saveSettings } from './ipc/shared.mjs'
@@ -101,6 +101,7 @@ function createWindow() {
     minHeight: 700,
     show: false,
     title: '项目文档管理系统',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -108,6 +109,10 @@ function createWindow() {
       sandbox: true,
     },
   })
+
+  // Windows/Linux 不显示 Electron 默认的 File/Edit/View/Window 菜单栏。
+  // 编辑框所需的剪切、复制、粘贴仍由下方右键菜单和快捷键提供。
+  win.setMenuBarVisibility(false)
 
   win.webContents.on('preload-error', (_, preloadPath, error) => {
     console.error('[Main] Preload error:', preloadPath, error)
@@ -182,6 +187,7 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  Menu.setApplicationMenu(null)
   // 1. 初始化数据库 + 迁移老 JSON（仅首次）
   let dbOk = false
   let dbError = ''
@@ -212,6 +218,9 @@ app.whenReady().then(async () => {
     documentsPath: app.getPath('documents'),
     bundledTemplatesDir,
   })
+  // 先登记用户通过资源管理器直接复制进模板库的文件，再做规范化整理，
+  // 避免旧逻辑把合法私人模板误移到“清理归档”。
+  await reconcileTemplateLibraryFiles(app.getPath('userData'))
   const templateCleanup = normalizeTemplateLibrary(app.getPath('userData'))
   const approvedGeneralTemplates = await listSystemTemplates(bundledTemplatesDir)
   const generalCleanup = archiveUnapprovedGeneralTemplates({

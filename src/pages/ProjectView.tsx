@@ -135,12 +135,28 @@ async function collectAIStream(
 
 const AUTO_FILLED_TEMPLATE_FIELDS = new Set([
   '项目名称', '工程名称', '文件编号', '编号', '文号', '日期', '报告日期', '签章日期',
+  '星期几', '天气', '气温',
   '致单位', '致送单位', '建设单位', '业主单位', '业主', '甲方', '甲方单位',
   '施工单位', '承建单位', '乙方', '乙方单位', '监理单位', '监理公司', '监理机构',
   '总监理工程师', '总监姓名', '总监理', '编制人', '审核人', '批准人',
   '施工单位签名', '监理单位签名', '建设单位签名', '签名日期',
   '局点名称', '表格行规格型号', '表格行备注', '表格行其它情况',
 ])
+
+function fillMonitorLogBasics(content: string, docType: string) {
+  if (docType !== '监理日志') return content
+  const fields = parseStructuredContent(content)
+  const defaults: Record<string, string> = {
+    日期: dayjs().format('YYYY年MM月DD日'),
+    星期几: `星期${'日一二三四五六'[dayjs().day()]}`,
+    天气: '未记录',
+    气温: '未记录',
+  }
+  const additions = Object.entries(defaults)
+    .filter(([field]) => !String(fields[field] || '').trim())
+    .map(([field, value]) => `【${field}】${value}`)
+  return additions.length ? `${content.trim()}\n\n${additions.join('\n')}` : content
+}
 
 function validateGeneratedOutput(docType: string, content: string, templateFields: string[]) {
   const cleaned = stripThinkingContent(content).trim()
@@ -183,6 +199,7 @@ function sanitizeFullPipeline(
   }
   if (ctx.docType === '监理日志') {
     result = sanitizeUnsupportedLogParticipants(result, ctx.sourceText || '')
+    result = fillMonitorLogBasics(result, ctx.docType)
   }
   return { content: result, warnings: guardResult.warnings }
 }
@@ -205,7 +222,7 @@ export default function ProjectView() {
   const [savedPath, setSavedPath] = useState('')
   const apiReady = useElectronAPI()
   const [lastInput, setLastInput] = useState('')
-  const [projectConfig, setProjectConfig] = useState<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; projectTypeCode?: string; projectTags?: string[]; projectFeatures?: string; projectPhase?: string; documentRules?: { rulePackIds?: string[]; additionalInstruction?: string }; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }>; templateSelections?: Record<string, string | null> }>({
+  const [projectConfig, setProjectConfig] = useState<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; projectTypeCode?: string; projectTags?: string[]; projectFeatures?: string; projectPhase?: string; implementationArea?: string; documentRules?: { rulePackIds?: string[]; additionalInstruction?: string }; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }>; templateSelections?: Record<string, string | null> }>({
     contractor: '',
     ownerUnit: '',
     supervisorUnit: '',

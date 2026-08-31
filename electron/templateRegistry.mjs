@@ -15,6 +15,7 @@ const REGISTRY_FILE = 'template-registry.json'
 const SUPPORTED_DOC_TYPES = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, '..', 'src', 'shared', 'builtin-doc-types.json'), 'utf8'),
 )
+const BUILTIN_DOC_TYPES = new Set(SUPPORTED_DOC_TYPES)
 
 const DOC_TYPE_NAME_FIXES = new Map([
   ['工程安装质量检查检查表', '工程安装质量检查表'],
@@ -59,6 +60,56 @@ export function listTemplateLibrary(userDataPath) {
     const byUpdatedAt = String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
     return byUpdatedAt || String(b.id || '').localeCompare(String(a.id || ''))
   }).map(item => ({ ...item, missing: !item.path || !fs.existsSync(item.path) }))
+}
+
+/**
+ * 把用户直接复制到专业/私人/其他模板目录的文件补录进 registry。
+ * Windows 用户常通过资源管理器维护模板；刷新模板库时必须能发现这些文件，
+ * 不能要求用户理解 template-registry.json。
+ */
+export async function reconcileTemplateLibraryFiles(userDataPath) {
+  const registry = readRegistry(userDataPath)
+  const registeredPaths = new Set(registry.templates.map(item => item.path && path.resolve(item.path)).filter(Boolean))
+  let added = 0
+  for (const scope of ['professional', 'personal', 'other']) {
+    const scopeRoot = getTemplateScopeDir(userDataPath, scope)
+    if (!fs.existsSync(scopeRoot)) continue
+    const walk = directory => fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+      if (entry.name.startsWith('.') || entry.name === '清理归档') return []
+      const fullPath = path.join(directory, entry.name)
+      return entry.isDirectory() ? walk(fullPath) : (/\.(docx|xlsx)$/i.test(entry.name) && !entry.name.startsWith('~$') ? [fullPath] : [])
+    })
+    for (const filePath of walk(scopeRoot)) {
+      if (registeredPaths.has(path.resolve(filePath))) continue
+      const relativeParts = path.relative(scopeRoot, filePath).split(path.sep)
+      const categoryLabel = relativeParts.length >= 3 ? relativeParts[0] : '通用'
+      const folderDocType = relativeParts.length >= 3 ? relativeParts.at(-2) : path.basename(filePath, path.extname(filePath))
+      const docType = cleanTemplateDocType(folderDocType)
+      const { getTemplatePlaceholders } = await import('./templateService.mjs')
+      const fields = await getTemplatePlaceholders(filePath)
+      const now = new Date().toISOString()
+      registry.templates.push({
+        id: `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        name: docType,
+        docType,
+        scope,
+        projectType: scope === 'professional' ? (normalizeProjectType(categoryLabel) || 'unclassified') : categoryLabel,
+        projectTypeLabel: categoryLabel,
+        path: filePath,
+        sourceName: path.basename(filePath),
+        fields,
+        // 内置文种的规则按文种随应用交付。复制为私人副本后直接继承，
+        // 只有新增自定义字段或自定义文种才需要重新配置。
+        aiRuleConfiguredAt: BUILTIN_DOC_TYPES.has(docType) && fields.length ? now : undefined,
+        createdAt: now,
+        updatedAt: now,
+      })
+      registeredPaths.add(path.resolve(filePath))
+      added++
+    }
+  }
+  if (added) writeRegistry(userDataPath, registry)
+  return { added }
 }
 
 /** 把旧版散落路径、英文 ID 文件名和同文种变体收敛为一份中文正式模板。 */
@@ -341,6 +392,7 @@ export async function importTemplateToLibrary({ userDataPath, sourcePath, docTyp
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
+  if (BUILTIN_DOC_TYPES.has(docType) && fields.length) entry.aiRuleConfiguredAt = entry.updatedAt
   registry.templates.push(entry)
   writeRegistry(userDataPath, registry)
   return entry

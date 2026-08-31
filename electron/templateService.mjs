@@ -667,7 +667,13 @@ export function buildPlaceholderData({
       default:
         value = defaultValue
     }
-    if (source === 'computed') value = defaultValue || `${dateNum}-001`
+    if (source === 'computed') {
+      if (/星期/.test(stripped)) value = `星期${'日一二三四五六'[now.getDay()]}`
+      else if (/(日期|时间)/.test(stripped)) value = dateStr
+      else value = defaultValue || `${dateNum}-001`
+    }
+    if (docType === '监理日志' && stripped === '天气' && !value) value = '未记录'
+    if (docType === '监理日志' && stripped === '气温' && !value) value = '未记录'
 
     // 写回到所有别名
     const aliases = FIELD_ALIASES[stdKey] || [stripped]

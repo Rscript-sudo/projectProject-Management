@@ -151,5 +151,6 @@ export function normalizeProjectProfile(input = {}) {
     projectTags: normalizeTags(input.projectTags),
     projectFeatures: String(input.projectFeatures || '').trim(),
     projectPhase: String(input.projectPhase || '').trim(),
+    implementationArea: String(input.implementationArea || '').trim(),
   }
 }

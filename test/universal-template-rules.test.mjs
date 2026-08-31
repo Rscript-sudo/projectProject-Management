@@ -73,3 +73,17 @@ test('通用长文种篇幅合同与实体模板容量相符', () => {
   }
   assert.deepEqual(config.docTypes.监理规划.fields.map(field => field.key), ['项目概况'])
 })
+
+test('全部内置模板逐字段写明专业重点和事实边界', () => {
+  const builtin = JSON.parse(fs.readFileSync(new URL('../src/shared/builtin-doc-types.json', import.meta.url), 'utf8'))
+  for (const docType of builtin) {
+    const doc = config.docTypes[docType]
+    assert.ok(doc?.systemTemplate, `${docType} 缺少内置规则`)
+    assert.doesNotMatch(doc.systemTemplate, /先提取用户提供的事实，再按“事实—判断—行动”组织专业文本/, `${docType} 仍在使用空泛批量规则`)
+    for (const field of doc.fields || []) {
+      assert.match(doc.systemTemplate, new RegExp(`【${field.key}】`), `${docType}.${field.key} 缺少字段规则`)
+    }
+  }
+  assert.match(config.docTypes.监理日志.systemTemplate, /当日施工活动、监理检查方法、质量安全控制结果、问题处置和次日跟踪安排/)
+  assert.match(config.docTypes.监理日志.systemTemplate, /不得根据日期、季节或城市猜测/)
+})

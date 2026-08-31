@@ -6,7 +6,15 @@ import { generateProjectCodeFromName } from './filename.mjs'
 import { normalizeProjectProfile, setCustomProjectTypes } from '../../src/shared/projectProfile.mjs'
 
 export function getDefaultRoot() {
-  return path.join(app.getPath('home'), 'Desktop')
+  const root = path.join(app.getPath('documents'), '项目文档管理系统', '项目')
+  ensureDir(root)
+  return root
+}
+
+function isLegacyDesktopRoot(value) {
+  if (!value || typeof value !== 'string') return false
+  return path.resolve(value) === path.resolve(path.join(app.getPath('home'), 'Desktop')
+  )
 }
 
 export function ensureDir(dir) {
@@ -259,6 +267,12 @@ export function getSettings() {
   try {
     if (fs.existsSync(settingsPath)) {
       const saved = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
+      // v1.4.2：旧版把桌面当项目根目录，导致首页把桌面文件全部展示出来。
+      // 自动迁移到应用专属项目目录；已登记项目仍由 project-index.json 保留，不丢数据。
+      if (isLegacyDesktopRoot(saved.projectRoot)) {
+        saved.projectRoot = getDefaultRoot()
+        fs.writeFileSync(settingsPath, JSON.stringify(saved, null, 2), 'utf8')
+      }
       const merged = { ...getDefaultSettings(), ...saved }
       // 解密 apiKey（如果存的是加密形式），前端拿到明文只在主进程用
       if (typeof merged.apiKey === 'object' && merged.apiKey) {

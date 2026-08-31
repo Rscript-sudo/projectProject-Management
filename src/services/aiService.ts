@@ -1680,6 +1680,7 @@ function buildGenericDocPrompt(
 - 专业标签：${projectInfo.projectTags?.length ? projectInfo.projectTags.join('、') : '未填写'}
 - 项目特点/建设范围：${projectInfo.projectFeatures || '未填写'}
 - 当前阶段：${projectInfo.projectPhase || '未填写'}
+- 实施区域：${projectInfo.implementationArea || '未填写'}
 - 建设单位：${projectInfo.ownerUnit || '未配置（文书中留空）'}
 - 施工单位：${projectInfo.contractor || '未配置（文书中留空）'}
 - 监理单位：${projectInfo.supervisorUnit || '未配置（文书中留空）'}
@@ -1742,6 +1743,7 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
   projectTags?: string[]
   projectFeatures?: string
   projectPhase?: string
+  implementationArea?: string
   documentRules?: { rulePackIds?: string[]; additionalInstruction?: string }
 }, extractedSubject?: string, sopData?: {
   found: boolean
@@ -1785,6 +1787,7 @@ export function buildDocPrompt(docType: string, userInput: string, projectInfo?:
 - 专业标签：${projectInfo.projectTags?.length ? projectInfo.projectTags.join('、') : '未填写'}
 - 项目特点/建设范围：${projectInfo.projectFeatures || '未填写'}
 - 当前阶段：${projectInfo.projectPhase || '未填写'}
+- 实施区域：${projectInfo.implementationArea || '未填写'}
 - 建设单位：${projectInfo.ownerUnit || '未配置（文书中留空）'}
 - 施工单位：${projectInfo.contractor || '未配置（文书中留空）'}
 - 监理单位：${projectInfo.supervisorUnit || '未配置（文书中留空）'}
