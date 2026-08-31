@@ -244,6 +244,24 @@ export function mergeResolvedFields(content = '', plan = []) {
   return additions.length ? `${result}\n\n${additions.join('\n')}`.trim() : result
 }
 
+/** 私人/企业实体模板只消费已登记字段；丢弃模型额外生成且模板会忽略的段落。 */
+export function retainTemplateFields(content = '', fields = []) {
+  const allowed = new Set(fields.map(normalizeFieldName).filter(Boolean))
+  if (!allowed.size) return String(content || '').trim()
+  const source = String(content || '')
+  const markers = [...source.matchAll(/【([^】]+)】/g)]
+  const parts = []
+  for (let index = 0; index < markers.length; index += 1) {
+    const marker = markers[index]
+    const key = normalizeFieldName(marker[1])
+    if (!allowed.has(key) || marker.index == null) continue
+    const next = markers[index + 1]
+    const end = next?.index ?? source.length
+    parts.push(source.slice(marker.index, end).trim())
+  }
+  return parts.join('\n').trim()
+}
+
 export function setStructuredFieldValue(content = '', field = '', value = '') {
   const key = normalizeFieldName(field)
   if (!key) return String(content || '')

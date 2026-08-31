@@ -17,7 +17,7 @@ import { generateDocTypePrompt, analyzeTemplateStructure, generateFieldExpansion
 import type { SuggestedField } from '../services/aiService'
 import { stripThinkingContent } from '../shared/aiOutput.mjs'
 import { buildTemplateStructureMap, deriveTemplateFieldSuggestions, reconcileTemplateFieldPlacements } from '../shared/templateStructureMap.mjs'
-import { mergeTemplateAnalysisFields, resolveReloadedTemplateFields, suggestPlaceholderNames } from '../shared/templateFieldSuggestions.mjs'
+import { mergeTemplateAnalysisFields, normalizeTemplateFieldSuggestions, resolveReloadedTemplateFields, suggestPlaceholderNames } from '../shared/templateFieldSuggestions.mjs'
 import { buildFieldContract } from '../shared/fieldResolution.mjs'
 
 const { Text, Title } = Typography
@@ -45,7 +45,7 @@ type FieldConfig = {
 type PlaceholderPlacement = {
   field: string
   anchor?: string
-  position: 'before' | 'after'
+  position: 'before' | 'after' | 'replace'
   tableIndex?: number
   rowIndex?: number
   cellIndex?: number
@@ -547,7 +547,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       // 2. 本地识别只作失败兜底，不能冒充“AI 分析”并提前结束。
       //    AI 必须重新核对已有占位符的字段规则，同时发现模板新增的空白填值位。
       const localFields = reconcileTemplateFieldPlacements(
-        deriveTemplateFieldSuggestions(content, html),
+        normalizeTemplateFieldSuggestions(deriveTemplateFieldSuggestions(content, html) as unknown as SuggestedField[]),
         html,
       ) as unknown as SuggestedField[]
       const settings = await window.electronAPI.getSettings()
@@ -623,7 +623,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       .map(f => ({
         field: f.name,
         anchor: f.anchorText.trim(),
-        position: (f.insertPosition === 'before' ? 'before' : 'after') as 'before' | 'after',
+        position: (f.insertPosition === 'before' ? 'before' : f.insertPosition === 'replace' ? 'replace' : 'after') as 'before' | 'after' | 'replace',
         tableIndex: f.tableIndex,
         rowIndex: f.rowIndex,
         cellIndex: f.cellIndex,

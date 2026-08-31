@@ -11,6 +11,37 @@ const AUTO_PROJECT_FIELDS = new Set([
   '总监理工程师', '总监姓名', '总监理', '项目类型', '工程类型',
 ])
 
+const FIELD_NAME_CUE_RE = /项目|工程|单位|名称|编号|日期|时间|天气|气温|地点|位置|部位|区域|区段|段落|人员|姓名|负责人|材料|设备|规格|型号|数量|工程量|方法|方式|结果|结论|意见|情况|记录|内容|说明|措施|问题|计划|备注|签字|签章|范围|金额|工期/
+const SENTENCE_FRAGMENT_RE = /[，,。；;]|(?:符合|参照|满足|采用|应当|应该|并且|并|不得|牢固|完整|明晰|夯实|外径|设计要求|规范要求|相关要求|为准)$/
+const MEASUREMENT_FRAGMENT_RE = /\d+(?:\.\d+)?\s*(?:mm|cm|m|米|毫米|厘米|%|×|\*)/i
+const FACT_FIELD_RE = /名称|编号|单位|日期|时间|天气|气温|地点|位置|部位|区域|区段|段落|人员|姓名|负责人|材料|设备|规格|型号|数量|工程量|金额|工期|电话|地址/
+
+export function isPlausibleTemplateFieldName(value = '') {
+  const name = String(value || '').trim()
+  if (!/^[\u4e00-\u9fa5A-Za-z0-9（）()、/-]{2,18}$/.test(name)) return false
+  if (!FIELD_NAME_CUE_RE.test(name)) return false
+  if (SENTENCE_FRAGMENT_RE.test(name) || MEASUREMENT_FRAGMENT_RE.test(name)) return false
+  return true
+}
+
+/** 事实型字段只能提取或轻度规范化，AI 规则不得把它升级为场景扩写。 */
+export function clampTemplateFieldRule(field = '', rule = {}) {
+  const name = String(field || '').trim()
+  if (!FACT_FIELD_RE.test(name)) return rule
+  const locationLike = /地点|位置|部位|区域|区段|段落|地址/.test(name)
+  return {
+    ...rule,
+    ...(rule.semanticType || !locationLike ? {} : { semanticType: 'location' }),
+    fillMode: rule.fillMode === 'project-data' || rule.fillMode === 'system-computed' || rule.fillMode === 'external-data'
+      ? rule.fillMode
+      : 'fact-extraction',
+    expansionLevel: locationLike ? 'summarize' : 'exact',
+    minWords: 0,
+    maxWords: Math.min(Math.max(1, Number(rule.maxWords) || 80), 80),
+    antiFabrication: true,
+  }
+}
+
 /**
  * 模板识别只返回真正需要写值的位置。固定表头即使被模型误标为 ai，也不能变成占位符。
  */
@@ -51,12 +82,15 @@ export function normalizeTemplateFieldSuggestions(fields = []) {
         },
       }
     }
-    return field
+    return { ...field, rule: clampTemplateFieldRule(name, field?.rule || {}) }
   }).filter(field => {
     const name = String(field?.name || '').trim()
     const mode = String(field?.mode || '')
     const reason = String(field?.reason || '')
     if (!name || mode === 'keep') return false
+    // 旧版“整行字段”最终只能落进一个窄单元格，无法按列渲染；新模板改用表格行+列名字段。
+    if (name === '工程量明细行') return false
+    if (!isPlausibleTemplateFieldName(name) && !AUTO_PROJECT_FIELDS.has(name)) return false
     const describedAsHeader = /固定|表头|栏目名|列标题|标题行/.test(reason)
     if (describedAsHeader && FIXED_TABLE_HEADER_NAMES.has(name)) return false
     if (seen.has(name)) return false

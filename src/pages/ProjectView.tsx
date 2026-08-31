@@ -14,7 +14,7 @@ import { getTemplateInputPlaceholder } from '../shared/templateInputGuidance.mjs
 import { getTemplateStatusBadge, isTemplateReady } from '../shared/templateReadiness.mjs'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { normalizeStructuredDocument } from '../shared/structuredGeneration'
-import { buildFactPool, buildFieldConfigsFromPrompt, buildFieldResolutionPlan, formatResolutionContext, getPendingFieldPlan, mergeResolvedFields, setStructuredFieldValue, updateFieldPlanValue } from '../shared/fieldResolution.mjs'
+import { buildFactPool, buildFieldConfigsFromPrompt, buildFieldResolutionPlan, formatResolutionContext, getPendingFieldPlan, mergeResolvedFields, retainTemplateFields, setStructuredFieldValue, updateFieldPlanValue } from '../shared/fieldResolution.mjs'
 import { getDefaultPrompts, mergeDocTypePrompt } from '../shared/docTypePrompts'
 import type { SessionMode } from '../services/aiService'
 import DirTree from '../components/DirTree'
@@ -189,7 +189,7 @@ function validateGeneratedOutput(docType: string, content: string, templateField
  */
 function sanitizeFullPipeline(
   rawContent: string,
-  ctx: { docType: string; holidayType?: string; sourceText?: string; isDocMode: boolean }
+  ctx: { docType: string; holidayType?: string; sourceText?: string; isDocMode: boolean; templateFields?: string[] }
 ): { content: string; warnings: string[] } {
   let result = stripThinkingContent(rawContent)
   result = stripCalibrationStatement(result)
@@ -209,7 +209,7 @@ function sanitizeFullPipeline(
       (_match, field) => `【${field}】`,
     )
   }
-  if (ctx.docType === '监理日志') {
+  if (ctx.docType === '监理日志' && !ctx.templateFields?.length) {
     result = sanitizeUnsupportedLogParticipants(result, ctx.sourceText || '')
     result = fillMonitorLogBasics(result, ctx.docType)
   }
@@ -1016,16 +1016,18 @@ export default function ProjectView() {
           holidayType,
           sourceText: trimmedInput,
           isDocMode: mode === 'DOC' || mode === 'HYBRID',
+          templateFields: generationTemplateFields,
         })
         accumulated = mainSanitized.content
         accumulated = mergeResolvedFields(accumulated, generationFieldPlan)
+        accumulated = retainTemplateFields(accumulated, generationTemplateFields)
         if (mainSanitized.warnings.length > 0) {
           message.warning(`⚠️ ${mainSanitized.warnings.join('；')}，已替换为占位符请补充`, 5)
         }
 
         // v1.2.1（2026-06-28 接入）：DOC/HYBRID 模式下自动续写
         //   AI 输出 < getMinWordCount(docType) → 追加一轮 user 消息要求扩写，最多 1 次
-        if ((mode === 'DOC' || mode === 'HYBRID') && docType && docType !== '通用文档') {
+        if ((mode === 'DOC' || mode === 'HYBRID') && docType && docType !== '通用文档' && generationTemplateFields.length === 0) {
             const minWords = Math.max(getMinWordCount(docType), getDocumentRuleMinWords(docType, projectConfig.documentRules))
           let wordCount = countEffectiveWords(accumulated)
           if (minWords > 0 && wordCount < minWords) {
@@ -1049,6 +1051,7 @@ export default function ProjectView() {
                   holidayType,
                   sourceText: trimmedInput,
                   isDocMode: mode === 'DOC' || mode === 'HYBRID',
+                  templateFields: generationTemplateFields,
                 }).content
                 setMessages(prev => prev.map(m => m.id === assistantId ? {
                   ...m,
@@ -1066,9 +1069,11 @@ export default function ProjectView() {
                   holidayType,
                   sourceText: trimmedInput,
                   isDocMode: mode === 'DOC' || mode === 'HYBRID',
+                  templateFields: generationTemplateFields,
                 })
                 accumulated = finalResult.content
                 accumulated = mergeResolvedFields(accumulated, generationFieldPlan)
+                accumulated = retainTemplateFields(accumulated, generationTemplateFields)
                 setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: accumulated } : m))
               }
             } catch (e) {
@@ -1145,9 +1150,11 @@ export default function ProjectView() {
         holidayType,
         sourceText: trimmedInput,
         isDocMode: mode === 'DOC' || mode === 'HYBRID',
+        templateFields: generationTemplateFields,
       })
       let aiContent = nonStreamSanitized.content
       aiContent = mergeResolvedFields(aiContent, generationFieldPlan)
+      aiContent = retainTemplateFields(aiContent, generationTemplateFields)
       if (nonStreamSanitized.warnings.length > 0) {
         message.warning(`⚠️ ${nonStreamSanitized.warnings.join('；')}，已替换为占位符请补充`, 5)
       }
@@ -1156,7 +1163,7 @@ export default function ProjectView() {
       // v1.2.0：AI 扩写字数软警告（与流式路径同源，老板 2026-06-27 反馈内容过简）
       if (mode === 'DOC' || mode === 'HYBRID') {
         const wordCount = countEffectiveWords(aiContent)
-        const minWords = Math.max(getMinWordCount(docType || ''), getDocumentRuleMinWords(docType || '', projectConfig.documentRules))
+        const minWords = generationTemplateFields.length ? 0 : Math.max(getMinWordCount(docType || ''), getDocumentRuleMinWords(docType || '', projectConfig.documentRules))
         if (wordCount < minWords) message.warning(`⚠️ AI 仅输出 ${wordCount} 字（要求 ≥ ${minWords} 字），建议补充现场事实后重新生成`, 6)
       }
 

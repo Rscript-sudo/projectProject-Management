@@ -72,6 +72,30 @@ test('空白表格单元格可按表格坐标写入占位符', async t => {
   assert.match(firstCell, /\{\{空白单元格字段\}\}/)
 })
 
+test('已填写的样例值单元格可原位替换为占位符', async t => {
+  const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-template-cell-replace-'))
+  t.after(() => fs.rmSync(runtimeDir, { recursive: true, force: true }))
+  const target = path.join(runtimeDir, 'cell-replace.docx')
+  fs.copyFileSync(path.resolve('templates/通用/01_监理日志/监理日志模板.docx'), target)
+  const { default: PizZip } = await import('pizzip')
+  const beforeZip = new PizZip(fs.readFileSync(target))
+  const xmlPath = 'word/document.xml'
+  const beforeXml = beforeZip.file(xmlPath).asText()
+  const firstCell = beforeXml.match(/<w:tc\b[\s\S]*?<\/w:tc>/)?.[0] || ''
+  const oldText = [...firstCell.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)].map(match => match[1]).join('')
+  assert.ok(oldText)
+
+  await saveDocxTemplatePlaceholders(target, {
+    addFields: ['工程名称'],
+    placements: [{ field: '工程名称', position: 'replace', tableIndex: 0, rowIndex: 0, cellIndex: 0 }],
+  })
+
+  const afterXml = new PizZip(fs.readFileSync(target)).file(xmlPath).asText()
+  const afterCell = afterXml.match(/<w:tc\b[\s\S]*?<\/w:tc>/)?.[0] || ''
+  assert.match(afterCell, /\{\{工程名称\}\}/)
+  assert.doesNotMatch(afterCell, new RegExp(oldText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+})
+
 test('完全空白段落可按段落坐标写入占位符', async t => {
   const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-template-blank-paragraph-'))
   t.after(() => fs.rmSync(runtimeDir, { recursive: true, force: true }))

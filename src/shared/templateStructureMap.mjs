@@ -138,14 +138,29 @@ export function deriveTemplateFieldSuggestions(content = '', html = '') {
     for (const row of table.rows) {
       const nonempty = row.cells.filter(cell => !cell.empty)
       const next = table.rows[row.rowIndex + 1]
-      // 多列表头 + 下一行多空格是明细数据区，不能逐列表头生成字段。
+      // 已填写过的样例模板也需要参数化。项目主数据标签右侧若仍是固定文本，
+      // 把值单元格标为 replace，避免生成结果混入旧项目名称或旧参建单位。
+      for (const cell of row.cells) {
+        if (!PROJECT_FIELDS.test(cell.text.replace(/[：:]$/, '').trim())) continue
+        const valueCell = row.cells[cell.cellIndex + 1]
+        if (!valueCell || valueCell.empty || /\{\{[^}]+\}\}/.test(valueCell.text)) continue
+        const item = suggestionFor(cell.text, { tableIndex: table.tableIndex, rowIndex: row.rowIndex, cellIndex: valueCell.cellIndex })
+        if (item) {
+          item.insertPosition = 'replace'
+          item.reason = '项目字段右侧仍为固定样例值，生成前应替换为项目资料'
+          add(item)
+        }
+      }
+      // 多列表头 + 下一行多空格是明细数据区。每列建立独立字段，保证渲染时
+      // 值进入对应单元格；旧版单一“工程量明细行”会把整行文本挤进第一窄列。
       if (nonempty.length >= 3 && next?.cells.filter(cell => cell.fillable).length >= 3) {
-        const target = next.cells.find(cell => cell.fillable)
-        if (target) {
-          const item = suggestionFor('工程量明细行', { tableIndex: table.tableIndex, rowIndex: target.rowIndex, cellIndex: target.cellIndex })
+        for (const header of nonempty) {
+          const target = next.cells[header.cellIndex]
+          if (!target?.fillable || /^(?:序号|项目)$/.test(header.text)) continue
+          const item = suggestionFor(`表格行${header.text}`, { tableIndex: table.tableIndex, rowIndex: target.rowIndex, cellIndex: target.cellIndex })
           if (item) {
-            item.anchorText = nonempty.map(cell => cell.text).join('、').slice(0, 60)
-            item.hint = '根据用户提供的工程量事实，按原表头列顺序填写明细行；不得改写表头或补造数量'
+            item.anchorText = header.text
+            item.hint = `仅提取用户明确提供的“${header.text}”原始值；未提供时留空，不得补造`
             item.rule.requirement = item.hint
             add(item)
           }
@@ -175,7 +190,7 @@ export function reconcileTemplateFieldPlacements(fields = [], html = '') {
   const at = (tableIndex, rowIndex, cellIndex) => tables[tableIndex]?.rows[rowIndex]?.cells[cellIndex]
   return fields.map(field => {
     const direct = at(field?.tableIndex, field?.rowIndex, field?.cellIndex)
-    if (direct?.fillable) return field
+    if (direct?.fillable || (field?.insertPosition === 'replace' && PROJECT_FIELDS.test(String(field?.name || '')))) return field
     const anchors = [field?.anchorText, field?.label, field?.name].map(value => String(value || '').replace(/[：:]$/, '').trim()).filter(Boolean)
     for (const table of tables) {
       for (const row of table.rows) {

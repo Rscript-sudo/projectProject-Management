@@ -459,7 +459,7 @@ export interface ElectronAPI {
   getTemplateLayoutContract: (filePath: string, docType: string) => Promise<any>
   saveTemplateLayoutContract: (filePath: string, docType: string, fields: Record<string, any>) => Promise<any>
   resetTemplateLayoutContract: (filePath: string, docType: string) => Promise<any>
-  saveTemplateContent: (payload: { path: string; addFields?: string[]; removeFields?: string[]; renameMap?: Record<string, string>; placements?: Array<{ field: string; anchor?: string; position?: 'before' | 'after'; tableIndex?: number; rowIndex?: number; cellIndex?: number }>; docType?: string; templateId?: string; saveAsPersonal?: boolean; name?: string }) => Promise<{ ok: boolean; path?: string; fields?: string[]; clonedToLibrary?: any; error?: string }>
+  saveTemplateContent: (payload: { path: string; addFields?: string[]; removeFields?: string[]; renameMap?: Record<string, string>; placements?: Array<{ field: string; anchor?: string; position?: 'before' | 'after' | 'replace'; tableIndex?: number; rowIndex?: number; cellIndex?: number }>; docType?: string; templateId?: string; saveAsPersonal?: boolean; name?: string }) => Promise<{ ok: boolean; path?: string; fields?: string[]; clonedToLibrary?: any; error?: string }>
   listSystemTemplates: () => Promise<any[]>
   listTemplatesByProjectType: (params: { projectType?: string; docType?: string; scope?: string }) => Promise<any[]>
   onCustomTypesChanged: (cb: (data: any) => void) => () => void

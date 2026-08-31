@@ -2,14 +2,36 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mergeTemplateAnalysisFields, normalizeTemplateFieldSuggestions, resolveReloadedTemplateFields, suggestPlaceholderNames } from '../src/shared/templateFieldSuggestions.mjs'
 
-test('固定明细表表头不会被识别为 AI 占位符', () => {
+test('固定明细表表头和旧版单格明细行不会被识别为 AI 占位符', () => {
   const result = normalizeTemplateFieldSuggestions([
     { name: '项目', mode: 'ai', reason: '固定表头栏目名' },
     { name: '设计数量', mode: 'keep', reason: '表头' },
     { name: '工程量明细行', mode: 'ai', reason: '表头下方空白数据行' },
     { name: '工程名称', mode: 'project', reason: '需要填写的基础信息栏' },
   ])
-  assert.deepEqual(result.map(item => item.name), ['工程量明细行', '工程名称'])
+  assert.deepEqual(result.map(item => item.name), ['工程名称'])
+})
+
+test('过滤固定检查标准的截断句，保留真实字段名', () => {
+  const result = normalizeTemplateFieldSuggestions([
+    { name: '检查地点', mode: 'ai', reason: '空白值栏', rule: { expansionLevel: 'contextual', maxWords: 300 } },
+    { name: '用正确，现场做好安全围避', mode: 'ai', reason: '固定检查项' },
+    { name: '0*800*1200mm', mode: 'ai', reason: '固定规格值' },
+    { name: '工艺良好各线缆的标签明晰', mode: 'ai', reason: '固定检查项' },
+  ])
+  assert.deepEqual(result.map(item => item.name), ['检查地点'])
+  assert.equal(result[0].rule.expansionLevel, 'summarize')
+  assert.equal(result[0].rule.fillMode, 'fact-extraction')
+})
+
+test('本地冒号扫描的截断句也使用同一过滤规则', () => {
+  const result = normalizeTemplateFieldSuggestions([
+    { name: '工程名称', mode: 'project', reason: '项目字段右侧固定样例值' },
+    { name: '检查地点', mode: 'ai', reason: '标签与相邻值区' },
+    { name: '深度及规格：设计要求位置', mode: 'ai', reason: '线性文本冒号扫描' },
+    { name: '洞口应大于光缆外径', mode: 'ai', reason: '线性文本冒号扫描' },
+  ])
+  assert.deepEqual(result.map(item => item.name), ['工程名称', '检查地点'])
 })
 
 test('重复候选字段只保留一个', () => {
@@ -26,7 +48,9 @@ test('模板解析得到的字段级规则随建议结果保留', () => {
     minWords: 0, maxWords: 40, antiFabrication: true, missingInfoPolicy: '留空',
   }
   const result = normalizeTemplateFieldSuggestions([{ name: '完成数量', mode: 'ai', reason: '数据行空白', rule }])
-  assert.deepEqual(result[0].rule, rule)
+  assert.equal(result[0].rule.requirement, rule.requirement)
+  assert.equal(result[0].rule.expansionLevel, 'exact')
+  assert.equal(result[0].rule.fillMode, 'fact-extraction')
 })
 
 test('业务事件时间不能被当作系统当前时间自动填充', () => {

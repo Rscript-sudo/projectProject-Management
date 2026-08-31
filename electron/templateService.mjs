@@ -290,6 +290,12 @@ export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [
       return replaceIndexedBlock(tableXml, /<w:tr\b[\s\S]*?<\/w:tr>/g, placement.rowIndex, rowXml => {
         return replaceIndexedBlock(rowXml, /<w:tc\b[\s\S]*?<\/w:tc>/g, placement.cellIndex, cellXml => {
           const run = `<w:r><w:t xml:space="preserve">${token}</w:t></w:r>`
+          if (placement.position === 'replace') {
+            return cellXml.replace(/<w:p\b([^>]*)>([\s\S]*?)<\/w:p>/, (_paragraph, attrs, inner) => {
+              const paragraphProps = inner.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/)?.[0] || ''
+              return `<w:p${attrs}>${paragraphProps}${run}</w:p>`
+            })
+          }
           if (cellXml.includes('</w:p>')) return cellXml.replace('</w:p>', `${run}</w:p>`)
           return cellXml.replace('</w:tc>', `<w:p>${run}</w:p></w:tc>`)
         }).value
@@ -327,8 +333,12 @@ export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [
       const escapedAnchor = anchor.replace(/[&<>\"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' })[ch])
       const index = xml.indexOf(escapedAnchor)
       if (index < 0) continue
-      const at = placement.position === 'before' ? index : index + escapedAnchor.length
-      xml = xml.slice(0, at) + insertion + xml.slice(at)
+      if (placement.position === 'replace') {
+        xml = xml.slice(0, index) + insertion + xml.slice(index + escapedAnchor.length)
+      } else {
+        const at = placement.position === 'before' ? index : index + escapedAnchor.length
+        xml = xml.slice(0, at) + insertion + xml.slice(at)
+      }
       placed.add(name)
       existingFields.add(name)
     }
@@ -1225,10 +1235,16 @@ export async function formatDocx(docxPath, templateUsed = true, docType = '', pr
 
     for (const fileName of Object.keys(zip.files)) {
       if (!/^word\/(?:document|styles|header\d+|footer\d+|theme\/theme\d+)\.xml$/.test(fileName)) continue
-      if (preserveTemplateLayout) continue
+      // 页眉页脚属于模板受保护资产，正式渲染必须逐字节保持不变；字体兼容
+      // 仅处理正文、样式和主题，不能为了跨平台显示破坏签章/页码/企业抬头。
+      if (preserveTemplateLayout && /^word\/(?:header|footer)\d+\.xml$/.test(fileName)) continue
       const part = zip.file(fileName)
       if (part) {
         let partXml = normalizeFonts(part.asText())
+        if (preserveTemplateLayout) {
+          zip.file(fileName, partXml)
+          continue
+        }
         if (fileName === 'word/styles.xml') {
           const defaults = `<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="${FONTS.body}" w:hAnsi="${FONTS.body}" w:eastAsia="${FONTS.body}"/><w:sz w:val="32"/><w:szCs w:val="32"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:line="560" w:lineRule="exact"/></w:pPr></w:pPrDefault></w:docDefaults>`
           if (/<w:docDefaults\b/.test(partXml)) partXml = partXml.replace(/<w:docDefaults\b[^>]*>[\s\S]*?<\/w:docDefaults>/, defaults)
@@ -1248,7 +1264,7 @@ export async function formatDocx(docxPath, templateUsed = true, docType = '', pr
 
     // 将系统模板中只在 Windows Office 上可用的旧字体，统一替换为本机可用字体。
     // 保留字号、加粗、对齐和版式，仅做字体兼容性处理。
-    if (!preserveTemplateLayout) xml = normalizeFonts(xml)
+    xml = normalizeFonts(xml)
 
     // === 1. 模板路径：只格式化含 <w:br/> 的段落（即 {{正文内容}} 产物）===
     //     有 <w:br/> → 分段检测（按 <w:br/> 分组，每行独立识别标题/正文）

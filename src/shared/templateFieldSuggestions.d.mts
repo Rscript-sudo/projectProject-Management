@@ -1,5 +1,7 @@
 import type { SuggestedField } from '../services/aiService'
 
+export function isPlausibleTemplateFieldName(value?: string): boolean
+export function clampTemplateFieldRule<T extends Record<string, any>>(field: string, rule: T): T
 export function normalizeTemplateFieldSuggestions(fields?: SuggestedField[]): SuggestedField[]
 export function mergeTemplateAnalysisFields(
   existingFields?: string[],

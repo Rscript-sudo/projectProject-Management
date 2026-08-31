@@ -13,7 +13,7 @@ import { getProjectTypeProfile, normalizeProjectType, getCustomProjectTypes, get
 import { buildDocumentRulesInjection, normalizeDocumentRules } from '../shared/documentRules.mjs'
 import { getDefaultPrompts, resolveDocTypePromptForAny } from '../shared/docTypePrompts'
 import { parseAIJsonObject, stripThinkingContent } from '../shared/aiOutput.mjs'
-import { normalizeTemplateFieldSuggestions } from '../shared/templateFieldSuggestions.mjs'
+import { clampTemplateFieldRule, normalizeTemplateFieldSuggestions } from '../shared/templateFieldSuggestions.mjs'
 import { DOC_TYPE_MIN_WORDS } from '../shared/docTypeMinWords'
 
 // 全局规则的唯一运行时真相源。任何生成路径（含自定义文种和兜底路径）
@@ -833,7 +833,7 @@ ${operationRule}
     const json = parseAIJsonObject(result.content)
     const minWords = Math.max(0, Number(json.minWords) || 80)
     const maxWords = Math.max(minWords, Number(json.maxWords) || 300)
-    const rule: GeneratedFieldRule = {
+    const rule: GeneratedFieldRule = clampTemplateFieldRule(input.field, {
       mode: 'ai',
       source: String(json.source || '用户输入与项目资料').trim(),
       requirement: stripThinkingContent(String(json.requirement || '')).trim(),
@@ -844,7 +844,7 @@ ${operationRule}
       expansionLevel: (['exact', 'normalize', 'summarize', 'contextual', 'advisory'].includes(json.expansionLevel) ? json.expansionLevel : 'contextual'),
       requiredForGeneration: json.requiredForGeneration === true,
       requiredForDelivery: json.requiredForDelivery === true,
-    }
+    })
     if (!rule.requirement) return { success: false, error: 'AI 未返回有效的字段扩写要求' }
     return { success: true, rule }
   } catch (e) {
@@ -872,7 +872,7 @@ export async function analyzeTemplateStructure(
 3. 当前日期、编制日期、基于已确认日期计算的星期可 mode=system。天气/气温也可 mode=system，但 rule.fillMode 必须为 external-data，依赖项目实施区域和业务日期；优先采用用户或现场资料实况，缺失时外部查询，查询失败软提醒
 4. 正文段落、意见栏、结论栏、描述性内容 → mode=ai（需要 AI 扩写）
 5. 固定标题、表头、栏目名、列标题和落款格式不是填写位置，不要放进 fields。尤其是“项目、规格型号、单位、数量、设计数量、实际数量、备注”等明细表列标题，必须原样保留
-6. 明细表的数据区应识别为一个可重复的“表格行/明细行”结构字段；不要把每个列标题改造成占位符
+6. 明细表的数据区必须按列建立“表格行+列名”字段（如“表格行规格型号”“表格行数量”），并定位到同一空白数据行的对应单元格；禁止创建无法按列渲染的“工程量明细行”单字段，也不要改写列标题
 7. “审批意见、审批结论、审核结论、批准意见、是否同意、是否进入下道工序”等流程决定栏 → mode=keep，保留模板位置并留待文档生成后的独立审批流程填写。不要生成通过、同意、驳回、支付等决定
 8. “审核意见、审查意见、监理意见”等内容性栏目不是审批决定 → mode=ai，但只能依据用户事实整理内容，不得自动给出审批结果
 

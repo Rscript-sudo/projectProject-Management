@@ -9,6 +9,7 @@ import {
   formatResolutionContext,
   getPendingFieldPlan,
   mergeResolvedFields,
+  retainTemplateFields,
   setStructuredFieldValue,
   updateFieldPlanValue,
 } from '../src/shared/fieldResolution.mjs'
@@ -19,6 +20,14 @@ test('少量施工事实形成事实池并原样保留工程量', () => {
   assert.deepEqual(pool.quantities.map(item => [item.value, item.unit]), [[20, '公里'], [15, '个']])
   assert.match(pool.rawInput, /20公里光缆/)
   assert.match(pool.rawInput, /15个交接箱/)
+})
+
+test('实体模板只保留登记字段并丢弃模型额外编造段落', () => {
+  const content = '【施工单位】润建股份有限公司\n【检查地点】南宁市青秀区测试路段\n【今日检查情况】盘具无破损，标签一致\n【明日计划】开盘测试'
+  assert.equal(
+    retainTemplateFields(content, ['施工单位', '检查地点']),
+    '【施工单位】润建股份有限公司\n【检查地点】南宁市青秀区测试路段',
+  )
 })
 
 test('普通模板字段缺失不阻断，叙述字段进入安全扩写计划', () => {

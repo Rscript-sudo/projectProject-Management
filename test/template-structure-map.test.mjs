@@ -32,10 +32,21 @@ test('表头行不会因下方空白数据区丢失自身文字属性', () => {
   assert.deepEqual(cells[1].cells.map(cell => cell.empty), [true, true, true])
 })
 
-test('明细表列标题合并为一个明细行字段', () => {
-  const html = '<table><tr><td>项目</td><td>规格型号</td><td>单位</td><td>数量</td><td>备注</td></tr><tr><td></td><td></td><td></td><td></td><td></td></tr></table>'
+test('明细表按列映射到对应空白单元格', () => {
+  const html = '<table><tr><td>材料名称</td><td>规格型号</td><td>单位</td><td>数量</td><td>检查方法</td></tr><tr><td></td><td></td><td></td><td></td><td></td></tr></table>'
   const fields = deriveTemplateFieldSuggestions('', html)
-  assert.deepEqual(fields.map(field => field.name), ['工程量明细行'])
+  assert.deepEqual(fields.map(field => field.name), ['表格行材料名称', '表格行规格型号', '表格行单位', '表格行数量', '表格行检查方法'])
+  assert.deepEqual(fields.map(field => field.cellIndex), [0, 1, 2, 3, 4])
+})
+
+test('固定样例项目值会被识别为替换字段', () => {
+  const html = '<table><tr><td>工程名称</td><td>2023年旧项目</td></tr><tr><td>施工单位</td><td>旧施工公司</td></tr></table>'
+  const fields = deriveTemplateFieldSuggestions('', html)
+  assert.deepEqual(fields.map(field => [field.name, field.cellIndex, field.insertPosition]), [
+    ['工程名称', 1, 'replace'],
+    ['施工单位', 1, 'replace'],
+  ])
+  assert.equal(reconcileTemplateFieldPlacements(fields, html).length, 2)
 })
 
 test('检查表示例答案不会成为字段名', () => {
