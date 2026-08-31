@@ -104,33 +104,16 @@ export function register(ipcMain) {
       }
     }
 
-    // ===== 文件名生成（虚竹 v2.0）=====
-    // 优先级：前端传的 fileName > filename.mjs 自动生成
-    let finalFileName = fileName
-    let finalSubDir = subDir
-    let filenameMeta = null
-    if (!finalFileName) {
-      // 所有自动命名文件都必须检查修订版号。旧逻辑只在 customSummary
-      // 非空时检查，使用默认摘要连续生成会覆盖同名首版。
-      const baseName = buildFileName({
-        docType,
-        projectName,
-        customSummary: customSummary || '',
-        version: '',
-      })
-      const autoVersion = version || nextVersion(projectPath, docType, baseName.summary)
-      const built = autoVersion
-        ? buildFileName({
-            docType,
-            projectName,
-            customSummary: customSummary || '',
-            version: autoVersion,
-          })
-        : baseName
-      finalFileName = built.fileName
-      finalSubDir = subDir || getFilenameSubDir(docType)
-      filenameMeta = built
-    }
+    // ===== 文件名生成（虚竹 v2.1）=====
+    // 主进程始终按固定文种规则重建文件名；忽略前端 fileName/customSummary，防止用户输入污染名称。
+    const baseName = buildFileName({ docType, projectName, version: '' })
+    const autoVersion = preview ? '' : (version || nextVersion(projectPath, docType, baseName.summary))
+    const built = autoVersion ? buildFileName({ docType, projectName, version: autoVersion }) : baseName
+    const finalFileName = preview
+      ? built.fileName.replace(/(\.[^.]+)$/, '.preview$1')
+      : built.fileName
+    const finalSubDir = subDir || getFilenameSubDir(docType)
+    const filenameMeta = built
 
     // 预览件只写系统临时目录，不占正式文号、不进入任何台账，也不会污染项目资料目录。
     const savePath = preview
@@ -336,14 +319,10 @@ export function register(ipcMain) {
     }
     content = _processedContent
 
-    // 文件名生成（虚竹 v2.0）—— 同步 fs:saveDoc 逻辑
-    let finalFileName = fileName
-    let finalSubDir = subDir
-    if (!finalFileName) {
-      const built = buildFileName({ docType, projectName, customSummary: customSummary || '' })
-      finalFileName = built.fileName
-      finalSubDir = subDir || getFilenameSubDir(docType)
-    }
+    // 文件名生成（虚竹 v2.1）—— 与 Word/Excel 一样忽略前端摘要和用户输入。
+    const built = buildFileName({ docType, projectName })
+    const finalFileName = built.fileName
+    const finalSubDir = subDir || getFilenameSubDir(docType)
     const pdfFileName = finalFileName.replace(/\.(docx|xlsx)$/, '.pdf')
     const savePath = path.join(projectPath, finalSubDir, pdfFileName)
     // v1.2.1 P0 修复：写文件前校验路径

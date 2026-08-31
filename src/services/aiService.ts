@@ -1013,7 +1013,7 @@ export function identifyDocType(input: string): { type: string; confidence: numb
 export async function generateFileName(
   docType: string,
   projectName: string,
-  description: string,
+  _description: string = '',
   version: string = ''
 ): Promise<{ fileName: string; subDir?: string; code?: string; projectCode?: string; summary?: string; date?: string; version?: string; ext?: string }> {
   if (window.electronAPI?.buildFileName) {
@@ -1021,7 +1021,6 @@ export async function generateFileName(
       const result = await window.electronAPI.buildFileName({
         docType,
         projectName,
-        customSummary: description,
         version,
       })
       return result
@@ -1031,7 +1030,7 @@ export async function generateFileName(
     }
   }
 
-  // 兜底（无 IPC 时）：本地拼，保留旧行为
+  // 兜底（无 IPC 时）：也只使用正式文种名称，禁止把用户描述放进文件名。
   const date = new Date().toISOString().split('T')[0].replace(/-/g, '')
   const typeCodes: Record<string, string> = {
     '整改通知书': 'ZG-TZ',
@@ -1046,7 +1045,7 @@ export async function generateFileName(
   }
   const code = typeCodes[docType] || 'DOC'
   const projCode = extractProjectCode(projectName)
-  const desc = sanitizeFileName(description.slice(0, 15) || docType)
+  const desc = sanitizeFileName(docType || '通用文档')
   const versionSuffix = version ? `_${version}` : ''
   const fileName = `${date}_${code}_${projCode}_${desc}${versionSuffix}.docx`
   return { fileName, code, projectCode: projCode, summary: desc, date }

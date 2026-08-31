@@ -7,7 +7,10 @@ import {
   buildFieldContract,
   buildFieldResolutionPlan,
   formatResolutionContext,
+  getPendingFieldPlan,
   mergeResolvedFields,
+  setStructuredFieldValue,
+  updateFieldPlanValue,
 } from '../src/shared/fieldResolution.mjs'
 import { buildLocationCandidates, resolveBusinessDate } from '../electron/fieldResolvers.mjs'
 
@@ -86,4 +89,21 @@ test('中文完整行政区可降级为城市名用于外部数据查询', () =>
   assert.ok(candidates.includes('南宁'))
   assert.ok(candidates.includes('青秀'))
   assert.equal(candidates[0], '广西壮族自治区南宁市青秀区')
+})
+
+test('待补充字段可写回结构化正文并同步更新字段状态', () => {
+  const plan = buildFieldResolutionPlan(['施工部位', '参与人员', '今日内容'], { factPool: buildFactPool('布放20公里光缆') })
+  assert.deepEqual(getPendingFieldPlan(plan).map(item => item.field), ['施工部位', '参与人员'])
+  const content = setStructuredFieldValue('【今日内容】布放20公里光缆。', '施工部位', '民族大道通信管道段')
+  assert.match(content, /【施工部位】民族大道通信管道段/)
+  const updated = updateFieldPlanValue(plan, '施工部位', '民族大道通信管道段')
+  assert.equal(updated.find(item => item.field === '施工部位')?.status, 'resolved')
+  assert.deepEqual(getPendingFieldPlan(updated).map(item => item.field), ['参与人员'])
+})
+
+test('重复补充同一字段只替换当前字段，不覆盖相邻正文', () => {
+  const source = '【施工部位】A段\n【今日内容】布放20公里光缆。\n【其他事项】无'
+  const updated = setStructuredFieldValue(source, '施工部位', 'B段')
+  assert.match(updated, /^【施工部位】B段\n【今日内容】布放20公里光缆。/)
+  assert.match(updated, /【其他事项】无$/)
 })

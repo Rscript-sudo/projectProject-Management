@@ -1,12 +1,12 @@
 /**
- * 文件名规则 — 虚竹 v2.0 命名规范
+ * 文件名规则 — 虚竹 v2.1 命名规范
  * 唯一真相源：~/.claude/skills/监理业务/modules/_shared/虚竹文档命名规则.md
  *
- * 文件名结构：{YYYYMMDD}_{文档编码}_{项目码}_{内容摘要}.{扩展名}
+ * 文件名结构：{YYYYMMDD}_{文档编码}_{项目码}_{固定文种摘要}.{扩展名}
  *   日期       YYYYMMDD 8位无分隔符
- *   文档编码   见 DOC_CODE_MAP，22 类标准码
+ *   文档编码   见 DOC_CODE_MAP，内置文种和兼容文种的标准码
  *   项目码     来自 project.config.json.projectCode（创建项目时自动生成）
- *   内容摘要   AI 提取或用户输入；首次不加版本号，修订走 _V2/_V3
+ *   固定摘要   只由文种/报告期规则生成，严禁使用用户原始输入；首次不加版本号，修订走 _V2/_V3
  *
  * 业务编号（写在正文"文件编号"字段，如 ZX-202605-001）继续走 numbering.mjs，
  * 与文件名是两条独立编号体系。
@@ -16,7 +16,7 @@ import path from 'path'
 import fs from 'fs'
 import { getProjectDataPath, ensureDir } from './shared.mjs'
 
-// ===== 22 类文档编码（v2.0 唯一真相源）=====
+// ===== 文档编码（v2.1 唯一真相源）=====
 export const DOC_CODE_MAP = {
   '监理日志': 'JL-RZ',
   '监理周报': 'JL-ZB',
@@ -51,6 +51,43 @@ export const DOC_CODE_MAP = {
   '付款审核意见': 'FK-SC',
   '进度分析报告': 'JD-FX',
   '通用文档': 'DOC',             // 兜底，禁止用作文档类型
+}
+
+// ===== 固定文种摘要（禁止用户输入进入文件名） =====
+// 每个内置编码都必须有稳定摘要；自定义文种使用其正式文种名称。
+export const DOCUMENT_SUMMARY_MAP = {
+  '监理日志': '监理日志',
+  '监理周报': '监理周报',
+  '监理月报': '监理月报',
+  '会议纪要': '会议纪要',
+  '现场照片': '现场照片',
+  '整改通知书': '整改通知书',
+  '安全通知书': '安全通知书',
+  '工程联系单': '工程联系单',
+  '工程函件': '工程函件',
+  '工程变更单': '工程变更单',
+  '往来函件台账': '往来函件台账',
+  '停工令': '停工令',
+  '工程款支付证书': '工程款支付证书',
+  '监理规划': '监理规划',
+  '专项汇报': '专项汇报',
+  '项目统计表': '项目统计表',
+  '监理工作总结': '监理工作总结',
+  '开工条件检查表': '开工条件检查表',
+  '承建资格报审表': '承建资格报审表',
+  '施工组织设计报审表': '施工组织设计报审表',
+  '总监理工程师任命书': '总监理工程师任命书',
+  '开工通知': '开工通知',
+  '竣工通知': '竣工通知',
+  '监理细则': '监理细则',
+  '方案审核意见': '方案审核意见',
+  '索赔报告': '索赔报告',
+  '巡视记录': '巡视记录',
+  '安全检查记录': '安全检查记录',
+  '质量评估报告': '质量评估报告',
+  '付款审核意见': '付款审核意见',
+  '进度分析报告': '进度分析报告',
+  '通用文档': '通用文档',
 }
 
 // ===== 扩展名映射（虚竹规则：.doc / .xlsx 区分） =====
@@ -173,30 +210,38 @@ export function ymd(date = new Date()) {
   return `${y}${m}${d}`
 }
 
-// ===== 月报专用：月份摘要 =====
+function isoWeek(date) {
+  const utc = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+  const day = utc.getUTCDay() || 7
+  utc.setUTCDate(utc.getUTCDate() + 4 - day)
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1))
+  return {
+    year: utc.getUTCFullYear(),
+    week: Math.ceil((((utc - yearStart) / 86400000) + 1) / 7),
+  }
+}
+
+// ===== 周报/月报专用：报告期摘要 =====
 export function monthSummary(docType, date = new Date()) {
   if (docType === '监理月报') {
     const m = String(date.getMonth() + 1).padStart(2, '0')
-    return `${m}月份监理月报`
+    return `${date.getFullYear()}年${m}月监理月报`
   }
   if (docType === '监理周报') {
-    // 周次计算需要 ISO 8601 周号，这里简化用本月第几周
-    const startOfYear = new Date(date.getFullYear(), 0, 1)
-    const dayOfYear = Math.floor((date - startOfYear) / 86400000)
-    const week = Math.ceil((dayOfYear + startOfYear.getDay() + 1) / 7)
-    return `第${week}周监理周报`
+    const period = isoWeek(date)
+    return `${period.year}年第${String(period.week).padStart(2, '0')}周监理周报`
   }
   return ''
 }
 
 // ===== 核心：生成文件名 =====
 // 返回 { fileName, absPath, relativePath, code, projectCode, summary, date, version }
-//   customSummary?  自定义摘要（来自 AI 或用户），否则按 docType 给默认
+//   customSummary?  旧版兼容参数，已忽略；用户输入不得进入文件名
 //   version?       修订版号，如 'V2'/'V3'，首次生成不传
 export function buildFileName({
   docType,
   projectName,
-  customSummary = '',
+  customSummary: _legacyCustomSummary = '',
   version = '',
   date = new Date(),
 }) {
@@ -204,11 +249,8 @@ export function buildFileName({
   const projectCode = getProjectCode(projectName)
   const dateStr = ymd(date)
 
-  // 摘要优先级：自定义 > docType 默认 > "通用"
-  let summary = sanitizeSummary(customSummary)
-  if (!summary) {
-    summary = monthSummary(docType, date) || defaultSummary(docType)
-  }
+  // 用户输入只属于正文事实源，永远不得进入文件名。
+  const summary = monthSummary(docType, date) || defaultSummary(docType)
 
   const ext = defaultExt(docType)
   const versionSuffix = version ? `_${version}` : ''
@@ -226,37 +268,7 @@ export function buildFileName({
 }
 
 function defaultSummary(docType) {
-  const map = {
-    '监理日志': '监理日志',
-    '监理周报': '监理周报',
-    '监理月报': '监理月报',
-    '会议纪要': '会议纪要',
-    '整改通知书': '整改通知',
-    '安全通知书': '安全通知',
-    '工程联系单': '工程联系单',
-    '工程函件': '工程函件',
-    '工程变更单': '工程变更',
-    '停工令': '停工令',
-    '工程款支付证书': '支付证书',
-    '开工通知': '开工通知',
-    '竣工通知': '竣工通知',
-    '开工条件检查表': '开工条件检查表',
-    '承建资格报审表': '承建资格报审表',
-    '施工组织设计报审表': '施工组织设计报审表',
-    '总监理工程师任命书': '总监理工程师任命书',
-    '监理规划': '监理规划',
-    '监理细则': '监理细则',
-    '专项汇报': '专项汇报',
-    '项目统计表': '项目统计表',
-    '方案审核意见': '方案审核意见',
-    '索赔报告': '索赔报告',
-    '巡视记录': '巡视记录',
-    '安全检查记录': '安全检查记录',
-    '质量评估报告': '质量评估报告',
-    '付款审核意见': '付款审核意见',
-    '进度分析报告': '进度分析报告',
-  }
-  return map[docType] || docType
+  return DOCUMENT_SUMMARY_MAP[docType] || sanitizeSummary(docType) || '通用文档'
 }
 
 // ===== 路径解析（按虚竹 directory_schema.json） =====
@@ -296,14 +308,19 @@ export function getSubDir(docType) {
   return map[docType] || '03_实施阶段'
 }
 
-// ===== 修订版本号：扫描同 docType 同 summary 的现有文件，返回下一个版本号 =====
-export function nextVersion(projectPath, docType, summary) {
+// ===== 修订版本号 =====
+// 普通文种只在同一生成日期内递增；周报/月报按固定报告期摘要递增，避免跨日误判或覆盖。
+export function nextVersion(projectPath, docType, summary, date = new Date()) {
   const subDir = getSubDir(docType)
   const dir = path.join(projectPath, subDir)
   if (!fs.existsSync(dir)) return ''
   const code = getDocCode(docType)
 
-  const files = fs.readdirSync(dir).filter(f => f.includes(`_${code}_`) && f.includes(`_${summary}`))
+  const datePrefix = `${ymd(date)}_`
+  const reportPeriodScoped = docType === '监理周报' || docType === '监理月报'
+  const files = fs.readdirSync(dir).filter(f =>
+    f.includes(`_${code}_`) && f.includes(`_${summary}`) && (reportPeriodScoped || f.startsWith(datePrefix))
+  )
   if (files.length === 0) return ''  // 首次生成
 
   // 提取最大版本号
@@ -329,8 +346,8 @@ export function register(ipcMain) {
     return { ...result, subDir }
   }))
 
-  ipcMain.handle('filename:nextVersion', safeCall((_, { projectPath, docType, summary }) => {
-    return nextVersion(projectPath, docType, summary)
+  ipcMain.handle('filename:nextVersion', safeCall((_, { projectPath, docType, summary, dateMs }) => {
+    return nextVersion(projectPath, docType, summary, dateMs ? new Date(dateMs) : new Date())
   }))
 
   ipcMain.handle('filename:codes', safeCall(() => {

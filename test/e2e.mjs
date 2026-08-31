@@ -61,10 +61,12 @@ async function main() {
   const content = '项目资料已核对。'.repeat(30)
   const saved = await call('fs:saveDoc', {
     projectPath, subDir: '03_实施阶段/01_监理日志', docType: '通用文档', projectName,
-    content, customSummary: '端到端测试', userInput: '生成测试文档', meta: { subject: '端到端测试' },
+    fileName: '用户输入污染文件名.docx', content, customSummary: '端到端测试', userInput: '生成测试文档', meta: { subject: '端到端测试' },
   })
   assert.equal(saved.success, true, saved.error)
   assert.ok(fs.existsSync(saved.path))
+  assert.match(saved.fileName, /_DOC_PJ803_通用文档\.docx$/)
+  assert.doesNotMatch(saved.fileName, /端到端测试/)
   const savedSnapshot = await call('db:getDocumentMasterSnapshot', saved.path)
   assert.equal(savedSnapshot.master_data.participants[0].organization_name, '原施工单位')
   const replacedParticipant = await call('db:saveMasterData', projectName, 'participant', {
@@ -94,14 +96,15 @@ async function main() {
     content: templateContent, customSummary: '模板渲染验证', userInput: '生成监理日志', meta: { subject: '模板渲染验证' },
   })
   assert.equal(templated.success, true, templated.error)
-  assert.match(templated.fileName, /_JL-RZ_PJ803_.*\.docx$/)
+  assert.match(templated.fileName, /_JL-RZ_PJ803_监理日志\.docx$/)
+  assert.doesNotMatch(templated.fileName, /模板渲染验证/)
   assert.ok(fs.existsSync(templated.path))
 
   const rebuilt = await call('search:rebuild')
   assert.equal(rebuilt.success, true)
   assert.ok(rebuilt.docCount >= 1)
-  const searchResults = resultData(await call('search:query', '端到端测试'))
-  assert.ok(searchResults.some(item => item.fileName.includes('端到端测试')))
+  const searchResults = resultData(await call('search:query', '项目资料已核对'))
+  assert.ok(searchResults.some(item => item.fileName.includes('通用文档')))
 
   const inspection = await call('inspection:save', {
     projectPath,

@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test, { after } from 'node:test'
-import { buildFileName, generateProjectCodeFromName, getSubDir, nextVersion } from '../electron/ipc/filename.mjs'
+import { buildFileName, DOC_CODE_MAP, DOCUMENT_SUMMARY_MAP, generateProjectCodeFromName, getSubDir, monthSummary, nextVersion } from '../electron/ipc/filename.mjs'
 
 const expected = {
   监理日志: ['JL-RZ', '.docx', '03_实施阶段/01_监理日志'],
@@ -40,8 +40,31 @@ test('18 个通用模板的编码、扩展名和目录映射唯一且完整', ()
     assert.equal(built.code, code, `${docType} 文档编码`)
     assert.equal(built.ext, ext, `${docType} 文件格式`)
     assert.equal(getSubDir(docType), subDir, `${docType} 输出目录`)
-    assert.match(built.fileName, new RegExp(`^20260830_${code}_PJ20260830_事实核验\\${ext}$`))
+    assert.equal(built.fileName, `20260830_${code}_PJ20260830_${built.summary}${ext}`)
+    assert.doesNotMatch(built.fileName, /事实核验/)
+    if (docType !== '监理周报' && docType !== '监理月报') assert.equal(built.summary, DOCUMENT_SUMMARY_MAP[docType])
   }
+})
+
+test('全部内置文种都有固定摘要，任何用户输入都不能进入文件名', () => {
+  assert.deepEqual(new Set(Object.keys(DOCUMENT_SUMMARY_MAP)), new Set(Object.keys(DOC_CODE_MAP)))
+  for (const docType of Object.keys(DOC_CODE_MAP)) {
+    const built = buildFileName({ docType, projectName: '命名验收项目2026', customSummary: '布放20公里光缆，安装15个交接箱', date: new Date(2026, 7, 31) })
+    assert.doesNotMatch(built.fileName, /20公里|15个|交接箱|布放|安装/, docType)
+    assert.ok(built.summary, `${docType} 固定摘要不能为空`)
+  }
+})
+
+test('自定义文种使用正式文种名称，不使用用户描述', () => {
+  const built = buildFileName({ docType: '设备到货检查表', projectName: '命名验收项目2026', customSummary: '用户随手输入的长句', date: new Date(2026, 7, 31) })
+  assert.equal(built.summary, '设备到货检查表')
+  assert.match(built.fileName, /_设备到货检查表\.docx$/)
+  assert.doesNotMatch(built.fileName, /用户随手输入/)
+})
+
+test('周报文件名按 ISO 报告周期固定，跨年时使用归属周年份', () => {
+  assert.equal(monthSummary('监理周报', new Date(2027, 0, 1)), '2026年第53周监理周报')
+  assert.equal(monthSummary('监理周报', new Date(2027, 0, 4)), '2027年第01周监理周报')
 })
 
 test('默认摘要重复生成也按首版、V2、V3 顺序留痕，不覆盖旧文件', () => {
@@ -51,11 +74,13 @@ test('默认摘要重复生成也按首版、V2、V3 顺序留痕，不覆盖旧
     const summary = buildFileName({ docType, projectName: '版本测试项目' }).summary
     const dir = path.join(projectPath, getSubDir(docType))
     fs.mkdirSync(dir, { recursive: true })
-    assert.equal(nextVersion(projectPath, docType, summary), '')
+    const businessDate = new Date(2026, 7, 30)
+    assert.equal(nextVersion(projectPath, docType, summary, businessDate), '')
     fs.writeFileSync(path.join(dir, `20260830_ZG-TZ_PROJECT_${summary}.docx`), '')
-    assert.equal(nextVersion(projectPath, docType, summary), 'V2')
+    assert.equal(nextVersion(projectPath, docType, summary, businessDate), 'V2')
     fs.writeFileSync(path.join(dir, `20260830_ZG-TZ_PROJECT_${summary}_V2.docx`), '')
-    assert.equal(nextVersion(projectPath, docType, summary), 'V3')
+    assert.equal(nextVersion(projectPath, docType, summary, businessDate), 'V3')
+    assert.equal(nextVersion(projectPath, docType, summary, new Date(2026, 7, 31)), '', '次日同文种应重新从首版开始')
   } finally {
     fs.rmSync(projectPath, { recursive: true, force: true })
   }

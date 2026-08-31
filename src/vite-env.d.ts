@@ -11,13 +11,13 @@ export interface DirNode {
 interface SaveDocOptions {
   projectPath: string
   subDir?: string               // 虚竹 v2.0：可选，由 IPC 端按 docType 算
-  fileName?: string             // 虚竹 v2.0：可选，由 IPC 端按 buildFileName 生成
+  fileName?: string             // 旧版兼容；正式保存由主进程按固定文种规则重建
   content: string
   docType: string
   projectName: string
   userInput: string
   savePath?: string
-  customSummary?: string        // 虚竹 v2.0：摘要内容（事由等）
+  customSummary?: string        // 旧版兼容，主进程已忽略，用户输入不得进入文件名
   version?: string              // 虚竹 v2.0：修订版本，如 'V2'/'V3'
   meta?: any                    // 台账登记用业务字段
   preview?: boolean             // 临时预览件：不占文号、不写正式台账
@@ -406,13 +406,13 @@ export interface ElectronAPI {
     docType: string
     projectName: string
     userInput: string
-    customSummary?: string
+    customSummary?: string // 旧版兼容，命名模块忽略
   }) => Promise<{ success: boolean; path?: string; fileName?: string; subDir?: string; error?: string }>
   previewNumber: (docType: string, projectName: string) => Promise<{ number: string }>
   buildFileName: (opts: {
     docType: string
     projectName: string
-    customSummary?: string
+    customSummary?: string // 旧版兼容，命名模块忽略
     version?: string
     dateMs?: number
   }) => Promise<BuildFileNameResult>
@@ -420,6 +420,7 @@ export interface ElectronAPI {
     projectPath: string
     docType: string
     summary: string
+    dateMs?: number
   }) => Promise<string>
   getDocCodes: () => Promise<Record<string, string>>
   setProjectCode: (projectName: string, projectCode: string) => Promise<{ success: boolean; projectCode: string }>

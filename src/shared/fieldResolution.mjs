@@ -243,3 +243,31 @@ export function mergeResolvedFields(content = '', plan = []) {
   }
   return additions.length ? `${result}\n\n${additions.join('\n')}`.trim() : result
 }
+
+export function setStructuredFieldValue(content = '', field = '', value = '') {
+  const key = normalizeFieldName(field)
+  if (!key) return String(content || '')
+  const normalizedValue = String(value || '').trim()
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const fieldRe = new RegExp(`【${escaped}】[\\s\\S]*?(?=\\n?【[^】]+】|$)`)
+  const replacement = `【${key}】${normalizedValue}`
+  const source = String(content || '').trim()
+  if (fieldRe.test(source)) return source.replace(fieldRe, replacement).trim()
+  return `${source}${source ? '\n\n' : ''}${replacement}`.trim()
+}
+
+export function updateFieldPlanValue(plan = [], field = '', value = '', source = 'manual-confirmed') {
+  const key = normalizeFieldName(field)
+  const normalizedValue = String(value || '').trim()
+  return (plan || []).map(item => item.field !== key ? item : {
+    ...item,
+    value: normalizedValue,
+    source: normalizedValue ? source : '',
+    provenance: normalizedValue ? { source, updatedAt: new Date().toISOString() } : null,
+    status: normalizedValue ? 'resolved' : item.contract?.fillMode === 'manual' ? 'manual' : item.contract?.fillMode === 'ai-expansion' ? 'expand' : 'unresolved',
+  })
+}
+
+export function getPendingFieldPlan(plan = []) {
+  return (plan || []).filter(item => !String(item.value || '').trim() && (item.status === 'unresolved' || item.status === 'manual'))
+}

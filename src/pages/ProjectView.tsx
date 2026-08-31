@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Typography, Input, Button, Space, Spin, Tag, App, Dropdown, Tooltip, DatePicker, Select, Tree, Modal, List } from 'antd'
+import { Typography, Input, Button, Space, Spin, Tag, App, Dropdown, Tooltip, DatePicker, Select, Tree, Modal, List, Drawer, Alert, Empty } from 'antd'
 import { SendOutlined, RobotOutlined, FileTextOutlined, SaveOutlined, ReloadOutlined, FilePdfOutlined, FolderOpenOutlined, HomeOutlined, EditOutlined, CloseOutlined, SearchOutlined, BookOutlined, EyeOutlined, PictureOutlined, InboxOutlined, HistoryOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../stores/useProjectStore'
@@ -14,7 +14,7 @@ import { getTemplateInputPlaceholder } from '../shared/templateInputGuidance.mjs
 import { getTemplateStatusBadge, isTemplateReady } from '../shared/templateReadiness.mjs'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { normalizeStructuredDocument } from '../shared/structuredGeneration'
-import { buildFactPool, buildFieldConfigsFromPrompt, buildFieldResolutionPlan, formatResolutionContext, mergeResolvedFields } from '../shared/fieldResolution.mjs'
+import { buildFactPool, buildFieldConfigsFromPrompt, buildFieldResolutionPlan, formatResolutionContext, getPendingFieldPlan, mergeResolvedFields, setStructuredFieldValue, updateFieldPlanValue } from '../shared/fieldResolution.mjs'
 import { getDefaultPrompts, mergeDocTypePrompt } from '../shared/docTypePrompts'
 import type { SessionMode } from '../services/aiService'
 import DirTree from '../components/DirTree'
@@ -25,6 +25,15 @@ import './ProjectView.css'
 
 const { Text } = Typography
 const { TextArea } = Input
+
+const PROJECT_CONFIG_FIELD_MAP: Record<string, 'ownerUnit' | 'contractor' | 'supervisorUnit' | 'chiefEngineer' | 'implementationArea' | 'projectCode'> = {
+  建设单位: 'ownerUnit', 甲方单位: 'ownerUnit', 业主单位: 'ownerUnit',
+  施工单位: 'contractor', 承建单位: 'contractor', 乙方单位: 'contractor',
+  监理单位: 'supervisorUnit', 监理公司: 'supervisorUnit',
+  总监理工程师: 'chiefEngineer', 总监姓名: 'chiefEngineer',
+  实施区域: 'implementationArea', 项目实施区域: 'implementationArea', 项目地址: 'implementationArea',
+  项目代码: 'projectCode', 项目编号: 'projectCode',
+}
 
 interface ChatMessage {
   id: string
@@ -212,7 +221,7 @@ export default function ProjectView() {
   const location = useLocation()
   const [searchParams] = useSearchParams()
   const { currentProject, setCurrentProject, projects, settings, projectRoot, loadSettings } = useAppStore()
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
 
   // 本地状态
   const [dirTree, setDirTree] = useState<DirNode | null>(null)
@@ -225,7 +234,7 @@ export default function ProjectView() {
   const [savedPath, setSavedPath] = useState('')
   const apiReady = useElectronAPI()
   const [lastInput, setLastInput] = useState('')
-  const [projectConfig, setProjectConfig] = useState<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; projectTypeCode?: string; projectTags?: string[]; projectFeatures?: string; projectPhase?: string; implementationArea?: string; documentRules?: { rulePackIds?: string[]; additionalInstruction?: string }; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }>; templateSelections?: Record<string, string | null> }>({
+  const [projectConfig, setProjectConfig] = useState<{ contractor: string; ownerUnit: string; supervisorUnit: string; chiefEngineer: string; projectType: string; projectTypeCode?: string; projectTags?: string[]; projectFeatures?: string; projectPhase?: string; implementationArea?: string; projectCode?: string; documentRules?: { rulePackIds?: string[]; additionalInstruction?: string }; templateOverrides?: Record<string, { path: string; sourceName?: string; updatedAt?: string }>; templateSelections?: Record<string, string | null> }>({
     contractor: '',
     ownerUnit: '',
     supervisorUnit: '',
@@ -234,6 +243,10 @@ export default function ProjectView() {
   })
   const [editMode, setEditMode] = useState(false)
   const [editableContent, setEditableContent] = useState('')
+  const [fieldDrawerOpen, setFieldDrawerOpen] = useState(false)
+  const [activePendingField, setActivePendingField] = useState('')
+  const [fieldDrafts, setFieldDrafts] = useState<Record<string, string>>({})
+  const [resolvingField, setResolvingField] = useState('')
   const [rightPanelTab, setRightPanelTab] = useState<'preview' | 'templates'>('preview')
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false)
   const [activeDocumentType, setActiveDocumentType] = useState<string>()
@@ -1084,6 +1097,9 @@ export default function ProjectView() {
         if (mode === 'DOC' || mode === 'HYBRID') {
           setProgressStage('processing')
           setPreviewContent({ docType: docType || '通用文档', content: accumulated, userInput: trimmedInput, meta: { fieldPlan: generationFieldPlan } })
+          setFieldDrafts({})
+          setFieldDrawerOpen(false)
+          setActivePendingField('')
           setSavedPath('')
         } else if (mode === 'DATA_QUERY' && currentProject && dataToolIds?.length) {
           setPreviewContent(null)
@@ -1157,6 +1173,9 @@ export default function ProjectView() {
       if (mode === 'DOC' || mode === 'HYBRID') {
         setProgressStage('processing')
         setPreviewContent({ docType: docType || '通用文档', content: aiContent, userInput: trimmedInput, meta: { fieldPlan: generationFieldPlan } })
+        setFieldDrafts({})
+        setFieldDrawerOpen(false)
+        setActivePendingField('')
         setSavedPath('')
       } else if (mode === 'DATA_QUERY' && currentProject && dataToolIds?.length) {
         setPreviewContent(null)
@@ -1195,12 +1214,114 @@ export default function ProjectView() {
     setLoading(false)
   }, [input, loading, apiReady, currentProject, projectConfig, messages, activeDocumentType, attachedItems, reportPeriod, generationTemplates, selectedGenerationTemplateId, location.pathname, location.search, navigate])
 
+  const openPendingFields = (field = '') => {
+    setActivePendingField(field)
+    setFieldDrawerOpen(true)
+  }
+
+  const applyFieldValue = async (field: string, value: string, source = 'manual-confirmed', persistToProject = false) => {
+    if (!previewContent) return false
+    const normalized = value.trim()
+    if (!normalized) {
+      message.warning(`请先填写“${field}”`)
+      return false
+    }
+    const baseContent = editMode ? editableContent : previewContent.content
+    const nextContent = setStructuredFieldValue(baseContent, field, normalized)
+    const nextPlan = updateFieldPlanValue(previewContent.meta?.fieldPlan || [], field, normalized, source)
+    setPreviewContent(prev => prev ? { ...prev, content: nextContent, meta: { ...prev.meta, fieldPlan: nextPlan } } : prev)
+    if (editMode) setEditableContent(nextContent)
+    setFieldDrafts(prev => ({ ...prev, [field]: normalized }))
+
+    const configKey = PROJECT_CONFIG_FIELD_MAP[field]
+    if (persistToProject && configKey && currentProject) {
+      const nextConfig = { ...projectConfig, [configKey]: normalized }
+      const saved = await window.electronAPI.writeProjectConfig(currentProject.path, nextConfig)
+      if (!saved.success) {
+        message.warning(`字段已写入当前文档，但项目资料保存失败：${saved.error || '未知错误'}`)
+        return true
+      }
+      setProjectConfig(nextConfig)
+      message.success(`“${field}”已写入文档并保存到项目资料`)
+    } else {
+      message.success(`“${field}”已写入当前文档`)
+    }
+    const remaining = getPendingFieldPlan(nextPlan)
+    if (!remaining.length) setFieldDrawerOpen(false)
+    else setActivePendingField(remaining[0].field)
+    return true
+  }
+
+  const syncEditedFieldPlan = (content: string) => {
+    if (!previewContent) return
+    const parsed = parseStructuredContent(content)
+    let nextPlan = previewContent.meta?.fieldPlan || []
+    for (const item of getPendingFieldPlan(nextPlan)) {
+      const value = String(parsed[item.field] || '').trim()
+      if (value) nextPlan = updateFieldPlanValue(nextPlan, item.field, value, 'manual-edit')
+    }
+    setPreviewContent(prev => prev ? { ...prev, content, meta: { ...prev.meta, fieldPlan: nextPlan } } : prev)
+  }
+
+  const saveImplementationArea = async () => {
+    if (!currentProject) return
+    const area = String(fieldDrafts.__implementationArea || '').trim()
+    if (!area) return message.warning('请先填写项目实施区域')
+    const nextConfig = { ...projectConfig, implementationArea: area }
+    const result = await window.electronAPI.writeProjectConfig(currentProject.path, nextConfig)
+    if (!result.success) return message.error(`实施区域保存失败：${result.error || '未知错误'}`)
+    setProjectConfig(nextConfig)
+    message.success('项目实施区域已保存，现在可以重新自动获取')
+  }
+
+  const retryAutomaticField = async (item: any) => {
+    if (!previewContent || !currentProject) return
+    setResolvingField(item.field)
+    try {
+      const automatic = await window.electronAPI.resolveTemplateContext({
+        input: previewContent.userInput || lastInput,
+        project: { ...projectConfig, projectName: currentProject.name },
+        fields: [item.field],
+      })
+      const value = automatic.values?.[item.field]
+      if (value) {
+        await applyFieldValue(item.field, value, 'automatic', false)
+      } else {
+        message.warning(automatic.warnings?.join('；') || `暂未取得“${item.field}”`)
+      }
+    } catch (error: any) {
+      message.error(`自动获取失败：${error?.message || error}`)
+    } finally {
+      setResolvingField('')
+    }
+  }
+
+  const confirmDeliveryFields = async () => {
+    const currentContent = editMode ? editableContent : previewContent?.content || ''
+    const manuallyEdited = parseStructuredContent(currentContent)
+    const missing = getPendingFieldPlan(previewContent?.meta?.fieldPlan || []).filter((item: any) =>
+      item.contract?.requiredForDelivery && !String(manuallyEdited[item.field] || '').trim()
+    )
+    if (!missing.length) return true
+    return await new Promise<boolean>(resolve => {
+      modal.confirm({
+        title: '还有交付前建议补充的字段',
+        content: `尚未填写：${missing.map((item: any) => item.field).join('、')}。可以继续保存，也可以先补充。`,
+        okText: '仍然保存',
+        cancelText: '先去补充',
+        onOk: () => resolve(true),
+        onCancel: () => { openPendingFields(missing[0].field); resolve(false) },
+      })
+    })
+  }
+
   // 保存文档
   const handleSave = async () => {
     if (!currentProject || !previewContent) {
       message.error('没有可保存的内容')
       return
     }
+    if (!await confirmDeliveryFields()) return
 
     setGenerating(true)
     try {
@@ -1210,7 +1331,7 @@ export default function ProjectView() {
       const content = stripCalibrationStatement(editMode ? editableContent : previewContent.content)
       const subject = extractSubject(previewContent.userInput || lastInput)
       // 预览用的文件名（前端也展示给老板看）
-      const fileNameInfo = await generateFileName(docType, currentProject.name, subject || docType)
+      const fileNameInfo = await generateFileName(docType, currentProject.name)
       const fileName = fileNameInfo.fileName
 
       // 直接保存到默认路径（IPC 端按虚竹 v2.0 重新生成标准文件名+路径）
@@ -1220,7 +1341,6 @@ export default function ProjectView() {
         docType: docType,
         projectName: currentProject.name,
         userInput: subject,
-        customSummary: subject || docType,
         meta: previewContent.meta,
       })
 
@@ -1870,17 +1990,13 @@ export default function ProjectView() {
                           if (!currentProject || !previewContent) return
                           const { docType } = previewContent
                           const content = stripCalibrationStatement(editMode ? editableContent : previewContent.content)
-                          const subject = extractSubject(previewContent.userInput || lastInput)
-                          // 走虚竹 v2.0 文件名
-                          const fileNameInfo = await generateFileName(docType, currentProject.name, subject || docType)
-                          // 预览版加 .preview 后缀（v1.1.1 修复：不再走 __preview__/ 子目录，直接放正式目录让老板能看到）
-                          const previewFileName = fileNameInfo.fileName.replace(/\.docx$/, '.preview.docx')
+                          // 预览同样由主进程按固定文种规则命名，并自动添加 .preview 后缀。
+                          const fileNameInfo = await generateFileName(docType, currentProject.name)
                           setGenerating(true)
                           try {
                             const result = await window.electronAPI.saveDoc({
                               projectPath: currentProject.path,
                               subDir: fileNameInfo.subDir || getDocSavePath(docType),
-                              fileName: previewFileName,
                               content,
                               docType,
                               projectName: currentProject.name,
@@ -1908,9 +2024,10 @@ export default function ProjectView() {
                         icon={<FilePdfOutlined />}
                         onClick={async () => {
                           if (!currentProject || !previewContent) return
+                          if (!await confirmDeliveryFields()) return
                           const content = editMode ? editableContent : previewContent.content
                           const subject = extractSubject(previewContent.userInput || lastInput)
-                          const fileNameInfo = await generateFileName(previewContent.docType, currentProject.name, subject || previewContent.docType)
+                          const fileNameInfo = await generateFileName(previewContent.docType, currentProject.name)
                           const fileName = fileNameInfo.fileName
                           const subDir = fileNameInfo.subDir || getDocSavePath(previewContent.docType)
                           setGenerating(true)
@@ -1923,7 +2040,6 @@ export default function ProjectView() {
                               docType: previewContent.docType,
                               projectName: currentProject.name,
                               userInput: subject,
-                              customSummary: subject,
                             })
                             if (result.success) {
                               message.success('PDF 已导出')
@@ -1950,13 +2066,15 @@ export default function ProjectView() {
                   <>
                     {Array.isArray(previewContent.meta?.fieldPlan) && previewContent.meta.fieldPlan.length > 0 && (() => {
                       const plan = previewContent.meta.fieldPlan as any[]
+                      const pending = getPendingFieldPlan(plan)
                       const resolved = plan.filter(item => item.status === 'resolved').length
                       const expanded = plan.filter(item => item.status === 'expand').length
-                      const unresolved = plan.filter(item => item.status === 'unresolved').length
-                      const manual = plan.filter(item => item.status === 'manual').length
+                      const unresolvedItems = pending.filter(item => item.status === 'unresolved')
+                      const manualItems = pending.filter(item => item.status === 'manual')
+                      const deliveryCount = pending.filter(item => item.contract?.requiredForDelivery).length
                       return <div style={{ background: '#f6f8fa', borderRadius: 8, padding: '9px 12px', marginBottom: 12 }}>
-                        <Space size={6} wrap><Text strong style={{ fontSize: 12 }}>字段解析</Text><Tag color="green">自动取得 {resolved}</Tag><Tag color="blue">AI扩写 {expanded}</Tag>{unresolved > 0 && <Tag color="orange">待补充 {unresolved}</Tag>}{manual > 0 && <Tag>人工字段 {manual}</Tag>}</Space>
-                        <Text type="secondary" style={{ display: 'block', marginTop: 5, fontSize: 11 }}>普通字段缺失不阻止生成；自动值和用户事实优先，AI仅扩写允许的叙述字段。</Text>
+                        <Space size={6} wrap><Text strong style={{ fontSize: 12 }}>字段解析</Text><Tag color="green">已确定 {resolved}</Tag><Tag color="blue">AI扩写 {expanded}</Tag>{unresolvedItems.length > 0 && <Tag color="orange" onClick={() => openPendingFields(unresolvedItems[0].field)} style={{ cursor: 'pointer' }}>待补充 {unresolvedItems.length} ›</Tag>}{manualItems.length > 0 && <Tag onClick={() => openPendingFields(manualItems[0].field)} style={{ cursor: 'pointer' }}>人工字段 {manualItems.length} ›</Tag>}{deliveryCount > 0 && <Tag color="red">交付前 {deliveryCount}</Tag>}</Space>
+                        <Text type="secondary" style={{ display: 'block', marginTop: 5, fontSize: 11 }}>{pending.length ? '点击“待补充”可集中填写并回写文档；普通字段缺失不阻止生成。' : '字段已处理完成；自动值和用户事实优先，AI仅扩写允许的叙述字段。'}</Text>
                       </div>
                     })()}
                     {savedPath && (
@@ -1984,24 +2102,37 @@ export default function ProjectView() {
 
                     {/* 编辑模式：TextArea */}
                     {editMode ? (
-                      <Input.TextArea
-                        value={editableContent}
-                        onChange={(e) => setEditableContent(e.target.value)}
-                        style={{
-                          fontSize: 13,
-                          lineHeight: 2,
-                          minHeight: 400,
-                          fontFamily: 'inherit',
-                          padding: 16,
-                          borderRadius: 8,
-                        }}
-                      />
+                      <div>
+                        {getPendingFieldPlan(previewContent.meta?.fieldPlan || []).length > 0 && <Alert
+                          type="warning"
+                          showIcon
+                          style={{ marginBottom: 10 }}
+                          message="当前文档还有待补充字段"
+                          description="可继续直接编辑正文，也可打开字段清单逐项填写；写入后会同步更新当前编辑内容。"
+                          action={<Button size="small" onClick={() => openPendingFields(getPendingFieldPlan(previewContent.meta?.fieldPlan || [])[0]?.field)}>打开清单</Button>}
+                        />}
+                        <Input.TextArea
+                          value={editableContent}
+                          onChange={(e) => setEditableContent(e.target.value)}
+                          onBlur={event => syncEditedFieldPlan(event.target.value)}
+                          style={{
+                            fontSize: 13,
+                            lineHeight: 2,
+                            minHeight: 400,
+                            fontFamily: 'inherit',
+                            padding: 16,
+                            borderRadius: 8,
+                          }}
+                        />
+                      </div>
                     ) : (
                       <DocumentLayoutPreview
                         docType={previewContent.docType}
                         content={previewContent.content}
                         projectName={currentProject?.name || ''}
                         projectConfig={projectConfig}
+                        pendingFields={getPendingFieldPlan(previewContent.meta?.fieldPlan || [])}
+                        onPendingFieldClick={field => openPendingFields(field)}
                       />
                     )}
 
@@ -2138,6 +2269,58 @@ export default function ProjectView() {
           )}
         </div>}
       </div>
+      <Drawer
+        title="补充文档字段"
+        width={430}
+        open={fieldDrawerOpen}
+        onClose={() => setFieldDrawerOpen(false)}
+        extra={previewContent && <Text type="secondary" style={{ fontSize: 12 }}>{getPendingFieldPlan(previewContent.meta?.fieldPlan || []).length} 项待处理</Text>}
+      >
+        {!previewContent ? <Empty description="请先生成文档" /> : (() => {
+          const pending = getPendingFieldPlan(previewContent.meta?.fieldPlan || [])
+          if (!pending.length) return <Empty description="当前字段已全部处理" />
+          const ordered = [...pending].sort((a, b) => a.field === activePendingField ? -1 : b.field === activePendingField ? 1 : 0)
+          return <div style={{ display: 'grid', gap: 12 }}>
+            <Alert type="info" showIcon message="填写后直接回写当前文档" description="可选字段不会阻止生成；交付字段会在正式保存或导出前集中提醒。项目公共资料可同时保存，后续文档自动使用。" />
+            {ordered.map((item: any) => {
+              const isActive = item.field === activePendingField
+              const configKey = PROJECT_CONFIG_FIELD_MAP[item.field]
+              const canRetry = item.contract?.fillMode === 'external-data' || item.contract?.fillMode === 'system-computed'
+              const draft = fieldDrafts[item.field] ?? item.value ?? ''
+              return <div key={item.field} onClick={() => setActivePendingField(item.field)} style={{ border: `1px solid ${isActive ? '#91caff' : '#e5e7eb'}`, boxShadow: isActive ? '0 0 0 2px rgba(22,119,255,.08)' : 'none', borderRadius: 9, padding: 13, background: '#fff' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 7 }}>
+                  <Text strong style={{ flex: 1 }}>{item.field}</Text>
+                  {item.status === 'manual' && <Tag>人工填写</Tag>}
+                  {item.contract?.requiredForDelivery ? <Tag color="red">交付前补充</Tag> : <Tag color="orange">可选</Tag>}
+                </div>
+                <Text type="secondary" style={{ display: 'block', fontSize: 12, lineHeight: 1.6, marginBottom: 9 }}>
+                  {item.contract?.requirement || (item.status === 'manual' ? '该字段必须由有权限的人员确认，AI 不代填。' : '请根据现场记录或项目资料填写明确事实。')}
+                </Text>
+                {item.contract?.fillMode === 'external-data' && !projectConfig.implementationArea && <div style={{ display: 'flex', gap: 6, marginBottom: 9 }}>
+                  <Input value={fieldDrafts.__implementationArea || ''} onChange={event => setFieldDrafts(prev => ({ ...prev, __implementationArea: event.target.value }))} placeholder="先填写项目实施区域，例如：广西南宁市" />
+                  <Button onClick={() => void saveImplementationArea()}>保存区域</Button>
+                </div>}
+                <Input.TextArea
+                  value={draft}
+                  onChange={event => setFieldDrafts(prev => ({ ...prev, [item.field]: event.target.value }))}
+                  autoSize={{ minRows: 2, maxRows: 5 }}
+                  placeholder={item.contract?.semanticType === 'person' ? '填写已确认的人员姓名或角色' : item.contract?.semanticType === 'quantity' ? '填写数值并保留单位' : `填写${item.field}`}
+                />
+                <Space wrap style={{ marginTop: 9 }}>
+                  <Button type="primary" size="small" onClick={() => void applyFieldValue(item.field, draft)}>写入当前文档</Button>
+                  {configKey && <Button size="small" onClick={() => void applyFieldValue(item.field, draft, 'project-data', true)}>写入并保存到项目资料</Button>}
+                  {canRetry && <Button size="small" loading={resolvingField === item.field} onClick={() => void retryAutomaticField(item)}>重新自动获取</Button>}
+                  <Button size="small" type="text" onClick={() => {
+                    setEditableContent(previewContent.content)
+                    setEditMode(true)
+                    setFieldDrawerOpen(false)
+                  }}>在编辑中查看</Button>
+                </Space>
+              </div>
+            })}
+          </div>
+        })()}
+      </Drawer>
     </div>
   )
 }
@@ -2316,7 +2499,7 @@ function parsePreviewSections(content: string): Record<string, string> {
   return sections
 }
 
-function DocumentLayoutPreview({ docType, content, projectName, projectConfig }: { docType: string; content: string; projectName: string; projectConfig: { ownerUnit?: string; contractor?: string; supervisorUnit?: string; chiefEngineer?: string } }) {
+function DocumentLayoutPreview({ docType, content, projectName, projectConfig, pendingFields = [], onPendingFieldClick }: { docType: string; content: string; projectName: string; projectConfig: { ownerUnit?: string; contractor?: string; supervisorUnit?: string; chiefEngineer?: string }; pendingFields?: any[]; onPendingFieldClick?: (field: string) => void }) {
   const sections = parsePreviewSections(content)
   const field = (...keys: string[]) => keys.map(key => sections[key]).find(value => value) || ''
   const meta = docType === '监理周报' || docType === '监理月报'
@@ -2329,6 +2512,10 @@ function DocumentLayoutPreview({ docType, content, projectName, projectConfig }:
     <div style={{ margin: '0 20px', display: 'grid', gridTemplateColumns: '88px minmax(0, 1fr)', border: '1px solid #dfe5ed', fontSize: 12 }}>
       {meta.flatMap(([label, value]) => [<div key={`${label}-label`} style={{ padding: '7px 8px', background: '#f7f9fc', borderBottom: '1px solid #e8edf3', color: '#64748b', fontWeight: 600 }}>{label}</div>, <div key={`${label}-value`} style={{ padding: '7px 9px', borderBottom: '1px solid #e8edf3', color: value ? '#334155' : '#9aa7b8' }}>{displayValue(value)}</div>])}
     </div>
+    {pendingFields.length > 0 && <div style={{ margin: '12px 20px 0', padding: '9px 10px', border: '1px solid #ffd591', background: '#fff7e6', borderRadius: 6 }}>
+      <div style={{ fontSize: 11, color: '#ad6800', marginBottom: 6 }}>待补充字段（点击定位填写）</div>
+      <Space size={[5, 5]} wrap>{pendingFields.map(item => <Button key={item.field} size="small" type="dashed" onClick={() => onPendingFieldClick?.(item.field)} style={{ color: '#d46b08', borderColor: '#ffc069', background: '#fff' }}>{item.field}</Button>)}</Space>
+    </div>}
     <div style={{ padding: '16px 20px 22px', fontSize: 13, lineHeight: 2, color: '#374151', whiteSpace: 'pre-wrap' }}>{body || '待补充正文内容'}</div>
   </div>
 }
