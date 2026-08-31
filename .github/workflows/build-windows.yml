@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # 允许上传产物到 Release（后续启用 publish 时需要）
+  contents: read
 
 jobs:
   build-windows:
@@ -54,30 +54,14 @@ jobs:
             release/*.blockmap
           retention-days: 30
 
-      # 7. 自动创建 GitHub Release 并 attach 产物（仅 tag 触发时）
-      #    只有 v* tag 才发布，手动 workflow_dispatch 不发
-      - name: Create GitHub Release
+      # 7. 只把发行包上传到 Gitee 专用发行仓库（仅 tag 触发）
+      #    GITEE_TOKEN 必须保存在 GitHub Actions Secrets，不写入源码或客户端。
+      - name: Publish Gitee Release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          name: ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          body: |
-            ## 项目文档管理系统 ${{ github.ref_name }}
-
-            📦 **下载下方附件**，安装包 / 绿色版二选一：
-
-            - `项目文档管理系统 Setup ${{ github.ref_name }}.exe` —— NSIS 安装包（推荐）
-            - `项目文档管理系统 ${{ github.ref_name }}.exe` —— Portable 绿色版
-
-            ⚠️ 首次运行可能被 SmartScreen 拦截，点"更多信息 → 仍要运行"。
-
-            📋 完整更新说明见 [RELEASE_NOTES_${{ github.ref_name }}.md](https://github.com/${{ github.repository }}/blob/main/RELEASE_NOTES_${{ github.ref_name }}.md)
-          files: |
-            release/*.exe
-            release/latest.yml
-            release/*.blockmap
+        run: node scripts/publish-gitee-release.mjs "${{ github.ref_name }}" release/*.exe release/latest.yml release/*.blockmap
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_RELEASE_NOTES: |
+            项目文档管理系统 ${{ github.ref_name }} Windows 正式发行版。
+
+            请优先下载名称中带 Setup 的 NSIS 安装包。安装更新不会删除用户项目数据。

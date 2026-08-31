@@ -20,7 +20,7 @@
 2. 检查是否有未提交改动（让你确认）
 3. `git add .` + `commit` + `push origin main`
 4. 打 tag + `push origin v1.0.2`
-5. **触发 CI 自动构建 + 自动创建 GitHub Release**
+5. **触发 CI 自动构建 + 自动上传 Gitee Release**
 
 ---
 
@@ -29,9 +29,29 @@
 | 用途 | 链接 |
 |------|------|
 | 看 CI 实时进度 | https://github.com/Rscript-sudo/projectProject-Management/actions |
-| 下载 EXE 产物 | https://github.com/Rscript-sudo/projectProject-Management/releases |
+| 下载发行版 | https://gitee.com/micfree/project-management/releases |
 
-5-10 分钟内 Release 自动出现在第二个链接。
+5-10 分钟内 Release 自动出现在第二个链接。发布前必须在 GitHub 源码仓库的 Actions Secrets 中配置 `GITEE_TOKEN`。
+
+### Gitee 首次配置（只做一次）
+
+1. 在 Gitee 个人设置创建私人令牌，仅授予发行仓库所需的权限。
+2. 打开 GitHub 源码仓库的 `Settings → Secrets and variables → Actions`。
+3. 新建 Repository secret，名称必须为 `GITEE_TOKEN`，值为上一步的令牌。
+4. 令牌不得写入 `.env`、源码、客户端设置或 Release 说明。
+
+Gitee 发行仓库固定为 `https://gitee.com/micfree/project-management`，只保存发行说明和安装包，不保存业务源码。
+
+### 手动上传 macOS 发行包
+
+macOS 包由 Mac 本机构建。确保 `package.json` 版本与标签一致后执行：
+
+```bash
+npm run package:mac
+GITEE_TOKEN="仅当前终端使用的令牌" npm run publish:gitee -- v1.4.3 "release/项目文档管理系统-1.4.3-arm64.dmg" "release/项目文档管理系统-1.4.3-arm64.dmg.blockmap"
+```
+
+脚本支持重试：同名同大小附件会跳过；同名但大小不同时会拒绝覆盖，避免已发布版本被静默替换。
 
 ---
 
@@ -71,12 +91,12 @@ git push origin v1.0.2
 
 ## 📦 产物说明
 
-下载产物（GitHub Release 或 Actions Artifacts）解压得到：
+下载产物（Gitee Release 或 Actions Artifacts）解压得到：
 
 ```
 项目文档管理系统 Setup X.Y.Z.exe   # NSIS 安装包（推荐用户用这个）
 项目文档管理系统 X.Y.Z.exe          # Portable 绿色版（双击即用）
-latest.yml                         # 自动升级用，暂未启用
+latest.yml                         # Windows 构建元数据，随 Release 保留
 ```
 
 ### Windows 安装验收清单
@@ -96,7 +116,7 @@ latest.yml                         # 自动升级用，暂未启用
 - **CI 跑 `electron-rebuild` 失败**：Windows runner 默认装好 Python + VS Build Tools 2022，通常无问题。失败看 Actions 日志。
 - **安装时提示"Windows 已保护你的电脑"**：未签名 EXE 被 SmartScreen 拦截，点"更多信息 → 仍要运行"。长期方案是申请代码签名证书（EV 证书最佳）。
 - **想出 macOS / Linux 包**：在 `.github/workflows/build-windows.yml` 基础上加 `macos-latest` / `ubuntu-latest` runner。
-- **想启用自动升级**：把 `--publish never` 改成 `--publish always`，配 `generic` provider，客户端启动时检测 `latest.yml`。
+- **客户端在线更新**：设置页会查询 Gitee 最新 Release，按 Windows/macOS 和 CPU 架构选择附件，由用户确认后打开安装包下载页。
 
 ---
 
@@ -108,7 +128,7 @@ latest.yml                         # 自动升级用，暂未启用
 | commit 信息写错 | `git commit --amend -m "新信息"`（未 push 前） |
 | tag 推错了 | `git tag -d v1.0.2 && git push origin :refs/tags/v1.0.2` |
 | 推错了 commit | `git revert <hash>` 再 push |
-| Release 出错了 | 去 https://github.com/Rscript-sudo/projectProject-Management/releases 手动 Edit / Delete |
+| Release 出错了 | 去 https://gitee.com/micfree/project-management/releases 手动编辑或删除 |
 
 ---
 
@@ -125,7 +145,7 @@ latest.yml                         # 自动升级用，暂未启用
               ↓
         Windows runner 跑构建（约 5-10 分钟）
               ↓
-        自动创建 Release + 上传 EXE
+        自动创建 Gitee Release + 上传 EXE
               ↓
-        老板去 Releases 页面下载
+        客户端从 Gitee 检查更新
 ```

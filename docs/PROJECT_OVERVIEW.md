@@ -146,7 +146,7 @@ npm run test:e2e:smoke    # 最小冒烟
 npm run test:e2e          # 全部 *.e2e.mjs（需 Electron 环境）
 npm run quality:gate      # verify:ipc -> typecheck -> test -> test:e2e -> build:renderer -> npm audit
 npm run build             # macOS dmg（本机）
-./release.sh vX.Y.Z "msg" # 出 Windows EXE + GitHub Release
+./release.sh vX.Y.Z "msg" # 出 Windows EXE + Gitee Release
 ```
 
 - 跑单个 e2e：`electron test/<name>.e2e.mjs`；单个单测：`node --test test/<name>.test.mjs`。
@@ -182,7 +182,7 @@ npm run build             # macOS dmg（本机）
 
 > ⚠️ 默认不发布。只有老板明确说"发布/出包/推 GitHub"时才执行本节流程。
 
-`./release.sh vX.Y.Z "msg"` → push main + 打 tag → CI（`.github/workflows/build-windows.yml`，windows-latest）5-10 分钟后出 Windows EXE 并自动建 GitHub Release。macOS 本机验证用 `npm run build` 出 dmg 装机。版本号规则与故障恢复见 `RELEASE.md`。
+`./release.sh vX.Y.Z "msg"` → push main + 打 tag → CI（`.github/workflows/build-windows.yml`，windows-latest）5-10 分钟后出 Windows EXE 并自动上传 Gitee 专用发行仓库。macOS 本机构建后使用 `npm run publish:gitee` 追加 dmg 附件。版本号规则与令牌配置见 `RELEASE.md`。
 
 ---
 
@@ -225,7 +225,7 @@ npm run build             # macOS dmg（本机）
 | **多项目驾驶舱** | ✅ 完整 | `PortfolioDashboardView` + `dashboard:portfolio` |
 | **交付包生成** | ✅ 完整 | `delivery:batchGenerate` + `delivery:createPackage` |
 | **运营中心** | ✅ 完整 | 异步任务队列（create/cancel/retry/list/clearFinished）+ 诊断 |
-| **自动更新** | ✅ 完整 | `update:check`（查 GitHub Release）+ `update:download`（跳转下载） |
+| **在线更新** | ✅ 完整 | `update:check`（查 Gitee Release 及附件）+ 平台/架构选包 + 可信域名校验 + `update:download` |
 | **项目备份/恢复** | ✅ 完整 | `project:createBackup/listBackups/restoreBackup` |
 | **DB 导出** | ✅ 完整 | `db:export`（checkpoint 导出） |
 | **聊天会话** | ✅ 完整 | `chat:createSession/listSessions/openSession/archiveSession` + 历史持久化 |
@@ -242,7 +242,7 @@ npm run build             # macOS dmg（本机）
 | **多项目并发** | ❌ 未做 | 单窗口单项目，不支持多开实例 | 同时管多个项目需切换 |
 | **自动升级（静默）** | ⚠️ 半成品 | `update:download` 仅 `shell.openExternal` 跳转浏览器下载，非应用内静默升级 | 用户需手动下载安装包覆盖 |
 | **移动端预览** | ⚠️ 半成品 | `ProjectView.css` 有 `@media` 响应式断点，但无完整移动端适配 | 桌面端为主，移动端不可用 |
-| **latest.yml 自动升级** | ⚠️ 未启用 | CI 已生成 `latest.yml`，但 `--publish never`，未配 `generic` provider | 自动升级链路断 |
+| **静默自动安装** | ⚠️ 未启用 | 现为发现新版后打开 Gitee 安装包；macOS 尚无有效 Developer ID 签名和公证 | 不影响手动确认更新 |
 | **CHANGELOG 同步** | ✅ 已修（v1.3.1） | `CHANGELOG.md` 已补齐 v1.1.0~v1.3.1，版本可追溯 |
 | **SOP 内容深度** | ✅ 已对齐（v1.3.2） | 7 类 SOP JSON 全部补齐到信息化深度：8 节 / 45-47 要点 / 标题+适用工艺+禁用术语齐全 / 字数下限 5 类文种 | 跨类型生成质量一致 |
 | **统一模板生成** | ✅ 已完成 | 正式生成入口不再区分“系统版式/已关联”；系统和用户模板均以实体文件、占位符和规则为准 | 后续新增模板无需增加代码文种特判 |

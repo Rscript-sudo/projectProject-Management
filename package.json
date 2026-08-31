@@ -18,7 +18,8 @@
     "quality:gate": "npm run verify:ipc && npm run typecheck && npm test && npm run test:e2e && npm run build:renderer && npm audit --omit=dev",
     "typecheck": "tsc --noEmit",
     "verify:ipc": "node scripts/verify-ipc-contract.mjs",
-    "verify:package": "node scripts/verify-packaged-files.mjs"
+    "verify:package": "node scripts/verify-packaged-files.mjs",
+    "publish:gitee": "node scripts/publish-gitee-release.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.6.0",

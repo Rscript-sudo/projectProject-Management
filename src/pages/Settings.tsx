@@ -95,7 +95,7 @@ export default function Settings() {
       }
       Modal.confirm({
         title: `发现新版本 v${result.latestVersion}`,
-        content: `当前版本为 v${result.currentVersion}。点击“前往下载”将从 GitHub Release 打开最新版安装包；下载完成后安装即可保留现有项目数据。`,
+        content: `当前版本为 v${result.currentVersion}。点击“前往下载”将从 Gitee 发行仓库打开适用于当前系统的安装包；下载完成后安装即可保留现有项目数据。`,
         okText: '前往下载', cancelText: '稍后更新',
         onOk: async () => {
           const opened = await window.electronAPI.downloadUpdate(result.downloadUrl || result.releaseUrl || '')
@@ -404,7 +404,7 @@ export default function Settings() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '0 0 16px', marginBottom: 16, borderBottom: '1px solid #f0f0f0' }}>
         <div>
           <Text strong>当前版本</Text><br />
-          <Text type="secondary">v{appVersion} · 更新来源：GitHub Release</Text>
+          <Text type="secondary">v{appVersion} · 更新来源：Gitee Release</Text>
         </div>
         <Button icon={checkingUpdate ? <SyncOutlined spin /> : <CloudDownloadOutlined />} loading={checkingUpdate} onClick={handleCheckUpdate}>
           检查更新

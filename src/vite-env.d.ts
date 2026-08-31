@@ -40,6 +40,7 @@ export interface EvidenceItem {
 
 export interface UpdateCheckResult {
   success: boolean
+  provider?: 'gitee'
   currentVersion: string
   latestVersion?: string
   hasUpdate?: boolean
@@ -47,6 +48,7 @@ export interface UpdateCheckResult {
   releaseUrl?: string
   downloadUrl?: string | null
   assetName?: string | null
+  publishedAt?: string | null
   error?: string
 }
 
