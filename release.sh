@@ -80,6 +80,13 @@ fi
 # ========== 执行发布 ==========
 
 echo ""
+PLAIN_VERSION="${VERSION#v}"
+CURRENT_PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+if [[ "$CURRENT_PACKAGE_VERSION" != "$PLAIN_VERSION" ]]; then
+  echo "🔢 同步应用版本：v$CURRENT_PACKAGE_VERSION → $VERSION"
+  npm version "$PLAIN_VERSION" --no-git-tag-version
+fi
+
 echo "📝 步骤 1/4：暂存改动..."
 git add .
 

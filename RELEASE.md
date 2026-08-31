@@ -18,9 +18,10 @@
 
 1. 校验版本号格式
 2. 检查是否有未提交改动（让你确认）
-3. `git add .` + `commit` + `push origin main`
-4. 打 tag + `push origin v1.0.2`
-5. **触发 CI 自动构建 + 自动上传 Gitee Release**
+3. 自动把 `package.json` / `package-lock.json` 版本同步为发布版本
+4. `git add .` + `commit` + `push origin main`
+5. 打 tag + `push origin v1.0.2`
+6. **触发 CI 自动构建 + 自动上传 Gitee Release**
 
 ---
 
