@@ -109,6 +109,41 @@ export async function reconcileTemplateLibraryFiles(userDataPath) {
       added++
     }
   }
+  const sitePackageRoot = getTemplateScopeDir(userDataPath, 'sitePackage')
+  if (fs.existsSync(sitePackageRoot)) {
+    const walk = directory => fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+      if (entry.name.startsWith('.') || entry.name === '清理归档') return []
+      const fullPath = path.join(directory, entry.name)
+      return entry.isDirectory() ? walk(fullPath) : (/\.(docx|xlsx)$/i.test(entry.name) && !entry.name.startsWith('~$') ? [fullPath] : [])
+    })
+    for (const filePath of walk(sitePackageRoot)) {
+      if (registeredPaths.has(path.resolve(filePath))) continue
+      const relativeParts = path.relative(sitePackageRoot, filePath).split(path.sep)
+      const categoryLabel = relativeParts.length >= 3 ? relativeParts[0] : '未分类'
+      const folderDocType = relativeParts.length >= 3 ? relativeParts.at(-2) : path.basename(filePath, path.extname(filePath))
+      const docType = cleanTemplateDocType(folderDocType)
+      const { getTemplatePlaceholders } = await import('./templateService.mjs')
+      const fields = await getTemplatePlaceholders(filePath)
+      const now = new Date().toISOString()
+      registry.templates.push({
+        id: `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        name: docType,
+        docType,
+        scope: 'professional',
+        projectType: normalizeProjectType(categoryLabel) || 'unclassified',
+        projectTypeLabel: categoryLabel,
+        path: filePath,
+        sourceName: path.basename(filePath),
+        resourceKind: 'site-package',
+        fields,
+        aiRuleConfiguredAt: BUILTIN_DOC_TYPES.has(docType) && fields.length ? now : undefined,
+        createdAt: now,
+        updatedAt: now,
+      })
+      registeredPaths.add(path.resolve(filePath))
+      added++
+    }
+  }
   if (added) writeRegistry(userDataPath, registry)
   return { added }
 }
@@ -132,7 +167,8 @@ export function normalizeTemplateLibrary(userDataPath) {
       : (entry.scope === 'other' || entry.scope === 'personal')
         ? (entry.projectTypeLabel || entry.projectType || '通用')
         : '通用'
-    const key = `${entry.scope}:${entry.projectTypeLabel || entry.projectType || '通用'}:${cleanedDocType}`
+    const resourceKind = entry.resourceKind === 'site-package' ? 'site-package' : 'document'
+    const key = `${resourceKind}:${entry.scope}:${entry.projectTypeLabel || entry.projectType || '通用'}:${cleanedDocType}`
     const sourcePath = entry.path && fs.existsSync(entry.path) ? entry.path : ''
     if (seen.has(key)) {
       if (sourcePath) {
@@ -145,7 +181,10 @@ export function normalizeTemplateLibrary(userDataPath) {
     seen.add(key)
     const extension = path.extname(sourcePath || entry.sourceName || '.docx').toLowerCase() || '.docx'
     const safeDocType = cleanedDocType.replace(/[\\/:*?"<>|]/g, '_')
-    const targetDir = path.join(getTemplateScopeDir(userDataPath, entry.scope), projectLabel, safeDocType)
+    const targetRoot = resourceKind === 'site-package'
+      ? getTemplateScopeDir(userDataPath, 'sitePackage')
+      : getTemplateScopeDir(userDataPath, entry.scope)
+    const targetDir = path.join(targetRoot, projectLabel, safeDocType)
     const targetPath = path.join(targetDir, `${safeDocType}模板${extension}`)
     if (sourcePath && path.resolve(sourcePath) !== path.resolve(targetPath)) {
       fs.mkdirSync(targetDir, { recursive: true })
@@ -157,6 +196,7 @@ export function normalizeTemplateLibrary(userDataPath) {
       docType: safeDocType,
       path: fs.existsSync(targetPath) ? targetPath : entry.path,
       sourceName: `${safeDocType}模板${extension}`,
+      resourceKind,
       projectTypeLabel: projectLabel,
     })
   }
@@ -186,7 +226,7 @@ export function normalizeTemplateLibrary(userDataPath) {
       physicalArchived++
     }
   }
-  for (const scope of ['professional', 'personal', 'other']) archiveUnregistered(getTemplateScopeDir(userDataPath, scope))
+  for (const scope of ['professional', 'personal', 'other', 'sitePackage']) archiveUnregistered(getTemplateScopeDir(userDataPath, scope))
 
   return { total: kept.length, archived: ordered.length - kept.length + physicalArchived, root, renamedDocTypes }
 }
@@ -200,14 +240,19 @@ export async function deleteProfessionalCategory(userDataPath, projectType, { tr
   const removed = registry.templates.filter(item => item.scope === 'professional' && (
     item.projectTypeLabel === label || normalizeProjectType(item.projectType) === targetCode
   ))
-  const categoryDir = path.join(getTemplateScopeDir(userDataPath, 'professional'), label)
-  if (fs.existsSync(categoryDir)) {
-    if (typeof trashItem !== 'function') return { ok: false, error: '系统废纸篓不可用' }
-    await trashItem(categoryDir)
+  const categoryDirs = [
+    path.join(getTemplateScopeDir(userDataPath, 'professional'), label),
+    path.join(getTemplateScopeDir(userDataPath, 'sitePackage'), label),
+  ]
+  for (const categoryDir of categoryDirs) {
+    if (fs.existsSync(categoryDir)) {
+      if (typeof trashItem !== 'function') return { ok: false, error: '系统废纸篓不可用' }
+      await trashItem(categoryDir)
+    }
   }
   registry.templates = registry.templates.filter(item => !removed.some(candidate => candidate.id === item.id))
   writeRegistry(userDataPath, registry)
-  return { ok: true, removedTemplates: removed.length, trashed: fs.existsSync(categoryDir) === false }
+  return { ok: true, removedTemplates: removed.length, trashed: categoryDirs.every(directory => !fs.existsSync(directory)) }
 }
 
 /** 删除用户自定义模板文件夹，同步清理文件夹内的模板登记。 */
@@ -343,11 +388,19 @@ export async function importTemplateToLibrary({ userDataPath, sourcePath, docTyp
   const extension = path.extname(sourcePath).toLowerCase()
   const safeDocType = cleanTemplateDocType(docType).replace(/[\\/:*?"<>|]/g, '_')
   const categoryLabel = scope === 'professional' ? (projectType || '未分类') : scope === 'other' || scope === 'personal' ? (projectType || '通用') : '通用'
-  const targetDir = path.join(getTemplateScopeDir(userDataPath, scope), categoryLabel, safeDocType)
+  const targetRoot = resourceKind === 'site-package'
+    ? getTemplateScopeDir(userDataPath, 'sitePackage')
+    : getTemplateScopeDir(userDataPath, scope)
+  const targetDir = path.join(targetRoot, categoryLabel, safeDocType)
   fs.mkdirSync(targetDir, { recursive: true })
   // 同一分类、同一文种只保留一个正式模板，不再产生“变体 1/2”式名称。
   const targetPath = path.join(targetDir, `${safeDocType}模板${extension}`)
-  const existing = registry.templates.filter(item => item.scope === scope && item.docType === docType && normalizeProjectType(item.projectType) === normalizeProjectType(projectType))
+  const existing = registry.templates.filter(item =>
+    item.scope === scope &&
+    item.docType === docType &&
+    (item.resourceKind || 'document') === resourceKind &&
+    normalizeProjectType(item.projectType) === normalizeProjectType(projectType)
+  )
   for (const duplicate of existing) {
     if (duplicate.path && duplicate.path !== targetPath && fs.existsSync(duplicate.path)) {
       const archiveDir = path.join(getTemplateWorkspaceRoot(userDataPath), '清理归档', new Date().toISOString().slice(0, 10))
@@ -429,7 +482,7 @@ export function resolveLibraryTemplate(userDataPath, { docType, projectType, sel
     if (selected) return selected
   }
   // 未完成配置的用户模板可以继续在模板中心编辑，但不能自动参与正式文档生成。
-  const readyTemplates = templates.filter(isTemplateReady)
+  const readyTemplates = templates.filter(item => isTemplateReady(item) && item.resourceKind !== 'site-package')
   // v1.x：projectType 兼容 label 和 code（normalizeProjectType 都处理）
   const targetCode = normalizeProjectType(projectType)
   // 自动路由优先选择当前项目的专业模板；私人/自定义模板仍可由用户显式选择，

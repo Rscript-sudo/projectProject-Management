@@ -103,6 +103,19 @@ export default function TemplateCenter() {
     if (section === 'personal-templates') {
       return <TemplateLibraryZone scope="personal" display="enterprise" title="私人模板库" onGoRules={(docType, templateId) => setEditingRule({ docType, templateId })} />
     }
+    if (section === 'site-packages') {
+      return selectedProjectType
+        ? <TemplateLibraryZone
+            key={`site-package-${selectedProjectType.code}`}
+            scope="professional"
+            display="enterprise"
+            resourceKind="site-package"
+            projectType={selectedProjectType.label}
+            title={`站点资料包 · ${selectedProjectType.label}`}
+            onGoRules={(docType, templateId) => setEditingRule({ docType, templateId })}
+          />
+        : null
+    }
     return (
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         {selectedProjectType && (
@@ -130,13 +143,16 @@ export default function TemplateCenter() {
           className="template-center-tree"
           showIcon
           defaultExpandAll
-          selectedKeys={[section === 'professional' ? `specialty-${projectTypeCode}` : section === 'custom-templates' ? `custom:${customCategory}` : section]}
+          selectedKeys={[section === 'professional' ? `specialty-${projectTypeCode}` : section === 'site-packages' ? `site-package-${projectTypeCode}` : section === 'custom-templates' ? `custom:${customCategory}` : section]}
           onSelect={keys => {
             if (!keys.length) return
             const key = String(keys[0])
             if (key.startsWith('specialty-')) {
               setProjectTypeCode(key.slice('specialty-'.length))
               setSection('professional')
+            } else if (key.startsWith('site-package-')) {
+              setProjectTypeCode(key.slice('site-package-'.length))
+              setSection('site-packages')
             } else if (key.startsWith('custom:')) {
               setCustomCategory(key.slice('custom:'.length))
               setSection('custom-templates')
@@ -165,6 +181,10 @@ export default function TemplateCenter() {
               children: [
                 { key: 'personal-templates', title: '我的模板', icon: <FolderOutlined /> },
               ],
+            },
+            {
+              key: 'site-package-group', title: '站点资料包', selectable: false, icon: <FolderOutlined />,
+              children: projectTypes.map(item => ({ key: `site-package-${item.code}`, title: item.label, icon: <FolderOutlined /> })),
             },
             {
               key: 'custom-group', title: '自定义模板', selectable: false, icon: <FolderOutlined />,

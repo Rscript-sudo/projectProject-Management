@@ -136,6 +136,39 @@ test('当前项目专业模板自动优先，私人模板仍可显式选择', as
   assert.equal(selected.id, personal.id)
 })
 
+test('站点资料包与普通专业模板独立存放，且只在显式选择时参与生成', async t => {
+  const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-site-package-'))
+  t.after(() => fs.rmSync(userDataPath, { recursive: true, force: true }))
+  const sourcePath = path.resolve('templates/通用/01_监理日志/监理日志模板.docx')
+
+  const professional = await importTemplateToLibrary({
+    userDataPath,
+    sourcePath,
+    docType: '监理日志',
+    scope: 'professional',
+    projectType: '通信工程',
+  })
+  const sitePackage = await importTemplateToLibrary({
+    userDataPath,
+    sourcePath,
+    docType: '监理日志',
+    scope: 'professional',
+    projectType: '通信工程',
+    resourceKind: 'site-package',
+  })
+
+  assert.notEqual(professional.id, sitePackage.id)
+  assert.notEqual(professional.path, sitePackage.path)
+  assert.match(sitePackage.path, /站点资料包[/\\]通信工程[/\\]监理日志/)
+  assert.equal(listTemplateLibrary(userDataPath).filter(item => item.docType === '监理日志').length, 2)
+  assert.equal(resolveLibraryTemplate(userDataPath, { docType: '监理日志', projectType: '通信工程' })?.id, professional.id)
+  assert.equal(resolveLibraryTemplate(userDataPath, {
+    docType: '监理日志',
+    projectType: '通信工程',
+    selectedTemplateId: sitePackage.id,
+  })?.id, sitePackage.id)
+})
+
 test('内置文种用户模板自动继承规则，替换源文件后自动失效', async t => {
   const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-template-rule-state-'))
   t.after(() => fs.rmSync(userDataPath, { recursive: true, force: true }))

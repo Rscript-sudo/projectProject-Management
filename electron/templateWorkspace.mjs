@@ -8,6 +8,7 @@ const SCOPE_DIRS = {
   professional: '专业模板',
   personal: '私人模板',
   other: '其他模板',
+  sitePackage: '站点资料包',
 }
 
 function copyTreeMissing(source, target) {

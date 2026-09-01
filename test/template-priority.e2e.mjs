@@ -44,8 +44,12 @@ async function main() {
 
   const global = await call('fs:importTemplateToLibrary', { sourcePath, docType, scope: 'global', projectType: '通用', name: '全局周报' })
   const professional = await call('fs:importTemplateToLibrary', { sourcePath, docType, scope: 'professional', projectType: '通信工程', name: '通信周报' })
+  const sitePackage = await call('fs:importTemplateToLibrary', { sourcePath, docType, scope: 'professional', projectType: '通信工程', name: '通信站点周报', resourceKind: 'site-package' })
   assert.equal(global.success, true)
   assert.equal(professional.success, true)
+  assert.equal(sitePackage.success, true)
+  assert.equal(sitePackage.template.resourceKind, 'site-package')
+  assert.match(sitePackage.template.path, /站点资料包[/\\]通信工程[/\\]监理周报/)
   assert.ok(professional.template.fields.includes('集采部分内容'), '导入时应识别 Word 模板中的占位符')
   assert.equal((await call('template:markRuleConfigured', { id: global.template.id })).ok, true)
   assert.equal((await call('template:markRuleConfigured', { id: professional.template.id })).ok, true)
@@ -63,6 +67,11 @@ async function main() {
   assert.equal(genericAuto.templateId, global.template.id)
   const informationAuto = await call('fs:getProjectTemplateContract', information.path, docType)
   assert.equal(informationAuto.templateId, global.template.id, '未配置专业模板的信息化项目应回退到通用模板')
+
+  const selectSitePackage = await call('fs:selectProjectTemplate', telecom.path, docType, sitePackage.template.id)
+  assert.equal(selectSitePackage.success, true)
+  const telecomSitePackage = await call('fs:getProjectTemplateContract', telecom.path, docType)
+  assert.equal(telecomSitePackage.templateId, sitePackage.template.id, '站点资料包应在用户明确选择后参与生成')
 
   const selected = await call('fs:selectProjectTemplate', telecom.path, docType, global.template.id)
   assert.equal(selected.success, true)

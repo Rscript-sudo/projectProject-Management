@@ -19,6 +19,7 @@ interface Props {
   title: string
   onGoRules?: (docType: string, templateId?: string) => void  // 跳转到扩写规则
   display?: 'all' | 'enterprise' | 'system'
+  resourceKind?: 'document' | 'site-package'
 }
 
 interface Tpl {
@@ -28,9 +29,10 @@ interface Tpl {
   layoutContract?: { status?: string; warningCount?: number; schemaVersion?: number; templateHash?: string }
   customDocTypeCode?: string
   projectTypeLabel?: string
+  resourceKind?: 'document' | 'site-package'
 }
 
-export default function TemplateLibraryZone({ scope, projectType, title, onGoRules, display = 'all' }: Props) {
+export default function TemplateLibraryZone({ scope, projectType, title, onGoRules, display = 'all', resourceKind = 'document' }: Props) {
   const { message } = App.useApp()
   const { customDocTypes } = useSettingsStore()
   const [templates, setTemplates] = useState<Tpl[]>([])
@@ -64,6 +66,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
       setHiddenSystemTemplateIds(hiddenIds)
       setHiddenCommonDocTypes(hiddenTypes)
       const matchScope = (t: Tpl) => {
+        if ((t.resourceKind || 'document') !== resourceKind) return false
         if (scope === 'global') return t.scope === 'global'
         if (scope === 'other') return t.scope === 'other' && (!projectType || t.projectType === projectType || t.projectTypeLabel === projectType)
         if (scope === 'personal') return t.scope === 'personal' && (!projectType || t.projectType === projectType || t.projectTypeLabel === projectType)
@@ -72,7 +75,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
       const enterprise = (all || []).filter(matchScope).map(t => ({ ...t, readOnly: false }))
       // 通用区：额外列出系统预置模板（只读），让清单列全
       const systemRows = scope === 'global'
-        ? (system || []).filter(s => !hiddenIds.includes(s.id)).map(s => ({ ...s, readOnly: true }))
+        ? (system || []).filter(s => resourceKind === 'document' && !hiddenIds.includes(s.id)).map(s => ({ ...s, readOnly: true }))
         : []
       if (scope === 'global' && display === 'all') {
         const byDocType = new Map<string, Tpl>()
@@ -106,7 +109,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
     } finally {
       setLoading(false)
     }
-  }, [scope, projectType, display, message, customDocTypes])
+  }, [scope, projectType, display, resourceKind, message, customDocTypes])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -127,6 +130,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
       docType,
       scope,
       projectType: scope === 'professional' || scope === 'other' || scope === 'personal' ? projectType : undefined,
+      resourceKind,
     })
     if (!result.success) throw new Error(result.error || '导入失败')
     return result.template
@@ -137,6 +141,10 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
     if (!requestedDocType) { message.warning('请输入或选择文种'); return }
     const files = await window.electronAPI.selectTemplateFiles()
     if (!files || files.length === 0) return
+    if (resourceKind === 'site-package' && files.length > 1) {
+      message.warning('站点资料包请按文种逐份添加，每次选择一个 DOCX 或 XLSX 表单')
+      return
+    }
     setImporting(true)
     try {
       // 不限定内置文种：用户输入新名称时自动创建自定义文种，再导入模板。
@@ -293,6 +301,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
               scope,
               projectType: scope === 'professional' ? projectType : '通用',
               name: editTpl.docType,
+              resourceKind,
             })
           : await window.electronAPI.cloneSystemTemplateToLibrary({
               docType: editTpl.docType,
@@ -422,9 +431,9 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
           filterOption={(input, option) => String(option?.value || '').toLowerCase().includes(input.toLowerCase())}
           placeholder="输入或选择文种"
         />
-        <Button type="primary" icon={<InboxOutlined />} loading={importing} onClick={handleImport}>添加模板</Button>
+        <Button type="primary" icon={<InboxOutlined />} loading={importing} onClick={handleImport}>{resourceKind === 'site-package' ? '添加资料包表单' : '添加模板'}</Button>
         {(scope === 'professional' || scope === 'other' || scope === 'personal') && projectType && <Text type="secondary">导入到文件夹：{projectType}</Text>}
-        <Text className="app-card-toolbar__hint">支持多选 .docx / .xlsx，导入后自动识别字段</Text>
+        <Text className="app-card-toolbar__hint">支持 .docx / .xlsx，导入后自动识别字段</Text>
       </div>}
       {scope === 'global' && display === 'all' && (
         <Alert
@@ -434,10 +443,18 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
           description="通用模板统一由实体模板文件、占位符和 AI 扩写规则组成。替换模板文件后，需要重新识别占位符并保存扩写规则。"
         />
       )}
+      {resourceKind === 'site-package' && (
+        <Alert
+          type="info" showIcon
+          style={{ marginBottom: 12 }}
+          message="站点资料包按当前工程专业管理"
+          description="每次选择一个文种并添加对应 DOCX/XLSX 表单；可重复添加不同文种。完成占位符和 AI 扩写规则后，该表单会出现在项目的“站点资料包”分组中。"
+        />
+      )}
       {(scope === 'professional' || scope === 'personal' || scope === 'other') && <Text type="secondary" style={{ display: 'block', marginBottom: 10 }}>提示：右击任意模板可打开操作菜单；删除会移到系统废纸篓，可恢复。</Text>}
       <Table
         size="small" rowKey="id" loading={loading} columns={columns} dataSource={templates}
-        locale={{ emptyText: <Empty description="暂无模板，点上方「批量导入」" /> }}
+        locale={{ emptyText: <Empty description={resourceKind === 'site-package' ? '暂无资料包表单，点上方「添加资料包表单」' : '暂无模板，点上方「添加模板」'} /> }}
         pagination={false}
         scroll={{ x: 840 }}
         onRow={record => ({
