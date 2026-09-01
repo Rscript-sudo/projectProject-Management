@@ -280,6 +280,26 @@ function sourceChoiceDecision(blockText, sourceText) {
   return 'positive'
 }
 
+function choiceBlockHasRecord(blockText) {
+  const remaining = String(blockText || '')
+    .replace(/[□☐☑☒]\s*(?:不合格|不符合|合格|符合)/g, '')
+    .replace(/(?:序号|编号|检查结论|检查结果)/g, '')
+    .replace(/[\s\d０-９一二三四五六七八九十、，,。.；;:：/\\()（）【】\[\]_-]+/g, '')
+  return /[\p{L}\u4e00-\u9fff]/u.test(remaining)
+}
+
+function choiceRowHasRecord(block, plainText) {
+  const cells = [...String(block || '').matchAll(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g)].map(match => match[0])
+  if (cells.length < 2) return choiceBlockHasRecord(plainText)
+  const choiceCellIndex = cells.findIndex(cell => /[□☐☑☒]\s*(?:不合格|不符合|合格|符合)/.test(logicalXmlText(cell)))
+  if (choiceCellIndex <= 0) return choiceBlockHasRecord(plainText)
+
+  // 典型检查表列顺序为“检查标准｜检查记录｜检查结论”。结论方框左侧的
+  // 单元格才是本行实际记录，不能把更左侧的固定检查标准当成已检查证据。
+  // 合并单元格仍落在相邻 tc 中；若记录为空，此处必须返回 false。
+  return choiceBlockHasRecord(logicalXmlText(cells[choiceCellIndex - 1]))
+}
+
 function applyChoiceMarks(block, decision) {
   const decideMark = label => {
     const negative = /^(?:不合格|不符合)$/.test(label)
@@ -325,7 +345,11 @@ export function applyTemplateChoiceDefaults(documentXml, { sourceText = '' } = {
   const apply = block => {
     const plain = logicalXmlText(block)
     if (!/[□☐☑☒]\s*(?:不合格|不符合|合格|符合)/.test(plain)) return block
-    return applyChoiceMarks(block, sourceChoiceDecision(plain, sourceText))
+    // 备用空白行即使带序号也不是检查记录；待补充/未记录的行同样没有形成
+    // 可下结论的事实，不能因为“默认合格”而自动勾选。
+    const pending = /待补充|待核实|未提供|未记录|不涉及/.test(plain)
+    const decision = pending || !choiceRowHasRecord(block, plain) ? 'blank' : sourceChoiceDecision(plain, sourceText)
+    return applyChoiceMarks(block, decision)
   }
   const xml = String(documentXml || '').replace(/<w:tr\b[^>]*>[\s\S]*?<\/w:tr>/g, apply)
   // 表格外的独立勾选项也使用相同规则；表格块已经按整行处理，不能再按段落

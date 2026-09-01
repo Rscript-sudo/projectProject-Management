@@ -87,6 +87,20 @@ test('用户明确不合格、不涉及或禁止勾选时覆盖选择组默认�
   assert.match(applyTemplateChoiceDefaults(xml, { sourceText: '不要自动勾选' }), /□合格 □不合格/)
 })
 
+test('只有序号或待补充说明的空白检查行不得自动勾选', () => {
+  const emptyRow = '<w:tr><w:tc><w:p><w:r><w:t>2</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t></w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>□合格 □不合格</w:t></w:r></w:p></w:tc></w:tr>'
+  const pendingRow = '<w:tr><w:tc><w:p><w:r><w:t>本项现场检查事实未提供，待补充</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>□合格 □不合格</w:t></w:r></w:p></w:tc></w:tr>'
+  assert.match(applyTemplateChoiceDefaults(emptyRow), /□合格 □不合格/)
+  assert.match(applyTemplateChoiceDefaults(pendingRow), /□合格 □不合格/)
+})
+
+test('固定检查标准不能代替左侧检查记录触发合格勾选', () => {
+  const blankRecord = '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>沟深、宽度</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>埋深及沟底处理应符合设计要求</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t></w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>□合格 □不合格</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
+  const actualRecord = '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>进场器材</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>外观无破损</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>GYTA光缆2000米，外观检查合格</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>□合格 □不合格</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
+  assert.match(applyTemplateChoiceDefaults(blankRecord), /□合格 □不合格/)
+  assert.match(applyTemplateChoiceDefaults(actualRecord), /☑合格 □不合格/)
+})
+
 test('空白表格单元格可按表格坐标写入占位符', async t => {
   const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-template-cell-edit-'))
   t.after(() => fs.rmSync(runtimeDir, { recursive: true, force: true }))

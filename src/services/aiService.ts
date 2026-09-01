@@ -1210,6 +1210,9 @@ export function postProcessTimeFields(
   const day = String(now.getDate()).padStart(2, '0')
   const dateStr = `${year}年${month}月${day}日`
   const dateNum = `${year}${month}${day}`
+  const sourceText = String(context?.sourceText || '')
+  const explicitlyMissingDate = /未提供[^。；\n]*(?:日期|时间)/.test(sourceText)
+  const resolvedDate = explicitlyMissingDate ? '' : dateStr
 
   // ★ 顺序很重要：必须先杀后补，否则 AI 编造的日期刚被替换又被清空 ★
 
@@ -1236,7 +1239,7 @@ export function postProcessTimeFields(
   // 同时兼容用户输入 2026年8月28日、模型输出 2026年08月28日 的格式差异。
   const protectedSourceDates: string[] = []
   const sourceDateKeys = new Set(
-    [...String(context?.sourceText || '').matchAll(/(\d{4})年(\d{1,2})月(\d{1,2})日/g)]
+    [...sourceText.matchAll(/(\d{4})年(\d{1,2})月(\d{1,2})日/g)]
       .map(match => `${match[1]}-${Number(match[2])}-${Number(match[3])}`),
   )
   if (sourceDateKeys.size) {
@@ -1279,13 +1282,13 @@ export function postProcessTimeFields(
   )
 
   // 2. 把 {{CURRENT_DATE}} 统一替换为真实日期
-  result = result.replace(/\{\{CURRENT_DATE\}\}/g, dateStr)
+  result = result.replace(/\{\{CURRENT_DATE\}\}/g, resolvedDate)
 
   // 3. 覆盖常见日期 key 的 AI 生成值（如 【日期】xxx → 【日期】2026年06月22日）
   const timeKeys = ['日期', '巡视日期', '检查日期', '签章日期', '报告日期']
   for (const key of timeKeys) {
     const regex = new RegExp(`【${key}】[^】\\n]+`, 'g')
-    result = result.replace(regex, `【${key}】${dateStr}`)
+    result = result.replace(regex, `【${key}】${resolvedDate}`)
   }
 
   result = result.replace(/__PMS_DATE_RANGE_(\d+)__/g, (_, index) => protectedRanges[Number(index)] || '')

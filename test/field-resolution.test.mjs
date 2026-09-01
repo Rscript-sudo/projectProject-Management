@@ -69,7 +69,7 @@ test('确定性自动字段覆盖未记录占位值且保留来源', () => {
   assert.equal(plan.find(item => item.field === '天气')?.provenance?.source, 'weather-test')
 })
 
-test('事实提取型日期天气不接受自动查询值，缺失字段清空模型猜测', () => {
+test('事实提取型日期天气不接受自动查询值，天气缺失时给出核验提示', () => {
   const pool = buildFactPool('未提供具体日期、天气', {
     autoValues: { 日期: '2026年09月01日', 天气: '小雨' },
   })
@@ -79,7 +79,7 @@ test('事实提取型日期天气不接受自动查询值，缺失字段清空�
   }
   const plan = buildFieldResolutionPlan(['日期', '天气'], { factPool: pool, fieldConfigs: configs })
   assert.deepEqual(plan.map(item => item.status), ['unresolved', 'unresolved'])
-  assert.equal(mergeResolvedFields('【日期】2026年09月01日\n【天气】强毛毛雨', plan), '【日期】\n【天气】')
+  assert.equal(mergeResolvedFields('【日期】2026年09月01日\n【天气】强毛毛雨', plan), '【日期】\n【天气】待补充（需按实际施工日期核验）')
 })
 
 test('复合模板字段守门清除无来源的现场动作和结论并保留可核验事实', () => {
@@ -97,7 +97,9 @@ test('复合模板字段守门清除无来源的现场动作和结论并保留�
   const safe = sanitizeGeneratedFieldsByPlan(model, plan, input)
   assert.match(safe, /【材料进出场情况】本次进场GYTA-48B1\.3光缆2000米。/)
   assert.doesNotMatch(safe, /包装完整|缆身完好|标识清晰|端头封堵|施工组织有序|巡视|未发现|安全防护|建议继续|张三/)
-  assert.match(safe, /【施工过程中存在的问题及汇报处理情况】\n/)
+  assert.match(safe, /【施工过程中存在的问题及汇报处理情况】未提供施工问题及汇报处理事实/)
+  assert.match(safe, /【发现情况】已确认GYTA-48B1\.3光缆2000米，外观检查合格/)
+  assert.match(safe, /【处理意见】后续应围绕当日完成光缆敷设与接续准备工作/)
   assert.match(safe, /【监理工程师签名】$/)
 })
 
@@ -109,7 +111,7 @@ test('字段计划缺失时仍执行用户明确的事实边界', () => {
 【监理工作总结】型号及数量符合报验记录；现场施工作业按计划推进，暂无异常情况；后续应继续关注材料使用与施工质量。`
   const safe = sanitizeGeneratedFieldsByPlan(model, [], input)
   assert.match(safe, /【日期】\s*(?:\n|$)/)
-  assert.match(safe, /【天气】\s*(?:\n|$)/)
+  assert.match(safe, /【天气】待补充（需按实际施工日期核验）/)
   assert.match(safe, /GYTA-48B1\.3光缆2000米/)
   assert.doesNotMatch(safe, /缆体完好|标识清晰|报验记录|按计划推进|暂无异常/)
   assert.match(safe, /后续应继续关注材料使用与施工质量/)
@@ -127,10 +129,92 @@ test('接续准备不能被扩写成已经实施的具体工序', () => {
 
 test('未提供路由和工艺依据时清除设计路由及工艺流程表述', () => {
   const input = '段落名称：A段；当日完成光缆敷设与接续准备工作。'
-  const model = '【施工情况】A段进行光缆敷设与接续准备工作。光缆沿设计路由布放，施工单位按工艺流程开展敷设作业，同步进行接续准备工作。'
+  const model = '【施工情况】A段进行光缆敷设与接续准备工作。光缆沿设计路由布放，施工单位按工艺流程开展敷设作业，同步进行接续准备工作。\n【施工当日完成主要工作量】完成光缆进场验收及路由复测。'
   const safe = sanitizeGeneratedFieldsByPlan(model, [], input)
   assert.match(safe, /A段进行光缆敷设与接续准备工作/)
-  assert.doesNotMatch(safe, /沿设计路由|按工艺流程/)
+  assert.doesNotMatch(safe, /沿设计路由|按工艺流程|路由复测/)
+})
+
+test('自然施工句可填入主要工作量并形成一致的旁站扩写', () => {
+  const input = '检查地点：南宁市青秀区测试路段；段落名称：A段；进场材料：GYTA-48B1.3光缆2000米，外观检查合格；当日完成光缆敷设与接续准备工作。未提供旁站起止时间。'
+  const pool = buildFactPool(input)
+  assert.equal(pool.structured.施工当日完成主要工作量, '当日完成光缆敷设与接续准备工作')
+  assert.equal(pool.structured.旁站监理的部位或工序, 'A段：光缆敷设与接续准备工作')
+  const fields = ['施工当日完成主要工作量', '工程质量检查、试验情况及施工重点、关键部位旁站记录', '安全文明施工记录', '施工情况', '发现情况', '处理意见', '旁站监理的部位或工序', '旁站监理开始时间']
+  const plan = buildFieldResolutionPlan(fields, { factPool: pool })
+  const empty = fields.map(field => `【${field}】`).join('\n')
+  const safe = sanitizeGeneratedFieldsByPlan(mergeResolvedFields(empty, plan), plan, input)
+  assert.match(safe, /【施工当日完成主要工作量】当日完成光缆敷设与接续准备工作/)
+  assert.match(safe, /【工程质量检查、试验情况及施工重点、关键部位旁站记录】已确认GYTA-48B1\.3光缆2000米，外观检查合格/)
+  assert.match(safe, /具体旁站起止时间、现场检查动作及检测数据未提供/)
+  assert.match(safe, /【安全文明施工记录】结合当日完成光缆敷设与接续准备工作特点/)
+  assert.match(safe, /【施工情况】本次施工涉及南宁市青秀区测试路段、A段；当日完成光缆敷设与接续准备工作/)
+  assert.match(safe, /【旁站监理的部位或工序】A段：光缆敷设与接续准备工作/)
+  assert.match(safe, /【旁站监理开始时间】\s*$/)
+})
+
+test('写作指令不作为现场证据且施工主线强制回填用户事实', () => {
+  const input = '检查地点：南宁市青秀区测试路段；段落名称：A段；进场材料：GYTA-48B1.3光缆2000米，外观检查合格；当日完成光缆敷设与接续准备工作。请围绕上述事实保持主线一致，可补充质量、安全和旁站控制要求。'
+  const fields = ['施工当日完成主要工作量', '施工情况', '工程质量检查、试验情况及施工重点、关键部位旁站记录', '安全文明施工记录']
+  const plan = buildFieldResolutionPlan(fields, { factPool: buildFactPool(input) })
+  const model = `【施工当日完成主要工作量】A段光缆路由检测完毕，开展敷设及接续准备工作，包括光缆单盘复测、路由清理、接续位置确认及材料就位。
+【施工情况】光缆已布放至设计路由指定位置，接续作业面已清理。
+【工程质量检查、试验情况及施工重点、关键部位旁站记录】监理已旁站检查弯曲半径及保护落实情况。
+【安全文明施工记录】现场施工人员正确佩戴安全防护用品。`
+  const safe = sanitizeGeneratedFieldsByPlan(model, plan, input)
+
+  assert.match(safe, /【施工当日完成主要工作量】当日完成光缆敷设与接续准备工作/)
+  assert.match(safe, /【施工情况】本次施工涉及南宁市青秀区测试路段、A段；当日完成光缆敷设与接续准备工作/)
+  assert.doesNotMatch(safe, /路由检测|单盘复测|路由清理|位置确认|材料就位|设计路由|作业面已清理|已旁站|正确佩戴/)
+  assert.match(safe, /具体旁站起止时间、现场检查动作及检测数据未提供/)
+  assert.match(safe, /本次现场核查结果待补充/)
+})
+
+test('分类检查记录只用对应事实，其他工序写待补充和控制重点', () => {
+  const input = '进场材料：GYTA-48B1.3光缆2000米，外观检查合格；当日完成光缆敷设与接续准备工作。'
+  const fields = ['进场器材检查记录', '安全检查检查记录', '管道光缆检查记录', '接头安装及固定检查记录']
+  const plan = buildFieldResolutionPlan(fields, { factPool: buildFactPool(input) })
+  const model = fields.map(field => `【${field}】`).join('\n')
+  const safe = sanitizeGeneratedFieldsByPlan(model, plan, input)
+
+  assert.match(safe, /【进场器材检查记录】依据已提供资料记录：GYTA-48B1\.3光缆2000米，外观检查合格/)
+  assert.match(safe, /【安全检查检查记录】未提供本项对应工序的现场检查事实.*作业区域警示、临时用电、个人防护及材料堆放/)
+  assert.match(safe, /【管道光缆检查记录】未提供本项对应工序的现场检查事实.*管孔使用、敷设保护、预留及人手孔内整理/)
+  assert.match(safe, /【接头安装及固定检查记录】未提供本项对应工序的现场检查事实.*接头位置、接续工艺、密封固定及余缆保护/)
+})
+
+test('旧模板错误保存的长文本字段会自动升级为 AI 扩写合同', () => {
+  const configs = buildFieldConfigsFromPrompt({
+    extras: {
+      fieldConfigs: {
+        '工程质量检查、试验情况及施工重点、关键部位旁站记录': {
+          mode: 'ai', semanticType: 'location', fillMode: 'fact-extraction',
+        },
+        安全文明施工记录: {
+          mode: 'ai', semanticType: 'text', fillMode: 'fact-extraction',
+        },
+      },
+    },
+  }, ['工程质量检查、试验情况及施工重点、关键部位旁站记录', '安全文明施工记录'])
+
+  assert.equal(configs['工程质量检查、试验情况及施工重点、关键部位旁站记录'].semanticType, 'narrative')
+  assert.equal(configs['工程质量检查、试验情况及施工重点、关键部位旁站记录'].fillMode, 'ai-expansion')
+  assert.equal(configs.安全文明施工记录.semanticType, 'narrative')
+  assert.equal(configs.安全文明施工记录.fillMode, 'ai-expansion')
+})
+
+test('明确缺少天气时保留待核验提示而不是再次清空', () => {
+  const input = '生成监理日志。未提供具体日期、天气和人员姓名。'
+  const fields = ['日期', '天气', '监理人员']
+  const configs = buildFieldConfigsFromPrompt({}, fields)
+  const pool = buildFactPool(input)
+  const plan = buildFieldResolutionPlan(fields, { fieldConfigs: configs, factPool: pool })
+  const merged = mergeResolvedFields('【日期】2026年09月01日\n【天气】阵雨\n【监理人员】张三', plan)
+  const safe = sanitizeGeneratedFieldsByPlan(merged, plan, input)
+
+  assert.match(safe, /【日期】\s*(?:\n|$)/)
+  assert.match(safe, /【天气】待补充（需按实际施工日期核验）/)
+  assert.match(safe, /【监理人员】\s*(?:\n|$)/)
 })
 
 test('合格事实不能泛化为报验相符或未见异常', () => {
@@ -139,6 +223,40 @@ test('合格事实不能泛化为报验相符或未见异常', () => {
   const safe = sanitizeGeneratedFieldsByPlan(model, [], input)
   assert.doesNotMatch(safe, /报验|相符|未见异常/)
   assert.match(safe, /后续施工应继续关注材料使用情况/)
+})
+
+test('未提供材料细节和测试状态时清除外护套、手续及暂未测试断言', () => {
+  const input = '进场材料：GYTA-48B1.3光缆2000米，外观检查合格；当日完成光缆敷设与接续准备工作。'
+  const model = '【材料进出场情况】GYTA-48B1.3光缆进场2000米，经外观检查，光缆外护套完整，无破损、压扁等缺陷，合格证及出厂检测报告齐全。\n【工程质量检查、试验情况及施工重点、关键部位旁站记录】光缆外护套完好，暂未进行OTDR测试。\n【综合评价及意见】本阶段光缆进场手续齐全。后续应做好测试记录。'
+  const safe = sanitizeGeneratedFieldsByPlan(model, [], input)
+  assert.doesNotMatch(safe, /外护套完整|无破损|压扁|合格证|出厂检测报告|外护套完好|暂未进行|手续齐全/)
+  assert.match(safe, /GYTA-48B1\.3光缆进场2000米，经外观检查/)
+  assert.match(safe, /后续应做好测试记录/)
+})
+
+test('材料有数量不代表已经完成数量核对', () => {
+  const input = '进场材料：GYTA-48B1.3光缆2000米，外观检查合格。'
+  const model = '【材料进出场情况】GYTA-48B1.3光缆进场2000米，经外观检查，数量核对无误。'
+  const safe = sanitizeGeneratedFieldsByPlan(model, [], input)
+  assert.match(safe, /GYTA-48B1\.3光缆进场2000米/)
+  assert.doesNotMatch(safe, /数量核对无误/)
+})
+
+test('写作要求中的主线一致不能作为开工条件和见证动作的事实来源', () => {
+  const input = '进场材料：GYTA-48B1.3光缆2000米，外观检查合格；当日完成光缆敷设与接续准备工作。请保持前后施工主线一致。'
+  const model = '【施工情况】当日完成光缆敷设与接续准备工作，监理工程师对材料进行外观检查见证。\n【综合评价及意见】光缆敷设准备工作满足开工条件。后续应加强成品保护。'
+  const safe = sanitizeGeneratedFieldsByPlan(model, [], input)
+  assert.doesNotMatch(safe, /见证|满足开工条件/)
+  assert.match(safe, /后续应加强成品保护/)
+})
+
+test('建议语气也不能引入用户未提供的技术阈值', () => {
+  const input = '进场材料：GYTA-48B1.3光缆2000米，外观检查合格；当日完成光缆敷设与接续准备工作。'
+  const model = '【综合评价及意见】外观检查合格。建议后续施工中控制弯曲半径不小于15倍缆径；单芯熔接损耗应控制在0.1dB以下；后续应做好接续工艺管控及测试记录。'
+  const safe = sanitizeGeneratedFieldsByPlan(model, [], input)
+  assert.doesNotMatch(safe, /15倍|0\.1dB/)
+  assert.match(safe, /外观检查合格/)
+  assert.match(safe, /后续应做好接续工艺管控及测试记录/)
 })
 
 test('未提供施工单位自检事实时清除自检动作并修复悬空标点', () => {

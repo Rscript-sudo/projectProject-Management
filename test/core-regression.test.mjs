@@ -123,6 +123,15 @@ test('用户明确提供的日期不会被改写成当天', () => {
   assert.match(output, /【送出时间】2026年08月30日/)
 })
 
+test('用户明确说明未提供日期时不得由保存后处理补成当天', () => {
+  const output = postProcessTimeFields(
+    '【日期】2026年09月01日\n【天气】待补充',
+    { sourceText: '生成监理日志。未提供具体日期、天气和人员姓名。' },
+  )
+  assert.match(output, /【日期】\s*(?:\n|$)/)
+  assert.doesNotMatch(output, /2026年09月01日/)
+})
+
 test('周报日期范围保留完整业务周期', () => {
   const input = '【日期范围】2026年8月10日至2026年8月16日\n【周数】33'
   assert.match(postProcessTimeFields(input), /【日期范围】2026年8月10日至2026年8月16日/)
