@@ -125,6 +125,14 @@ test('接续准备不能被扩写成已经实施的具体工序', () => {
   assert.match(safe, /后续应持续关注接续质量/)
 })
 
+test('未提供路由和工艺依据时清除设计路由及工艺流程表述', () => {
+  const input = '段落名称：A段；当日完成光缆敷设与接续准备工作。'
+  const model = '【施工情况】A段进行光缆敷设与接续准备工作。光缆沿设计路由布放，施工单位按工艺流程开展敷设作业，同步进行接续准备工作。'
+  const safe = sanitizeGeneratedFieldsByPlan(model, [], input)
+  assert.match(safe, /A段进行光缆敷设与接续准备工作/)
+  assert.doesNotMatch(safe, /沿设计路由|按工艺流程/)
+})
+
 test('合格事实不能泛化为报验相符或未见异常', () => {
   const input = '进场材料：GYTA-48B1.3光缆2000米，外观检查合格。'
   const model = '【综合评价及意见】本次进场光缆规格、数量与报验资料相符，外观检查未见异常。后续施工应继续关注材料使用情况。'

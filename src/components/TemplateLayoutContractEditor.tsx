@@ -18,6 +18,7 @@ type LayoutContract = {
   warnings?: string[]
   protectedAssets?: Record<string, string>
   fields: Record<string, FieldContract>
+  choiceGroups?: Array<{ id: string; label: string; options: string[]; defaultValue?: string }>
 }
 
 interface Props {
@@ -186,6 +187,7 @@ export default function TemplateLayoutContractEditor({ open, template, onClose, 
       {exceptions.length > 0 && <Alert type="warning" showIcon message={`发现 ${exceptions.length} 项需要关注`} description={<div style={{ maxHeight: 90, overflow: 'auto' }}>{exceptions.slice(0, 12).map(item => <div key={item}>• {item}</div>)}</div>} />}
       <Space wrap>
         <Tag color="cyan">字段 {Object.keys(contract.fields).length}</Tag>
+        <Tag color="purple">选择项 {contract.choiceGroups?.length || 0}</Tag>
         <Tag color="green">受保护资产 {Object.keys(contract.protectedAssets || {}).length}</Tag>
         <Tag>合同 v{contract.schemaVersion}</Tag>
         <Text type="secondary" style={{ fontSize: 12 }}>模板指纹：{contract.templateHash.slice(0, 12)}</Text>

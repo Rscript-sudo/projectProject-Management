@@ -24,6 +24,28 @@ function xmlText(value = '') {
     .replace(/&quot;/g, '"')
 }
 
+export function extractTemplateChoiceGroups(documentXml = '') {
+  const rows = String(documentXml || '').match(/<w:tr\b[^>]*>[\s\S]*?<\/w:tr>/g) || []
+  const withoutRows = String(documentXml || '').replace(/<w:tr\b[^>]*>[\s\S]*?<\/w:tr>/g, '')
+  const blocks = [...rows, ...(withoutRows.match(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g) || [])]
+  const groups = []
+  for (const [index, block] of blocks.entries()) {
+    const plain = xmlText(block).replace(/\s+/g, ' ').trim()
+    const options = [...plain.matchAll(/[□☐☑☒]\s*(不合格|不符合|合格|符合)/g)].map(match => match[1])
+    if (!options.length || !options.some(option => /^(?:合格|符合)$/.test(option))) continue
+    const firstMark = plain.search(/[□☐☑☒]\s*(?:不合格|不符合|合格|符合)/)
+    groups.push({
+      id: `choice-${index}`,
+      kind: 'single-choice',
+      label: plain.slice(Math.max(0, firstMark - 40), firstMark).trim(),
+      options: [...new Set(options)],
+      defaultValue: '合格',
+      source: 'template',
+    })
+  }
+  return groups
+}
+
 function attr(xml, name) {
   return xml.match(new RegExp(`\\b${name}="([^"]+)"`))?.[1]
 }
@@ -88,6 +110,7 @@ export async function extractTemplateLayoutContract(templatePath, { docType = ''
     preserve: { headers: true, footers: true, media: true, tables: true, borders: true, sectionProperties: true },
     defaults: { fieldMode: 'inherit', collapseBlankLines: true },
     fields: {},
+    choiceGroups: [],
     protectedAssets: {},
     warnings: [],
   }
@@ -97,6 +120,7 @@ export async function extractTemplateLayoutContract(templatePath, { docType = ''
     const zip = new PizZip(templateBuffer)
     const documentXml = zip.file('word/document.xml')?.asText() || ''
     contract.protectedAssets = assetManifest(zip)
+    contract.choiceGroups = extractTemplateChoiceGroups(documentXml)
     for (const paragraph of documentXml.match(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g) || []) {
       const plain = xmlText(paragraph)
       const fields = [...plain.matchAll(/\{\{([^{}]{1,80})\}\}/g)].map(match => match[1].trim()).filter(Boolean)

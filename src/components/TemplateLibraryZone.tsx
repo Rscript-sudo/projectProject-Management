@@ -27,7 +27,7 @@ interface Tpl {
   id: string; name: string; docType: string; scope: string; projectType: string
   path: string; sourceName: string; fields?: string[]; readOnly?: boolean; missing?: boolean
   aiRuleConfiguredAt?: string
-  layoutContract?: { status?: string; warningCount?: number; schemaVersion?: number; templateHash?: string }
+  layoutContract?: { status?: string; warningCount?: number; choiceGroupCount?: number; schemaVersion?: number; templateHash?: string }
   customDocTypeCode?: string
   projectTypeLabel?: string
   resourceKind?: 'document' | 'site-package'
@@ -362,6 +362,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
               <Tag color={r.layoutContract.warningCount ? 'orange' : 'cyan'} style={{ margin: 0 }}>版式已识别</Tag>
             </Tooltip>
           )}
+          {!!r.layoutContract?.choiceGroupCount && <Tag color="purple" style={{ margin: 0 }}>选择项 {r.layoutContract.choiceGroupCount}</Tag>}
         </Space>
       },
     },

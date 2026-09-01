@@ -253,6 +253,88 @@ export function collapseAdjacentDuplicatePlaceholders(xml) {
   })
 }
 
+function logicalXmlText(value = '') {
+  return String(value)
+    .replace(/<w:tab\/>/g, '\t')
+    .replace(/<w:br\/>/g, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+}
+
+function sourceChoiceDecision(blockText, sourceText) {
+  const source = String(sourceText || '').replace(/\s+/g, '')
+  if (/不得.{0,8}勾选|不要.{0,8}勾选|勾选项.{0,8}(?:留空|不填)/.test(source)) return 'blank'
+  if (/(?:全部|所有).{0,8}(?:检查项|项目)?.{0,8}(?:不合格|不符合)/.test(source)) return 'negative'
+  if (/(?:全部|所有).{0,8}(?:检查项|项目)?.{0,8}不涉及/.test(source)) return 'blank'
+
+  const row = String(blockText || '').replace(/\s+/g, '')
+  const statements = [...source.matchAll(/([^，,。；;\n]{2,36}?)(不合格|不符合|异常|不涉及)/g)]
+  for (const statement of statements) {
+    const phrase = statement[1].replace(/^(?:其中|另外|但是|但|并且)/, '')
+    const candidates = []
+    for (let length = Math.min(16, phrase.length); length >= 2; length -= 1) candidates.push(phrase.slice(-length))
+    if (!candidates.some(candidate => row.includes(candidate))) continue
+    return statement[2] === '不涉及' ? 'blank' : 'negative'
+  }
+
+  return 'positive'
+}
+
+function applyChoiceMarks(block, decision) {
+  const decideMark = label => {
+    const negative = /^(?:不合格|不符合)$/.test(label)
+    const checked = decision === 'negative' ? negative : decision === 'positive' ? !negative : false
+    return checked ? '☑' : '□'
+  }
+  const source = String(block)
+  const nodes = [...source.matchAll(/(<w:t\b[^>]*>)([\s\S]*?)(<\/w:t>)/g)]
+  if (!nodes.length) return source.replace(/([□☐☑☒])(\s*)(不合格|不符合|合格|符合)/g,
+    (_match, _mark, spacing, label) => `${decideMark(label)}${spacing}${label}`)
+
+  // Word 经常把“□”和“合格”拆到不同 run。先在合并后的可见文本上判断，
+  // 再只改方框所在文本节点，避免依赖 OOXML 的 run 切分方式。
+  const texts = nodes.map(node => node[2]
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'))
+  const logical = texts.join('')
+  const replacements = new Map()
+  for (const match of logical.matchAll(/([□☐☑☒])(\s*)(不合格|不符合|合格|符合)/g)) {
+    replacements.set(match.index, decideMark(match[3]))
+  }
+  if (!replacements.size) return source
+
+  let rebuilt = ''
+  let sourceOffset = 0
+  let logicalOffset = 0
+  nodes.forEach((node, index) => {
+    const start = node.index
+    const end = start + node[0].length
+    const chars = [...texts[index]]
+    const replaced = chars.map((char, offset) => replacements.get(logicalOffset + offset) || char).join('')
+    rebuilt += source.slice(sourceOffset, start)
+      + node[1]
+      + replaced.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      + node[3]
+    sourceOffset = end
+    logicalOffset += chars.length
+  })
+  return rebuilt + source.slice(sourceOffset)
+}
+
+/** 模板中的字符方框是确定性表单控件：默认合格，明确例外才反选或留空。 */
+export function applyTemplateChoiceDefaults(documentXml, { sourceText = '' } = {}) {
+  const apply = block => {
+    const plain = logicalXmlText(block)
+    if (!/[□☐☑☒]\s*(?:不合格|不符合|合格|符合)/.test(plain)) return block
+    return applyChoiceMarks(block, sourceChoiceDecision(plain, sourceText))
+  }
+  const xml = String(documentXml || '').replace(/<w:tr\b[^>]*>[\s\S]*?<\/w:tr>/g, apply)
+  // 表格外的独立勾选项也使用相同规则；表格块已经按整行处理，不能再按段落
+  // 二次处理，否则“某项不合格”的行级判断会被无标签段落的默认值覆盖。
+  return xml.split(/(<w:tbl\b[^>]*>[\s\S]*?<\/w:tbl>)/g).map(part =>
+    /^<w:tbl\b/.test(part) ? part : part.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, apply),
+  ).join('')
+}
+
 /** 读取 DOCX 主文档中的 {{字段}}；项目模板可自由替换，因此字段以文件实际内容为准。 */
 export async function getTemplatePlaceholders(templatePath) {
   try {
@@ -906,8 +988,12 @@ export async function renderTemplate(templatePath, data, options = {}) {
   // 替换占位符
   doc.render(data)
 
+  const renderedZip = doc.getZip()
+  const renderedXml = renderedZip.file('word/document.xml')?.asText() || ''
+  renderedZip.file('word/document.xml', applyTemplateChoiceDefaults(renderedXml, { sourceText: data.subject || '' }))
+
   // 生成输出 buffer
-  const buffer = doc.getZip().generate({
+  const buffer = renderedZip.generate({
     type: 'nodebuffer',
     mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   })

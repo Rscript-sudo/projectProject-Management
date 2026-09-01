@@ -335,7 +335,7 @@ export async function updateTemplateInLibrary(userDataPath, id, { name, sourcePa
     const { getTemplatePlaceholders } = await import('./templateService.mjs')
     entry.fields = await getTemplatePlaceholders(entry.path)
     const layoutContract = await extractTemplateLayoutContract(entry.path, { docType: entry.docType, write: true })
-    entry.layoutContract = { path: getTemplateLayoutContractPath(entry.path), templateHash: layoutContract.templateHash, schemaVersion: layoutContract.schemaVersion, status: 'ready', warningCount: layoutContract.warnings.length }
+    entry.layoutContract = { path: getTemplateLayoutContractPath(entry.path), templateHash: layoutContract.templateHash, schemaVersion: layoutContract.schemaVersion, status: 'ready', warningCount: layoutContract.warnings.length, choiceGroupCount: layoutContract.choiceGroups?.length || 0 }
     entry.sourceName = path.basename(sourcePath)
     // 文件内容已替换，旧模板上的规则确认不能沿用；保留曾配置记录，供界面明确显示“需更新”。
     if (entry.aiRuleConfiguredAt) entry.aiRuleNeedsUpdate = true
@@ -444,6 +444,7 @@ export async function importTemplateToLibrary({ userDataPath, sourcePath, docTyp
       schemaVersion: layoutContract.schemaVersion,
       status: 'ready',
       warningCount: layoutContract.warnings.length,
+      choiceGroupCount: layoutContract.choiceGroups?.length || 0,
     } : undefined,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -465,7 +466,7 @@ export async function refreshTemplateLibraryEntry({ userDataPath, templateId }) 
   entry.fields = await getTemplatePlaceholders(entry.path)
   if (path.extname(entry.path).toLowerCase() === '.docx') {
     const layoutContract = await extractTemplateLayoutContract(entry.path, { docType: entry.docType, write: true })
-    entry.layoutContract = { path: getTemplateLayoutContractPath(entry.path), templateHash: layoutContract.templateHash, schemaVersion: layoutContract.schemaVersion, status: 'ready', warningCount: layoutContract.warnings.length }
+    entry.layoutContract = { path: getTemplateLayoutContractPath(entry.path), templateHash: layoutContract.templateHash, schemaVersion: layoutContract.schemaVersion, status: 'ready', warningCount: layoutContract.warnings.length, choiceGroupCount: layoutContract.choiceGroups?.length || 0 }
   }
   const currentFields = [...entry.fields].sort()
   if (entry.aiRuleConfiguredAt && JSON.stringify(previousFields) !== JSON.stringify(currentFields)) entry.aiRuleNeedsUpdate = true

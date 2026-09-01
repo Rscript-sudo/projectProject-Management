@@ -3,7 +3,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { collapseAdjacentDuplicatePlaceholders, extractDocxPlaceholdersFromXml, getTemplatePlaceholders, saveDocxTemplatePlaceholders } from '../electron/templateService.mjs'
+import { applyTemplateChoiceDefaults, collapseAdjacentDuplicatePlaceholders, extractDocxPlaceholdersFromXml, getTemplatePlaceholders, saveDocxTemplatePlaceholders } from '../electron/templateService.mjs'
+import { extractTemplateChoiceGroups } from '../electron/templateLayoutContract.mjs'
 import { deleteProfessionalCategory, deleteTemplateFromLibrary, importTemplateToLibrary, listTemplateLibrary, markTemplateRuleConfigured, resolveLibraryTemplate, updateTemplateInLibrary } from '../electron/templateRegistry.mjs'
 
 test('模板占位符可新增、删除并真实写回 DOCX', async t => {
@@ -61,6 +62,29 @@ test('相邻重复占位符跨 Word run 也会折叠且不影响其他重复字�
   const firstText = [...paragraphs[0].matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)].map(match => match[1]).join('')
   assert.equal(firstText, '施工地点：{{施工地点}}')
   assert.equal(cleaned.match(/\{\{施工单位\}\}/g)?.length, 2, '不同段落中的同字段必须保留')
+})
+
+test('模板分析识别合格/不合格选择组，渲染默认勾选合格', () => {
+  const xml = '<w:body><w:tbl><w:tr><w:tc><w:p><w:r><w:t>安全检查</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>□合格 □不合格</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body>'
+  const groups = extractTemplateChoiceGroups(xml)
+  assert.equal(groups.length, 1)
+  assert.deepEqual(groups[0].options, ['合格', '不合格'])
+  assert.equal(groups[0].defaultValue, '合格')
+  assert.match(applyTemplateChoiceDefaults(xml), /☑合格 □不合格/)
+})
+
+test('方框与标签被 Word 拆分到不同 run 时仍能正确勾选', () => {
+  const xml = '<w:body><w:tbl><w:tr><w:tc><w:p><w:r><w:t>材料检查</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>□</w:t></w:r><w:r><w:t>合格</w:t></w:r><w:r><w:t> □</w:t></w:r><w:r><w:t>不合格</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body>'
+  const rendered = applyTemplateChoiceDefaults(xml)
+  const plain = rendered.replace(/<[^>]+>/g, '')
+  assert.equal(plain, '材料检查☑合格 □不合格')
+})
+
+test('用户明确不合格、不涉及或禁止勾选时覆盖选择组默认值', () => {
+  const xml = '<w:body><w:tbl><w:tr><w:tc><w:p><w:r><w:t>安全检查</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>□合格 □不合格</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body>'
+  assert.match(applyTemplateChoiceDefaults(xml, { sourceText: '安全检查不合格' }), /□合格 ☑不合格/)
+  assert.match(applyTemplateChoiceDefaults(xml, { sourceText: '安全检查不涉及' }), /□合格 □不合格/)
+  assert.match(applyTemplateChoiceDefaults(xml, { sourceText: '不要自动勾选' }), /□合格 □不合格/)
 })
 
 test('空白表格单元格可按表格坐标写入占位符', async t => {
