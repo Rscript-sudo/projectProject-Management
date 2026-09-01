@@ -50,11 +50,19 @@ type PlaceholderPlacement = {
   rowIndex?: number
   cellIndex?: number
   paragraphIndex?: number
+  block?: boolean
+  repeat?: boolean
+  prefix?: string
+  replaceTail?: boolean
 }
 
 const SYSTEM_FIELDS = ['日期', '日期范围', '周数', '月份', '星期几', '当前时间', '编制日期']
 const EXTERNAL_FIELDS = ['天气', '气温', '温度']
-const HUMAN_SIGNOFF_FIELDS = ['施工单位签名', '监理单位签名', '建设单位签名', '监理单位签章', '施工单位签章', '签名日期']
+const HUMAN_SIGNOFF_FIELDS = [
+  '施工单位签名', '监理单位签名', '建设单位签名', '监理单位签章', '施工单位签章', '签名日期',
+  '监理工程师签名', '旁站监理工程师签字', '监理人员签字', '监理人员', '施工单位负责人',
+  '施工单位现场负责人', '施工项目负责人', '监理工程师', '建设单位代表',
+]
 // 项目通用字段：新建项目时已写入项目基本信息，生成时直接从项目资料读取，不调 AI
 const PROJECT_FIELDS = [
   '项目名称', '工程名称', '项目编号', '文件编号', '编号', '文号',
@@ -101,6 +109,9 @@ function normalizeTemplateFieldConfig(field: string, config: FieldConfig): Field
   }
   if (HUMAN_SIGNOFF_FIELDS.includes(field)) {
     return enrich({ ...config, mode: 'keep', fillMode: 'manual', expansionLevel: 'none', source: '人工签章', requirement: '', required: false, minWords: 0, maxWords: 0, missingInfoPolicy: '留空' })
+  }
+  if (/检查结论$/.test(field)) {
+    return enrich({ ...config, mode: 'keep', fillMode: 'manual', expansionLevel: 'none', source: '人工复核结论', requirement: '必须由现场检查事实和有权人员确认，AI 不得代填合格、不合格或验收结论。', required: false, minWords: 0, maxWords: 0, antiFabrication: true, missingInfoPolicy: '留空' })
   }
   if (field.startsWith('表格行')) {
     const label = field.replace(/^表格行/, '')
@@ -489,10 +500,18 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
   const addField = () => {
     const name = newFieldName.trim().replace(/^\{\{\s*|\s*\}\}$/g, '').trim()
     if (!name) { message.warning('请输入占位符名称'); return }
-    if (fields.includes(name)) { message.warning('该字段已存在'); return }
+    if (fields.includes(name)) {
+      if (inlineAnchor || inlineLocator) {
+        const next = { field: name, anchor: inlineAnchor || undefined, position: 'after' as const, repeat: true, ...(inlineLocator || {}) }
+        setPendingPlacements(prev => [...prev, next])
+        setInlineAnchor(''); setInlineLocator(null); setInlineEditorPosition(null); setInlineExistingField('')
+        message.success(`已为字段「${name}」增加一个同步填写位置`)
+      } else message.warning('该字段已存在；请先在模板中点选另一个位置')
+      return
+    }
     setConfigs(prev => ({ ...prev, [name]: defaultFieldConfig(name) }))
     if (template) setTemplate(prev => prev ? { ...prev, fields: [...(prev.fields || []), name] } : prev)
-    if (inlineAnchor || inlineLocator) setPendingPlacements(prev => [...prev.filter(item => item.field !== name), { field: name, anchor: inlineAnchor || undefined, position: 'after', ...(inlineLocator || {}) }])
+    if (inlineAnchor || inlineLocator) setPendingPlacements(prev => [...prev, { field: name, anchor: inlineAnchor || undefined, position: 'after', ...(inlineLocator || {}) }])
     setDeletedFields(prev => prev.filter(item => item.field !== name))
     setSelectedField(name)
     setNewFieldName('')
@@ -550,6 +569,43 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
         normalizeTemplateFieldSuggestions(deriveTemplateFieldSuggestions(content, html) as unknown as SuggestedField[]),
         html,
       ) as unknown as SuggestedField[]
+      // 确定性结构识别先返回，不能因为外部 AI 慢或不可用让用户卡在空白页。
+      // AI 在后台只增强字段语义和规则，返回后仍保留本地坐标与多位置映射。
+      if (localFields.length) {
+        setRecognitionError('')
+        setSuggestedFields(localFields)
+        setSelectedSuggestions(localFields.map(field => field.name))
+        setAnalyzeOpen(true)
+        setAnalyzing(false)
+        void (async () => {
+          try {
+            const settings = await window.electronAPI.getSettings()
+            const result = await analyzeTemplateStructure(
+              { provider: (settings.aiProvider as any) || 'deepseek', baseUrl: settings.baseUrl || '', model: settings.model || '' },
+              activeItem.label,
+              content,
+              fields,
+              buildTemplateStructureMap(html),
+            )
+            if (!result.success || !result.fields?.length) return
+            const aiFields = reconcileTemplateFieldPlacements(result.fields, html) as SuggestedField[]
+            const aiByName = new Map(aiFields.map(field => [field.name, field]))
+            // 结构坐标只能来自 DOCX/HTML 的确定性解析。AI 可以优化同名字段的
+            // 语义和规则，但不得新增本地未确认的字段，否则很容易把相似表头
+            // （例如多张表里的“检查地点”）写到错误单元格。
+            const enhanced = localFields.map(local => {
+              const semantic = aiByName.get(local.name)
+              return semantic ? { ...local, ...semantic, tableIndex: local.tableIndex, rowIndex: local.rowIndex, cellIndex: local.cellIndex, ...(local as any).placements ? { placements: (local as any).placements } : {} } : local
+            }) as SuggestedField[]
+            setSuggestedFields(enhanced)
+            setSelectedSuggestions(enhanced.map(field => field.name))
+            message.success('本地结构已可用，AI 字段规则已在后台完成增强')
+          } catch {
+            // 本地结构结果已可继续使用；后台增强失败不打断用户。
+          }
+        })()
+        return
+      }
       const settings = await window.electronAPI.getSettings()
       const result = await analyzeTemplateStructure(
         { provider: (settings.aiProvider as any) || 'deepseek', baseUrl: settings.baseUrl || '', model: settings.model || '' },
@@ -558,9 +614,20 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
         fields,
         buildTemplateStructureMap(html),
       )
-      const analyzedFields = result.success && result.fields?.length
+      const aiFields = result.success && result.fields?.length
         ? reconcileTemplateFieldPlacements(result.fields, html) as SuggestedField[]
-        : localFields
+        : []
+      // OOXML/HTML 结构坐标是定位真相源，AI 只补语义名称和字段规则。
+      // 同名字段在复合资料包中可能出现多次，必须保留本地识别出的全部 placements。
+      const aiByName = new Map(aiFields.map(field => [field.name, field]))
+      const localNames = new Set(localFields.map(field => field.name))
+      const analyzedFields = [
+        ...localFields.map(local => {
+          const semantic = aiByName.get(local.name)
+          return semantic ? { ...local, ...semantic, tableIndex: local.tableIndex, rowIndex: local.rowIndex, cellIndex: local.cellIndex, ...(local as any).placements ? { placements: (local as any).placements } : {} } : local
+        }),
+        ...aiFields.filter(field => !localNames.has(field.name)),
+      ] as SuggestedField[]
       if (!analyzedFields.length && !fields.length) throw new Error(result.error || 'AI 未识别出字段')
       const reconciledFields = mergeTemplateAnalysisFields(fields, analyzedFields, field => {
         const currentConfig = configs[field] || defaultFieldConfig(field)
@@ -618,20 +685,31 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
       else newFields.push(f.name)
     }
     setConfigs(nextConfigs)
-    const placements = picked
-      .filter(f => !fields.includes(f.name) && (f.anchorText || [f.tableIndex, f.rowIndex, f.cellIndex].every(Number.isInteger)))
-      .map(f => ({
-        field: f.name,
-        anchor: f.anchorText.trim(),
-        position: (f.insertPosition === 'before' ? 'before' : f.insertPosition === 'replace' ? 'replace' : 'after') as 'before' | 'after' | 'replace',
-        tableIndex: f.tableIndex,
-        rowIndex: f.rowIndex,
-        cellIndex: f.cellIndex,
-      }))
-    setPendingPlacements(prev => [
-      ...prev.filter(item => !placements.some(next => next.field === item.field)),
-      ...placements,
-    ])
+    const placements = picked.flatMap(f => {
+      const rawPlacements = Array.isArray((f as any).placements) && (f as any).placements.length
+        ? (f as any).placements
+        : [f]
+      return rawPlacements
+        .filter((placement: any) => placement.anchorText || [placement.tableIndex, placement.rowIndex, placement.cellIndex].every(Number.isInteger))
+        .map((placement: any, placementIndex: number) => ({
+          field: f.name,
+          anchor: String(placement.anchorText || '').trim(),
+          position: (placement.insertPosition === 'before' ? 'before' : placement.insertPosition === 'replace' ? 'replace' : 'after') as 'before' | 'after' | 'replace',
+          tableIndex: placement.tableIndex,
+          rowIndex: placement.rowIndex,
+          cellIndex: placement.cellIndex,
+          paragraphIndex: placement.paragraphIndex,
+          block: placement.block === true,
+          repeat: placementIndex > 0,
+          prefix: placement.prefix,
+          replaceTail: placement.replaceTail === true,
+        }))
+    })
+    const placementKey = (item: PlaceholderPlacement) => `${item.field}:${item.tableIndex ?? ''}:${item.rowIndex ?? ''}:${item.cellIndex ?? ''}:${item.paragraphIndex ?? ''}:${item.anchor || ''}`
+    setPendingPlacements(prev => {
+      const merged = [...prev, ...placements]
+      return merged.filter((item, index) => merged.findIndex(candidate => placementKey(candidate) === placementKey(item)) === index)
+    })
     // 纯文本预览同步插入，HTML 预览由 pendingPlacements 统一绘制可点击标记。
     let insertedCount = 0
     setTemplate(prev => {

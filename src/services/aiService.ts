@@ -915,7 +915,7 @@ export async function analyzeTemplateStructure(
 
   const messages = [
     { role: 'system', content: systemMsg },
-    { role: 'user', content: `文种：${docType}${existingBlock}\n\n模板线性文本（仅用于理解语义，不能据此覆盖表头）：\n${templateContent.slice(0, 5000)}\n\n压缩表格结构坐标图（定位真相源）：\n${structureMap.slice(0, 8000) || '未提供'}` },
+    { role: 'user', content: `文种：${docType}${existingBlock}\n\n模板线性文本（仅用于理解语义，不能据此覆盖表头；复合资料包需逐个子表单分析）：\n${templateContent.slice(0, 16000)}\n\n压缩表格结构坐标图（定位真相源）：\n${structureMap.slice(0, 24000) || '未提供'}` },
   ]
 
   const result = await callAI(config, messages)

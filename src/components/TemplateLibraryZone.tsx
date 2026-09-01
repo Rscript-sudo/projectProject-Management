@@ -10,6 +10,7 @@ import { getAllProjectTypes } from '../shared/projectProfile.mjs'
 import { BUILTIN_DOC_TYPES } from '../shared/builtinDocTypes'
 import { getTemplateStatus, TEMPLATE_STATUS } from '../shared/templateReadiness.mjs'
 import TemplateLayoutContractEditor from './TemplateLayoutContractEditor'
+import { inferTemplateDocumentType } from '../shared/templateStructureMap.mjs'
 
 const { Text } = Typography
 
@@ -38,7 +39,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
   const [templates, setTemplates] = useState<Tpl[]>([])
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
-  const [importDocType, setImportDocType] = useState('监理日志')
+  const [importDocType, setImportDocType] = useState('')
   const [hiddenSystemTemplateIds, setHiddenSystemTemplateIds] = useState<string[]>([])
   const [hiddenCommonDocTypes, setHiddenCommonDocTypes] = useState<string[]>([])
   const [addTypeOpen, setAddTypeOpen] = useState(false)
@@ -137,21 +138,16 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
   }
 
   const handleImport = async () => {
-    const requestedDocType = importDocType.trim()
-    if (!requestedDocType) { message.warning('请输入或选择文种'); return }
     const files = await window.electronAPI.selectTemplateFiles()
     if (!files || files.length === 0) return
-    if (resourceKind === 'site-package' && files.length > 1) {
-      message.warning('站点资料包请按文种逐份添加，每次选择一个 DOCX 或 XLSX 表单')
-      return
-    }
     setImporting(true)
     try {
-      // 不限定内置文种：用户输入新名称时自动创建自定义文种，再导入模板。
-      if (!allDocTypes.includes(requestedDocType)) {
+      const ensureCustomDocType = async (requestedDocType: string) => {
+        if (allDocTypes.includes(requestedDocType)) return
         const settings = await window.electronAPI.getSettings()
+        if ((settings.customDocTypes || []).some((item: any) => item.label === requestedDocType)) return
         const stamp = Date.now().toString(36)
-        const customDocTypes = [...(settings.customDocTypes || []), {
+        const nextCustomDocTypes = [...(settings.customDocTypes || []), {
           code: `custom_${stamp}`,
           label: requestedDocType,
           fileCode: `ZD${stamp.slice(-6).toUpperCase()}`,
@@ -161,7 +157,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         }]
-        const saved = await window.electronAPI.setSettings({ ...settings, customDocTypes })
+        const saved = await window.electronAPI.setSettings({ ...settings, customDocTypes: nextCustomDocTypes })
         if (!saved?.success) throw new Error(saved?.error || '创建自定义文种失败')
         await useSettingsStore.getState().loadCustomTypes()
       }
@@ -169,6 +165,14 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
       let firstPendingTemplate: Tpl | null = null
       for (const f of files) {
         if (!/\.(docx|xlsx)$/i.test(f)) throw new Error(`不支持的模板格式：${f.split(/[\\/]/).pop()}。请使用 .docx 或 .xlsx 文件`)
+        let requestedDocType = importDocType.trim()
+        if (!requestedDocType) {
+          const parsed = await window.electronAPI.readFileContent(f)
+          const inferred = inferTemplateDocumentType(parsed?.content || '', f.split(/[\\/]/).pop() || '', { sitePackage: resourceKind === 'site-package' })
+          requestedDocType = inferred.docType
+          if (inferred.compound) message.info(`已识别为复合资料包：${inferred.forms.join('、')}`)
+        }
+        await ensureCustomDocType(requestedDocType)
         const imported = await doImport(f, requestedDocType)
         if (!imported?.id || !imported?.path) throw new Error(`模板未写入模板库：${f.split(/[\\/]/).pop()}`)
         if (!imported?.fields?.length && !firstPendingTemplate) firstPendingTemplate = imported
@@ -182,7 +186,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
       }
       setImporting(false)
       await load()
-      if (firstPendingTemplate && onGoRules) onGoRules(requestedDocType, firstPendingTemplate.id)
+      if (firstPendingTemplate && onGoRules) onGoRules(firstPendingTemplate.docType, firstPendingTemplate.id)
     } catch (e: any) {
       setImporting(false)
       message.error('导入失败：' + (e?.message || '未知错误'))
@@ -429,7 +433,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
           style={{ width: 220 }}
           options={allDocTypes.map(d => ({ value: d, label: d }))}
           filterOption={(input, option) => String(option?.value || '').toLowerCase().includes(input.toLowerCase())}
-          placeholder="输入或选择文种"
+          placeholder="自动识别文种，也可手动指定"
         />
         <Button type="primary" icon={<InboxOutlined />} loading={importing} onClick={handleImport}>{resourceKind === 'site-package' ? '添加资料包表单' : '添加模板'}</Button>
         {(scope === 'professional' || scope === 'other' || scope === 'personal') && projectType && <Text type="secondary">导入到文件夹：{projectType}</Text>}
@@ -448,7 +452,7 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
           type="info" showIcon
           style={{ marginBottom: 12 }}
           message="站点资料包按当前工程专业管理"
-          description="每次选择一个文种并添加对应 DOCX/XLSX 表单；可重复添加不同文种。完成占位符和 AI 扩写规则后，该表单会出现在项目的“站点资料包”分组中。"
+          description="先选择 DOCX/XLSX，系统自动识别单表或复合资料包；也可在上方手动指定名称。复合资料包保留为一个文件，可一次生成全部子表单。"
         />
       )}
       {(scope === 'professional' || scope === 'personal' || scope === 'other') && <Text type="secondary" style={{ display: 'block', marginBottom: 10 }}>提示：右击任意模板可打开操作菜单；删除会移到系统废纸篓，可恢复。</Text>}

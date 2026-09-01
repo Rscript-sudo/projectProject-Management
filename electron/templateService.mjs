@@ -290,13 +290,19 @@ export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [
     return replaceIndexedBlock(source, /<w:tbl\b[\s\S]*?<\/w:tbl>/g, placement.tableIndex, tableXml => {
       return replaceIndexedBlock(tableXml, /<w:tr\b[\s\S]*?<\/w:tr>/g, placement.rowIndex, rowXml => {
         return replaceIndexedBlock(rowXml, /<w:tc\b[\s\S]*?<\/w:tc>/g, placement.cellIndex, cellXml => {
+          if (cellXml.includes(token)) return cellXml
           const run = `<w:r><w:t xml:space="preserve">${token}</w:t></w:r>`
           if (placement.position === 'replace') {
             return cellXml.replace(/<w:p\b([^>]*)>([\s\S]*?)<\/w:p>/, (_paragraph, attrs, inner) => {
               const paragraphProps = inner.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/)?.[0] || ''
-              return `<w:p${attrs}>${paragraphProps}${run}</w:p>`
+              const prefix = String(placement.prefix || '').replace(/[&<>\"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' })[ch])
+              const prefixRun = prefix ? `<w:r><w:t xml:space="preserve">${prefix}</w:t></w:r>` : ''
+              return `<w:p${attrs}>${paragraphProps}${prefixRun}${run}</w:p>`
             })
           }
+          // 长文本区必须使用独立段落，不能把多段正文塞进标签文字所在的 run。
+          // docxtemplater(linebreaks=true) 会在该段内保留换行，表格行高由 Word 自动扩展。
+          if (placement.block === true) return cellXml.replace('</w:tc>', `<w:p>${run}</w:p></w:tc>`)
           if (cellXml.includes('</w:p>')) return cellXml.replace('</w:p>', `${run}</w:p>`)
           return cellXml.replace('</w:tc>', `<w:p>${run}</w:p></w:tc>`)
         }).value
@@ -310,10 +316,33 @@ export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [
       return paragraphXml.replace('</w:p>', `${run}</w:p>`)
     })
   }
+  const decodeXmlText = value => String(value || '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+  const insertAtAnchorParagraph = (source, placement, token, anchor) => {
+    if (!anchor) return { value: source, changed: false }
+    const matches = [...source.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)]
+    const normalizedAnchor = anchor.replace(/：/g, ':').replace(/\s+/g, '')
+    const match = matches.find(candidate => {
+      if (candidate[0].includes(token)) return false
+      const logical = [...candidate[0].matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)].map(item => decodeXmlText(item[1])).join('').replace(/：/g, ':').replace(/\s+/g, '')
+      return logical.includes(normalizedAnchor)
+    })
+    if (!match || match.index == null) return { value: source, changed: false }
+    let replacement
+    if (placement.replaceTail === true) {
+      const attrs = match[0].match(/^<w:p\b([^>]*)>/)?.[1] || ''
+      const props = match[0].match(/<w:pPr\b[\s\S]*?<\/w:pPr>/)?.[0] || ''
+      const prefix = anchor.replace(/[&<>\"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' })[ch])
+      replacement = `<w:p${attrs}>${props}<w:r><w:t xml:space="preserve">${prefix}</w:t></w:r><w:r><w:t xml:space="preserve">${token}</w:t></w:r></w:p>`
+    } else {
+      replacement = match[0].replace('</w:p>', `<w:r><w:t xml:space="preserve">${token}</w:t></w:r></w:p>`)
+    }
+    return { value: source.slice(0, match.index) + replacement + source.slice(match.index + match[0].length), changed: true }
+  }
   for (const placement of placements) {
     const name = String(placement?.field || '').trim()
     const anchor = String(placement?.anchor || '').trim()
-    if (!name || existingFields.has(name)) continue
+    if (!name || (existingFields.has(name) && placement.repeat !== true)) continue
     const escapedName = name.replace(/[&<>\"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' })[ch])
     const insertion = `{{${escapedName}}}`
     const cellResult = insertAtTableCell(xml, placement, insertion)
@@ -332,6 +361,25 @@ export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [
     }
     if (anchor) {
       const escapedAnchor = anchor.replace(/[&<>\"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' })[ch])
+      const exactIndex = placement.replaceTail !== true && placement.repeat !== true ? xml.indexOf(escapedAnchor) : -1
+      if (exactIndex >= 0) {
+        if (placement.position === 'replace') {
+          xml = xml.slice(0, exactIndex) + insertion + xml.slice(exactIndex + escapedAnchor.length)
+        } else {
+          const at = placement.position === 'before' ? exactIndex : exactIndex + escapedAnchor.length
+          xml = xml.slice(0, at) + insertion + xml.slice(at)
+        }
+        placed.add(name)
+        existingFields.add(name)
+        continue
+      }
+      const logicalParagraphResult = insertAtAnchorParagraph(xml, placement, insertion, anchor)
+      if (logicalParagraphResult.changed) {
+        xml = logicalParagraphResult.value
+        placed.add(name)
+        existingFields.add(name)
+        continue
+      }
       const index = xml.indexOf(escapedAnchor)
       if (index < 0) continue
       if (placement.position === 'replace') {

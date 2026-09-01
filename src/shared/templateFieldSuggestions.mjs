@@ -11,14 +11,14 @@ const AUTO_PROJECT_FIELDS = new Set([
   '总监理工程师', '总监姓名', '总监理', '项目类型', '工程类型',
 ])
 
-const FIELD_NAME_CUE_RE = /项目|工程|单位|名称|编号|日期|时间|天气|气温|地点|位置|部位|区域|区段|段落|人员|姓名|负责人|材料|设备|规格|型号|数量|工程量|方法|方式|结果|结论|意见|情况|记录|内容|说明|措施|问题|计划|备注|签字|签章|范围|金额|工期/
+const FIELD_NAME_CUE_RE = /项目|工程|单位|名称|编号|日期|时间|天气|气温|地点|位置|部位|区域|区段|段落|人员|姓名|负责人|材料|设备|规格|型号|数量|工程量|工作量|方法|方式|结果|结论|意见|情况|记录|内容|说明|措施|问题|计划|备注|签字|签章|范围|金额|工期/
 const SENTENCE_FRAGMENT_RE = /[，,。；;]|(?:符合|参照|满足|采用|应当|应该|并且|并|不得|牢固|完整|明晰|夯实|外径|设计要求|规范要求|相关要求|为准)$/
 const MEASUREMENT_FRAGMENT_RE = /\d+(?:\.\d+)?\s*(?:mm|cm|m|米|毫米|厘米|%|×|\*)/i
 const FACT_FIELD_RE = /名称|编号|单位|日期|时间|天气|气温|地点|位置|部位|区域|区段|段落|人员|姓名|负责人|材料|设备|规格|型号|数量|工程量|金额|工期|电话|地址/
 
 export function isPlausibleTemplateFieldName(value = '') {
   const name = String(value || '').trim()
-  if (!/^[\u4e00-\u9fa5A-Za-z0-9（）()、/-]{2,18}$/.test(name)) return false
+  if (!/^[\u4e00-\u9fa5A-Za-z0-9（）()、/-]{2,32}$/.test(name)) return false
   if (!FIELD_NAME_CUE_RE.test(name)) return false
   if (SENTENCE_FRAGMENT_RE.test(name) || MEASUREMENT_FRAGMENT_RE.test(name)) return false
   return true

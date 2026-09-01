@@ -18,4 +18,5 @@ export function extractTemplateTableStructure(html?: string): Array<{
 
 export function buildTemplateStructureMap(html?: string): string
 export function deriveTemplateFieldSuggestions(content?: string, html?: string): Array<Record<string, unknown>>
+export function inferTemplateDocumentType(content?: string, filename?: string, options?: { sitePackage?: boolean }): { docType: string; compound: boolean; forms: string[] }
 export function reconcileTemplateFieldPlacements<T>(fields?: T[], html?: string): T[]
