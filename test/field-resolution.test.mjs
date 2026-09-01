@@ -133,6 +133,14 @@ test('合格事实不能泛化为报验相符或未见异常', () => {
   assert.match(safe, /后续施工应继续关注材料使用情况/)
 })
 
+test('未提供施工单位自检事实时清除自检动作并修复悬空标点', () => {
+  const input = '进场材料：GYTA-48B1.3光缆2000米，外观检查合格；当日完成光缆敷设与接续准备工作。'
+  const model = '【施工情况】本段当日完成光缆敷设与接续准备工作。光缆已由施工单位自检进场，外观检查合格，'
+  const safe = sanitizeGeneratedFieldsByPlan(model, [], input)
+  assert.doesNotMatch(safe, /自检/)
+  assert.match(safe, /外观检查合格。$/)
+})
+
 test('明确无其他检查事实时高风险栏目只保留未来建议', () => {
   const input = '进场材料：GYTA-48B1.3光缆2000米，外观检查合格。未提供其他检查事实。'
   const model = '【综合评价及意见】经检查未见缆皮破损、端头密封完好、印字清晰，工序推进处于可控状态。监理将持续关注后续接续质量。\n【发现情况】现场未见异常。'

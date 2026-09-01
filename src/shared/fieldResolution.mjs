@@ -303,6 +303,7 @@ const UNSUPPORTED_CLAIM_RULES = [
   { claim: /巡视|巡查/, source: /巡视|巡查/ },
   { claim: /旁站/, source: /旁站/ },
   { claim: /核查|核验/, source: /核查|核验/ },
+  { claim: /自检|复核|送检|见证取样/, source: /自检|复核|送检|见证取样/ },
   { claim: /施工组织|有序|按计划|施工方案/, source: /施工组织|有序|计划|施工方案/ },
   { claim: /安全|风险|隐患|防护|临电|围挡|警示|劳保|交底/, source: /安全|风险|隐患|防护|临电|围挡|警示|劳保|交底/ },
   { claim: /未发现|暂无异常|无异常|未发生|无需专项|不存在/, source: /未发现|暂无异常|无异常|未发生|无需专项|不存在/ },
@@ -338,7 +339,11 @@ function filterUnsupportedSentences(value, source) {
     const unsupported = !recommendation && UNSUPPORTED_CLAIM_RULES.some(rule => rule.claim.test(clause) && !rule.source.test(source))
     if (!unsupported) kept.push(`${clause}${delimiter}`)
   }
-  return kept.join('').replace(/[，,]{2,}/g, '，').replace(/[，,]+([。！？；;])/g, '$1').trim()
+  return kept.join('')
+    .replace(/[，,]{2,}/g, '，')
+    .replace(/[，,]+([。！？；;])/g, '$1')
+    .replace(/[，,；;]+$/, '。')
+    .trim()
 }
 
 function keepRecommendationsOnly(value) {

@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { extractDocxPlaceholdersFromXml, getTemplatePlaceholders, saveDocxTemplatePlaceholders } from '../electron/templateService.mjs'
+import { collapseAdjacentDuplicatePlaceholders, extractDocxPlaceholdersFromXml, getTemplatePlaceholders, saveDocxTemplatePlaceholders } from '../electron/templateService.mjs'
 import { deleteProfessionalCategory, deleteTemplateFromLibrary, importTemplateToLibrary, listTemplateLibrary, markTemplateRuleConfigured, resolveLibraryTemplate, updateTemplateInLibrary } from '../electron/templateRegistry.mjs'
 
 test('模板占位符可新增、删除并真实写回 DOCX', async t => {
@@ -52,6 +52,15 @@ test('Word 跨文本片段占位符不会被误判为缺失并重复写入', asy
   const savedXml = new PizZip(fs.readFileSync(target)).file(xmlPath).asText()
   const logicalText = [...savedXml.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)].map(match => match[1]).join('')
   assert.equal(logicalText.match(/\{\{天气\}\}/g)?.length, 1)
+})
+
+test('相邻重复占位符跨 Word run 也会折叠且不影响其他重复字段', () => {
+  const xml = '<w:body><w:p><w:r><w:t>施工地点：{{施工地点}}</w:t></w:r><w:r><w:t>{{施工地点}}</w:t></w:r></w:p><w:p><w:r><w:t>{{施工单位}}</w:t></w:r></w:p><w:p><w:r><w:t>{{施工单位}}</w:t></w:r></w:p></w:body>'
+  const cleaned = collapseAdjacentDuplicatePlaceholders(xml)
+  const paragraphs = cleaned.match(/<w:p\b[\s\S]*?<\/w:p>/g) || []
+  const firstText = [...paragraphs[0].matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)].map(match => match[1]).join('')
+  assert.equal(firstText, '施工地点：{{施工地点}}')
+  assert.equal(cleaned.match(/\{\{施工单位\}\}/g)?.length, 2, '不同段落中的同字段必须保留')
 })
 
 test('空白表格单元格可按表格坐标写入占位符', async t => {

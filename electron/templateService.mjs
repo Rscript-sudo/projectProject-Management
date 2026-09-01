@@ -212,6 +212,47 @@ export function extractDocxPlaceholdersFromXml(xml) {
   return [...new Set(fields.filter(Boolean))]
 }
 
+/**
+ * 折叠同一段落内紧邻的重复占位符。
+ *
+ * 自动分析可能为同一个锚点返回多条候选位置；重复保存时也可能再次命中原位置。
+ * 这里按 Word 段落的逻辑文本处理，因此占位符即使跨多个 w:t run，也能保持幂等。
+ */
+export function collapseAdjacentDuplicatePlaceholders(xml) {
+  return String(xml || '').replace(/<w:p\b[\s\S]*?<\/w:p>/g, paragraph => {
+    const nodes = [...paragraph.matchAll(/(<w:t\b[^>]*>)([\s\S]*?)(<\/w:t>)/g)]
+    if (!nodes.length) return paragraph
+    const decoded = nodes.map(node => decodeXmlText(node[2]))
+    const logical = decoded.join('')
+    const removals = []
+    for (const match of logical.matchAll(/(\{\{([^{}]{1,80})\}\})(?:\1)+/g)) {
+      removals.push([match.index + match[1].length, match.index + match[0].length])
+    }
+    if (!removals.length) return paragraph
+
+    let logicalOffset = 0
+    let rebuilt = ''
+    let sourceOffset = 0
+    for (let index = 0; index < nodes.length; index += 1) {
+      const node = nodes[index]
+      const start = node.index
+      const end = start + node[0].length
+      const text = decoded[index]
+      const kept = text.split('').filter((_, charIndex) => {
+        const position = logicalOffset + charIndex
+        return !removals.some(([from, to]) => position >= from && position < to)
+      }).join('')
+      rebuilt += paragraph.slice(sourceOffset, start)
+        + node[1]
+        + kept.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        + node[3]
+      sourceOffset = end
+      logicalOffset += text.length
+    }
+    return rebuilt + paragraph.slice(sourceOffset)
+  })
+}
+
 /** 读取 DOCX 主文档中的 {{字段}}；项目模板可自由替换，因此字段以文件实际内容为准。 */
 export async function getTemplatePlaceholders(templatePath) {
   try {
@@ -251,6 +292,9 @@ export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [
   const docXmlPath = 'word/document.xml'
   let xml = zip.file(docXmlPath)?.asText()
   if (!xml) throw new Error('模板文件格式异常：未找到 word/document.xml')
+
+  // 修复历史版本可能已经写入的相邻重复占位符，并保证再次分析/保存仍然幂等。
+  xml = collapseAdjacentDuplicatePlaceholders(xml)
 
   // Idempotency guard: a split-run placeholder is still an existing field.
   // Do not insert it again merely because its raw token is not contiguous XML.
@@ -409,6 +453,8 @@ export async function saveDocxTemplatePlaceholders(templatePath, { addFields = [
       xml += paragraphs
     }
   }
+
+  xml = collapseAdjacentDuplicatePlaceholders(xml)
 
   // 4. 写回 zip
   zip.file(docXmlPath, xml)
@@ -644,10 +690,10 @@ function parseSections(content, knownKeys = new Set()) {
     const nextField = markers.slice(index + 1).find(item => knownKeys.has(item[1].trim()))
     const valueEnd = nextField ? nextField.index : String(content).length
     let value = String(content).slice(match.index + match[0].length, valueEnd).trim()
-    if (key && value) {
+    if (key) {
       // v1.2.4（2026-06-29）：循环剥前缀（事由：：xxx → 事由：xxx → xxx）
       // 老板反馈 v1.2.3 的单次 regex 剥不干净，剩"：xxx"
-      value = sanitizeFieldValue(value)
+      value = value ? sanitizeFieldValue(value) : ''
       result[key] = value
     }
   }
@@ -762,8 +808,9 @@ export function buildPlaceholderData({
   for (const [key, value] of Object.entries(sections)) {
     const stdKey = resolveKey(key)
     // 项目元数据由系统真相源回填，不能被模型输出的“待确认”等占位话术覆盖。
-    // 私人模板同样遵循此规则，避免工程名称、编号和日期被 AI 降级为不确定值。
-    if (stdKey && new Set(['projectName', 'fileNumber', 'date']).has(stdKey)) continue
+    // 日期例外：结构化输出中的显式空【日期】表示用户要求留空，必须覆盖系统当天默认值。
+    // 仅项目名称和编号始终由系统真相源保护。
+    if (stdKey && new Set(['projectName', 'fileNumber']).has(stdKey)) continue
     const aliases = stdKey ? (FIELD_ALIASES[stdKey] || [key]) : [key]
     const fieldContract = layoutContract?.fields?.[key]
       || aliases.map(alias => layoutContract?.fields?.[alias]).find(Boolean)
