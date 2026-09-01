@@ -15,7 +15,7 @@ import { getTemplateStatusBadge, isTemplateReady } from '../shared/templateReadi
 import { buildTemplateResourceGroups, matchesCurrentProfessionalTemplate } from '../shared/templateResources.mjs'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { normalizeStructuredDocument } from '../shared/structuredGeneration'
-import { buildFactPool, buildFieldConfigsFromPrompt, buildFieldResolutionPlan, formatResolutionContext, getPendingFieldPlan, mergeResolvedFields, retainTemplateFields, setStructuredFieldValue, updateFieldPlanValue } from '../shared/fieldResolution.mjs'
+import { buildFactPool, buildFieldConfigsFromPrompt, buildFieldResolutionPlan, formatResolutionContext, getPendingFieldPlan, mergeResolvedFields, retainTemplateFields, sanitizeGeneratedFieldsByPlan, setStructuredFieldValue, updateFieldPlanValue } from '../shared/fieldResolution.mjs'
 import { getDefaultPrompts, mergeDocTypePrompt } from '../shared/docTypePrompts'
 import type { SessionMode } from '../services/aiService'
 import DirTree from '../components/DirTree'
@@ -913,8 +913,13 @@ export default function ProjectView() {
               fields: templateFields,
             })
             if (automatic.warnings?.length) message.info(`自动取数提示：${automatic.warnings.join('；')}`, 5)
-            const promptOverrides = useSettingsStore.getState().docTypePromptOverrides || {}
-            const promptKey = Object.keys(promptOverrides).find(key => key === docType || promptOverrides[key]?.key === docType)
+            const settingsState = useSettingsStore.getState()
+            const promptOverrides = settingsState.docTypePromptOverrides || {}
+            // 自定义文种规则按 code 保存，而生成态拿到的是 label。只按 label 查找会
+            // 丢失刚在模板中心保存的字段合同，日期/天气随即退回系统自动取数。
+            const customPromptCode = settingsState.customDocTypes.find(item => item.label === docType)?.code
+            const promptKey = [docType, customPromptCode, ...Object.keys(promptOverrides).filter(key => promptOverrides[key]?.key === docType)]
+              .find(key => Boolean(key && promptOverrides[key]))
             const defaults = getDefaultPrompts().docTypes[docType || '']
             const effectivePrompt = defaults
               ? mergeDocTypePrompt(defaults, promptKey ? promptOverrides[promptKey] : undefined)
@@ -1019,6 +1024,7 @@ export default function ProjectView() {
         })
         accumulated = mainSanitized.content
         accumulated = mergeResolvedFields(accumulated, generationFieldPlan)
+        accumulated = sanitizeGeneratedFieldsByPlan(accumulated, generationFieldPlan, trimmedInput)
         accumulated = retainTemplateFields(accumulated, generationTemplateFields)
         if (mainSanitized.warnings.length > 0) {
           message.warning(`⚠️ ${mainSanitized.warnings.join('；')}，已替换为占位符请补充`, 5)
@@ -1072,6 +1078,7 @@ export default function ProjectView() {
                 })
                 accumulated = finalResult.content
                 accumulated = mergeResolvedFields(accumulated, generationFieldPlan)
+                accumulated = sanitizeGeneratedFieldsByPlan(accumulated, generationFieldPlan, trimmedInput)
                 accumulated = retainTemplateFields(accumulated, generationTemplateFields)
                 setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: accumulated } : m))
               }
@@ -1153,6 +1160,7 @@ export default function ProjectView() {
       })
       let aiContent = nonStreamSanitized.content
       aiContent = mergeResolvedFields(aiContent, generationFieldPlan)
+      aiContent = sanitizeGeneratedFieldsByPlan(aiContent, generationFieldPlan, trimmedInput)
       aiContent = retainTemplateFields(aiContent, generationTemplateFields)
       if (nonStreamSanitized.warnings.length > 0) {
         message.warning(`⚠️ ${nonStreamSanitized.warnings.join('；')}，已替换为占位符请补充`, 5)

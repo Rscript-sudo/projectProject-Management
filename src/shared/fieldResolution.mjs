@@ -140,6 +140,40 @@ export function buildFactPool(input = '', { project = {}, autoValues = {}, prove
     const value = String(match[2] || '').trim()
     if (key && value) structured[key] = value
   }
+  // 用户通常会一次性输入“检查地点：…；段落名称：…；进场材料：…”，
+  // 而不是逐个填写【字段】。把这类常见标签解析成模板真相源，并同步到
+  // 复合资料包的表格字段，避免事实只出现在长段落、对应单元格却为空。
+  const inlineFacts = {}
+  for (const match of rawInput.matchAll(/(?:^|[。；;\n])\s*([^：:；;。\n]{1,24})[:：]\s*([^；;。\n]+)/g)) {
+    const key = normalizeFieldName(match[1])
+    const value = String(match[2] || '').trim()
+    if (key && value) inlineFacts[key] = value
+  }
+  const firstFact = (...keys) => keys.map(key => inlineFacts[key] || structured[key]).find(Boolean) || ''
+  const location = firstFact('检查地点', '施工地点', '工程地点')
+  const section = firstFact('段落名称', '施工段落')
+  const contractor = firstFact('施工单位', '承建单位')
+  const material = firstFact('进场材料', '材料')
+  const completedWork = firstFact('当日完成', '当日工作', '施工情况')
+  if (location) Object.assign(structured, { 检查地点: location, 施工地点: location, 工程地点: location, 表格行检查地点: location })
+  if (section) structured.段落名称 = section
+  if (contractor) structured.施工单位 = contractor
+  if (material) {
+    const materialName = material.match(/([A-Za-z0-9.-]+\s*(?:型)?(?:光缆|电缆|设备|材料)?)/)?.[1]?.trim() || material.split(/[，,]/)[0].trim()
+    const amount = material.match(new RegExp(`\\d+(?:\\.\\d+)?\\s*${UNIT_RE.source}`))?.[0] || ''
+    const method = material.match(/(?:外观|抽样|见证|平行|开箱|实测)[^，,]{0,8}(?:检查|检验|检测|验收)/)?.[0] || ''
+    const opinion = /不合格/.test(material) ? '不合格' : /合格/.test(material) ? '合格' : ''
+    Object.assign(structured, {
+      材料: material,
+      材料进出场情况: material,
+      '表格行设备/材料': materialName,
+      '表格行规格、型号': materialName,
+      ...(amount ? { 表格行数量: amount } : {}),
+      ...(method ? { 表格行检查方式: method } : {}),
+      ...(opinion ? { 表格行检查意见: opinion } : {}),
+    })
+  }
+  if (completedWork) Object.assign(structured, { 施工情况: completedWork, 施工当日完成主要工作量: completedWork })
   const quantities = []
   const quantityRe = new RegExp(`([\u4e00-\u9fa5A-Za-z0-9（）()、/-]{0,24}?)(\\d+(?:\\.\\d+)?)\\s*${UNIT_RE.source}`, 'g')
   for (const match of rawInput.matchAll(quantityRe)) {
@@ -183,12 +217,16 @@ export function buildFieldResolutionPlan(fields = [], { fieldConfigs = {}, factP
 function resolveKnownValue(field, contract, pool) {
   if (pool.structured?.[field]) return { value: pool.structured[field], source: 'user-input' }
   if (pool.explicit?.[field]) return { value: pool.explicit[field], source: 'user-input' }
-  if (pool.automatic?.[field]) return { value: pool.automatic[field], source: 'automatic', provenance: pool.provenance?.[field] }
+  // 自动日期/天气只能进入明确配置为系统计算或外部取数的字段。用户模板把
+  // “日期/天气”设为事实提取时，缺失就必须留空，不能因为解析器能查到当天
+  // 日期或当地天气就覆盖用户的“未提供”。
+  const acceptsAutomatic = contract.fillMode === 'system-computed' || contract.fillMode === 'external-data'
+  if (acceptsAutomatic && pool.automatic?.[field]) return { value: pool.automatic[field], source: 'automatic', provenance: pool.provenance?.[field] }
   if (contract.semanticType === 'weather') {
     const isTemperature = /气温|温度/.test(field)
     const alias = isTemperature ? '气温' : '天气'
     if (pool.explicit?.[alias]) return { value: pool.explicit[alias], source: 'user-input' }
-    if (pool.automatic?.[alias]) return { value: pool.automatic[alias], source: 'automatic', provenance: pool.provenance?.[alias] }
+    if (acceptsAutomatic && pool.automatic?.[alias]) return { value: pool.automatic[alias], source: 'automatic', provenance: pool.provenance?.[alias] }
   }
   if (contract.semanticType === 'project') {
     const aliases = {
@@ -230,9 +268,15 @@ export function mergeResolvedFields(content = '', plan = []) {
   let result = String(content || '').trim()
   const additions = []
   for (const item of plan) {
-    if (!item.value || item.contract.fillMode === 'manual' || item.contract.fillMode === 'ai-expansion') continue
     const escaped = item.field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const fieldRe = new RegExp(`【${escaped}】[^\\r\\n]*`)
+    const fieldRe = new RegExp(`【${escaped}】[\\s\\S]*?(?=\\n?【[^】]+】|$)`)
+    if (item.contract.fillMode === 'manual' || item.status === 'unresolved') {
+      // 模型经常会替未解析字段猜一个值。字段计划是最终真相源：人工字段和
+      // 未取得事实的字段只保留字段名，等待用户后续补录。
+      if (fieldRe.test(result)) result = result.replace(fieldRe, `【${item.field}】`)
+      continue
+    }
+    if (!item.value || item.contract.fillMode === 'ai-expansion') continue
     const existing = result.match(fieldRe)
     if (existing) {
       // 确定来源值始终优先于模型文本，防止模型改写日期、天气、数量或项目主数据。
@@ -242,6 +286,126 @@ export function mergeResolvedFields(content = '', plan = []) {
     additions.push(`【${item.field}】${item.value}`)
   }
   return additions.length ? `${result}\n\n${additions.join('\n')}`.trim() : result
+}
+
+const NARRATIVE_SUPPORT_RULES = [
+  { field: /问题|异常|缺陷|隐患|整改|汇报处理|跟踪处理/, source: /问题|异常|缺陷|隐患|整改|汇报|处理|跟踪|复查|销项/ },
+  { field: /安全|文明施工|风险/, source: /安全|文明施工|风险|防护|临电|围挡|警示|劳保|交底|隐患/ },
+  { field: /旁站/, source: /旁站/ },
+  { field: /处理意见/, source: /处理|整改|要求|建议|退场|更换/ },
+  { field: /检查记录$/, source: /检查|检验|核查|检测|试验/ },
+  { field: /发现情况/, source: /发现|检查|检验|核查|检测|合格|不合格|异常|问题/ },
+  { field: /^其他情况$/, source: /其他情况|其他事项|补充说明/ },
+]
+
+const UNSUPPORTED_CLAIM_RULES = [
+  { claim: /包装完整|盘具|盘号|缆[身体](?:完好|无)|端头封堵|标签(?:一致|清晰|齐全)|标识(?:一致|清晰|齐全)|质量证明文件/, source: /包装|盘具|盘号|缆[身体]|损伤|端头|封堵|标签|标识|质量证明/ },
+  { claim: /巡视|巡查/, source: /巡视|巡查/ },
+  { claim: /旁站/, source: /旁站/ },
+  { claim: /核查|核验/, source: /核查|核验/ },
+  { claim: /施工组织|有序|按计划|施工方案/, source: /施工组织|有序|计划|施工方案/ },
+  { claim: /安全|风险|隐患|防护|临电|围挡|警示|劳保|交底/, source: /安全|风险|隐患|防护|临电|围挡|警示|劳保|交底/ },
+  { claim: /未发现|暂无异常|无异常|未发生|无需专项|不存在/, source: /未发现|暂无异常|无异常|未发生|无需专项|不存在/ },
+  { claim: /首日|初期施工阶段/, source: /首日|初期施工阶段/ },
+  { claim: /存放|堆放|标识/, source: /存放|堆放|标识/ },
+  { claim: /符合设计|符合规范|具备进场|同意入场|同意使用/, source: /符合设计|符合规范|具备进场|同意入场|同意使用/ },
+  { claim: /报验|未见异常|异常|相符|一致|符合|达到|满足|受控|具备|就绪/, source: /报验|未见异常|异常|相符|一致|符合|达到|满足|受控|具备|就绪/ },
+  { claim: /光缆开剥|纤芯预留|接头盒定位|熔接衰减|光纤测试|单盘测试/, source: /光缆开剥|纤芯预留|接头盒定位|熔接衰减|光纤测试|单盘测试/ },
+  { claim: /按(?:设计|工艺|规范)要求|符合设计要求|满足设计指标|材料质量(?:合格|受控)/, source: /按(?:设计|工艺|规范)要求|符合设计要求|满足设计指标|材料质量(?:合格|受控)/ },
+  { claim: /路由(?:位于|走向)|按路由/, source: /路由/ },
+]
+
+function explicitlyMissing(field, source) {
+  const text = String(source || '')
+  if (/(日期|时间)/.test(field) && /未提供[^。；\n]*(?:日期|时间)/.test(text)) return true
+  if (/天气|气温|温度/.test(field) && /未提供[^。；\n]*(?:天气|气温|温度)/.test(text)) return true
+  if (/人员|姓名|负责人|签字|签章/.test(field) && /未提供[^。；\n]*(?:人员|姓名)/.test(text)) return true
+  if (/旁站|检查记录|检查结论|发现情况|处理意见|安全|问题|跟踪/.test(field)
+    && /未提供[^。；\n]*(?:其他检查事实|检查事实|检查动作|检测结果|旁站)/.test(text)) return true
+  return false
+}
+
+function filterUnsupportedSentences(value, source) {
+  // 以分句而不是整句为单位清理，避免混合句把用户提供的型号、数量等
+  // 可核验事实与模型擅自添加的材料细节一起丢掉。建议性语句不是既成事实。
+  const clauses = String(value || '').split(/([，,。！？；;\n])/)
+  const kept = []
+  for (let index = 0; index < clauses.length; index += 2) {
+    const clause = String(clauses[index] || '').trim()
+    if (!clause) continue
+    const delimiter = clauses[index + 1] || ''
+    const recommendation = /^(后续|下一步|建议|应当|应|宜|需|须|继续|持续|监理(?:单位|人员)?将|施工单位应|相关单位应)/.test(clause)
+    const unsupported = !recommendation && UNSUPPORTED_CLAIM_RULES.some(rule => rule.claim.test(clause) && !rule.source.test(source))
+    if (!unsupported) kept.push(`${clause}${delimiter}`)
+  }
+  return kept.join('').replace(/[，,]{2,}/g, '，').replace(/[，,]+([。！？；;])/g, '$1').trim()
+}
+
+function keepRecommendationsOnly(value) {
+  const clauses = String(value || '').split(/([。！？；;\n])/)
+  const kept = []
+  for (let index = 0; index < clauses.length; index += 2) {
+    const clause = String(clauses[index] || '').trim()
+    if (!clause) continue
+    const delimiter = clauses[index + 1] || ''
+    if (/^(后续|下一步|建议|应当|应|宜|需|须|继续|持续|监理(?:单位|人员)?将|施工单位应|相关单位应)/.test(clause)) kept.push(`${clause}${delimiter}`)
+  }
+  return kept.join('').trim()
+}
+
+/**
+ * 实体模板生成后的字段级事实守门：字段计划比模型文本优先。没有来源支撑的
+ * 高风险栏目直接留空；允许扩写的栏目也逐句剔除模型擅自增加的现场动作、
+ * 安全结论、材料细节和“未发现问题”等事实性断言。
+ */
+export function sanitizeGeneratedFieldsByPlan(content = '', plan = [], sourceText = '') {
+  let result = String(content || '').trim()
+  const source = String(sourceText || '')
+
+  // 无论字段合同是否成功加载，都先执行用户明确声明的事实边界。这样即使
+  // 自定义文种的 code/label 映射异常，猜出的日期、天气和现场结论也进不了文档。
+  const markers = [...result.matchAll(/【([^】]+)】/g)]
+  for (const marker of markers) {
+    const field = normalizeFieldName(marker[1])
+    if (!field) continue
+    const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const fieldRe = new RegExp(`【${escaped}】([\\s\\S]*?)(?=\\n?【[^】]+】|$)`)
+    const match = result.match(fieldRe)
+    if (!match) continue
+    if (explicitlyMissing(field, source)) {
+      result = result.replace(fieldRe, `【${field}】`)
+      continue
+    }
+    const noOtherInspectionFacts = /未提供[^。；\n]*(?:其他检查事实|检查事实|检查动作|检测结果)/.test(source)
+    if (noOtherInspectionFacts && /综合评价|发现情况|处理意见|其他情况|问题|跟踪处理|安全文明|检查记录/.test(field)) {
+      result = result.replace(fieldRe, `【${field}】${keepRecommendationsOnly(match[1].trim())}`)
+      continue
+    }
+    const safeValue = filterUnsupportedSentences(match[1].trim(), source)
+    result = result.replace(fieldRe, `【${field}】${safeValue}`)
+  }
+
+  for (const item of plan) {
+    const field = normalizeFieldName(item.field)
+    if (!field) continue
+    const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const fieldRe = new RegExp(`【${escaped}】([\\s\\S]*?)(?=\\n?【[^】]+】|$)`)
+    const match = result.match(fieldRe)
+    if (!match) continue
+    if (item.contract?.fillMode === 'manual' || item.status === 'unresolved' || explicitlyMissing(field, source)) {
+      result = result.replace(fieldRe, `【${field}】`)
+      continue
+    }
+    if (item.contract?.fillMode !== 'ai-expansion') continue
+    const supportRule = NARRATIVE_SUPPORT_RULES.find(rule => rule.field.test(field))
+    if (supportRule && !supportRule.source.test(source)) {
+      result = result.replace(fieldRe, `【${field}】`)
+      continue
+    }
+    const safeValue = filterUnsupportedSentences(match[1].trim(), source)
+    result = result.replace(fieldRe, `【${field}】${safeValue}`)
+  }
+  return result.trim()
 }
 
 /** 私人/企业实体模板只消费已登记字段；丢弃模型额外生成且模板会忽略的段落。 */

@@ -43,10 +43,28 @@ BUILT_HASH="$(shasum -a 256 "$BUILT_APP/Contents/Resources/app.asar" | awk '{pri
 INSTALLED_HASH="$(shasum -a 256 "$INSTALLED_APP/Contents/Resources/app.asar" | awk '{print $1}')"
 [[ "$BUILT_HASH" == "$INSTALLED_HASH" ]] || { echo "安装校验失败"; exit 1; }
 
+# 替换目录不会自动刷新已运行的 Electron 进程。若旧进程仍存活，用户看到的
+# 会是旧 renderer，形成“安装成功但修复未生效”的假象。安装后统一重启并校验。
+osascript -e 'tell application id "com.supervision.project-management" to quit' >/dev/null 2>&1 || true
+for _ in {1..10}; do
+  pgrep -f '/Applications/项目文档管理系统.app/Contents/MacOS/项目文档管理系统' >/dev/null || break
+  sleep 1
+done
+if pgrep -f '/Applications/项目文档管理系统.app/Contents/MacOS/项目文档管理系统' >/dev/null; then
+  pkill -TERM -f '/Applications/项目文档管理系统.app/Contents/MacOS/项目文档管理系统' || true
+  sleep 2
+fi
+open -a "$INSTALLED_APP"
+for _ in {1..10}; do
+  pgrep -f '/Applications/项目文档管理系统.app/Contents/MacOS/项目文档管理系统' >/dev/null && break
+  sleep 1
+done
+pgrep -f '/Applications/项目文档管理系统.app/Contents/MacOS/项目文档管理系统' >/dev/null || { echo "新版应用启动校验失败"; exit 1; }
+
 # 安装成功后不留旧应用、DMG、dist 或 release 副本。
 cleanup_tree "$TEMP_OLD"
 cleanup_tree "$PROJECT_DIR/dist"
 cleanup_tree "$PROJECT_DIR/release"
 trap - ERR
 
-echo "已安装最新版，本机仅保留：$INSTALLED_APP"
+echo "已安装并启动最新版，本机仅保留：$INSTALLED_APP"

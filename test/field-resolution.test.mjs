@@ -9,6 +9,7 @@ import {
   formatResolutionContext,
   getPendingFieldPlan,
   mergeResolvedFields,
+  sanitizeGeneratedFieldsByPlan,
   retainTemplateFields,
   setStructuredFieldValue,
   updateFieldPlanValue,
@@ -20,6 +21,19 @@ test('少量施工事实形成事实池并原样保留工程量', () => {
   assert.deepEqual(pool.quantities.map(item => [item.value, item.unit]), [[20, '公里'], [15, '个']])
   assert.match(pool.rawInput, /20公里光缆/)
   assert.match(pool.rawInput, /15个交接箱/)
+})
+
+test('自然语言标签一次解析到复合资料包及表格字段', () => {
+  const pool = buildFactPool('检查地点：南宁市青秀区测试路段；施工单位：润建股份有限公司；段落名称：A段；进场材料：GYTA-48B1.3光缆2000米，外观检查合格；当日完成：光缆敷设与接续准备工作。')
+  assert.equal(pool.structured.检查地点, '南宁市青秀区测试路段')
+  assert.equal(pool.structured.施工地点, '南宁市青秀区测试路段')
+  assert.equal(pool.structured.段落名称, 'A段')
+  assert.equal(pool.structured.施工单位, '润建股份有限公司')
+  assert.equal(pool.structured['表格行设备/材料'], 'GYTA-48B1.3光缆')
+  assert.equal(pool.structured['表格行数量'], '2000米')
+  assert.equal(pool.structured['表格行检查方式'], '外观检查')
+  assert.equal(pool.structured['表格行检查意见'], '合格')
+  assert.equal(pool.structured.施工当日完成主要工作量, '光缆敷设与接续准备工作')
 })
 
 test('实体模板只保留登记字段并丢弃模型额外编造段落', () => {
@@ -53,6 +67,79 @@ test('确定性自动字段覆盖未记录占位值且保留来源', () => {
   assert.match(merged, /【天气】多云/)
   assert.match(merged, /【气温】26～33℃/)
   assert.equal(plan.find(item => item.field === '天气')?.provenance?.source, 'weather-test')
+})
+
+test('事实提取型日期天气不接受自动查询值，缺失字段清空模型猜测', () => {
+  const pool = buildFactPool('未提供具体日期、天气', {
+    autoValues: { 日期: '2026年09月01日', 天气: '小雨' },
+  })
+  const configs = {
+    日期: { mode: 'ai', semanticType: 'date', fillMode: 'fact-extraction' },
+    天气: { mode: 'ai', semanticType: 'weather', fillMode: 'fact-extraction' },
+  }
+  const plan = buildFieldResolutionPlan(['日期', '天气'], { factPool: pool, fieldConfigs: configs })
+  assert.deepEqual(plan.map(item => item.status), ['unresolved', 'unresolved'])
+  assert.equal(mergeResolvedFields('【日期】2026年09月01日\n【天气】强毛毛雨', plan), '【日期】\n【天气】')
+})
+
+test('复合模板字段守门清除无来源的现场动作和结论并保留可核验事实', () => {
+  const input = '进场材料：GYTA-48B1.3光缆2000米，外观检查合格；当日完成光缆敷设与接续准备工作。未提供具体日期、天气、人员姓名及其他检查事实。'
+  const fields = ['材料进出场情况', '施工情况', '施工过程中存在的问题及汇报处理情况', '发现情况', '处理意见', '监理工程师签名']
+  const plan = buildFieldResolutionPlan(fields, { factPool: buildFactPool(input) })
+  const model = [
+    '【材料进出场情况】本次进场GYTA-48B1.3光缆2000米。包装完整，缆身完好，标识清晰，端头封堵可靠。',
+    '【施工情况】当日完成光缆敷设与接续准备工作。施工组织有序，监理人员进行了巡视。',
+    '【施工过程中存在的问题及汇报处理情况】未发现异常情况，无需专项汇报。',
+    '【发现情况】现场安全防护到位，未发现安全隐患。',
+    '【处理意见】建议继续推进。',
+    '【监理工程师签名】张三',
+  ].join('\n')
+  const safe = sanitizeGeneratedFieldsByPlan(model, plan, input)
+  assert.match(safe, /【材料进出场情况】本次进场GYTA-48B1\.3光缆2000米。/)
+  assert.doesNotMatch(safe, /包装完整|缆身完好|标识清晰|端头封堵|施工组织有序|巡视|未发现|安全防护|建议继续|张三/)
+  assert.match(safe, /【施工过程中存在的问题及汇报处理情况】\n/)
+  assert.match(safe, /【监理工程师签名】$/)
+})
+
+test('字段计划缺失时仍执行用户明确的事实边界', () => {
+  const input = '进场材料：GYTA-48B1.3光缆2000米，外观检查合格。未提供具体日期、天气、人员姓名及其他检查事实。'
+  const model = `【日期】2026年09月01日
+【天气】小雨
+【材料进出场情况】GYTA-48B1.3光缆2000米，经外观检查，缆体完好，标识清晰。
+【监理工作总结】型号及数量符合报验记录；现场施工作业按计划推进，暂无异常情况；后续应继续关注材料使用与施工质量。`
+  const safe = sanitizeGeneratedFieldsByPlan(model, [], input)
+  assert.match(safe, /【日期】\s*(?:\n|$)/)
+  assert.match(safe, /【天气】\s*(?:\n|$)/)
+  assert.match(safe, /GYTA-48B1\.3光缆2000米/)
+  assert.doesNotMatch(safe, /缆体完好|标识清晰|报验记录|按计划推进|暂无异常/)
+  assert.match(safe, /后续应继续关注材料使用与施工质量/)
+})
+
+test('接续准备不能被扩写成已经实施的具体工序', () => {
+  const input = '检查地点：南宁市青秀区测试路段；进场材料：GYTA-48B1.3光缆2000米，外观检查合格；当日完成光缆敷设与接续准备工作。'
+  const model = `【施工情况】本段施工内容为A段光缆敷设与接续准备工作。光缆路由位于南宁市青秀区测试路段，施工单位按工艺要求组织敷设作业，同步开展接续准备工作，包括光缆开剥、纤芯预留、接头盒定位等前期操作。
+【综合评价及意见】施工单位按设计要求完成敷设与接续准备工作，材料质量合格。后续应持续关注接续质量。`
+  const safe = sanitizeGeneratedFieldsByPlan(model, [], input)
+  assert.match(safe, /本段施工内容为A段光缆敷设与接续准备工作/)
+  assert.doesNotMatch(safe, /路由位于|按工艺要求|光缆开剥|纤芯预留|接头盒定位|按设计要求|材料质量合格/)
+  assert.match(safe, /后续应持续关注接续质量/)
+})
+
+test('合格事实不能泛化为报验相符或未见异常', () => {
+  const input = '进场材料：GYTA-48B1.3光缆2000米，外观检查合格。'
+  const model = '【综合评价及意见】本次进场光缆规格、数量与报验资料相符，外观检查未见异常。后续施工应继续关注材料使用情况。'
+  const safe = sanitizeGeneratedFieldsByPlan(model, [], input)
+  assert.doesNotMatch(safe, /报验|相符|未见异常/)
+  assert.match(safe, /后续施工应继续关注材料使用情况/)
+})
+
+test('明确无其他检查事实时高风险栏目只保留未来建议', () => {
+  const input = '进场材料：GYTA-48B1.3光缆2000米，外观检查合格。未提供其他检查事实。'
+  const model = '【综合评价及意见】经检查未见缆皮破损、端头密封完好、印字清晰，工序推进处于可控状态。监理将持续关注后续接续质量。\n【发现情况】现场未见异常。'
+  const safe = sanitizeGeneratedFieldsByPlan(model, [], input)
+  assert.doesNotMatch(safe, /缆皮破损|端头密封|印字清晰|可控状态|未见异常/)
+  assert.match(safe, /【综合评价及意见】监理将持续关注后续接续质量/)
+  assert.match(safe, /【发现情况】\s*$/)
 })
 
 test('用户提供叙述字段时仍进入扩写，确定字段才由程序覆盖', () => {

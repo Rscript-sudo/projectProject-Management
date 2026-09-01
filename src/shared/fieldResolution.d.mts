@@ -39,6 +39,7 @@ export function buildFactPool(input?: string, options?: { project?: Record<strin
 export function buildFieldResolutionPlan(fields?: string[], options?: { fieldConfigs?: Record<string, any>; factPool?: Record<string, any> }): FieldPlanItem[]
 export function formatResolutionContext(factPool: Record<string, any>, plan: FieldPlanItem[]): string
 export function mergeResolvedFields(content?: string, plan?: FieldPlanItem[]): string
+export function sanitizeGeneratedFieldsByPlan(content?: string, plan?: FieldPlanItem[], sourceText?: string): string
 export function retainTemplateFields(content?: string, fields?: string[]): string
 export function setStructuredFieldValue(content?: string, field?: string, value?: string): string
 export function updateFieldPlanValue(plan?: FieldPlanItem[], field?: string, value?: string, source?: string): FieldPlanItem[]
