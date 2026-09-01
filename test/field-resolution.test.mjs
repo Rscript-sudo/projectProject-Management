@@ -153,6 +153,20 @@ test('自然施工句可填入主要工作量并形成一致的旁站扩写', ()
   assert.match(safe, /【旁站监理开始时间】\s*$/)
 })
 
+test('缺少旁站时间和其他检查事实时仍用施工主线定位旁站工序', () => {
+  const input = '检查地点：南宁市青秀区民族大道测试段；段落名称：B段；当日完成B段管道光缆敷设准备与材料清点。未提供日期、天气、具体旁站起止时间、人员姓名、检测数据及其他检查事实。'
+  const fields = ['旁站监理的部位或工序', '旁站监理开始时间', '旁站监理结束时间', '发现情况']
+  const pool = buildFactPool(input)
+  const plan = buildFieldResolutionPlan(fields, { factPool: pool })
+  const empty = fields.map(field => `【${field}】`).join('\n')
+  const safe = sanitizeGeneratedFieldsByPlan(mergeResolvedFields(empty, plan), plan, input)
+
+  assert.match(safe, /【旁站监理的部位或工序】B段管道光缆敷设准备与材料清点/)
+  assert.match(safe, /【旁站监理开始时间】\s*$/m)
+  assert.match(safe, /【旁站监理结束时间】\s*$/m)
+  assert.doesNotMatch(safe, /已旁站|旁站检查/)
+})
+
 test('写作指令不作为现场证据且施工主线强制回填用户事实', () => {
   const input = '检查地点：南宁市青秀区测试路段；段落名称：A段；进场材料：GYTA-48B1.3光缆2000米，外观检查合格；当日完成光缆敷设与接续准备工作。请围绕上述事实保持主线一致，可补充质量、安全和旁站控制要求。'
   const fields = ['施工当日完成主要工作量', '施工情况', '工程质量检查、试验情况及施工重点、关键部位旁站记录', '安全文明施工记录']

@@ -172,6 +172,9 @@ test('当前项目专业模板自动优先，私人模板仍可显式选择', as
   const global = await importTemplateToLibrary({ userDataPath, sourcePath, docType: '监理日志', scope: 'global', projectType: '通用', name: '通用版本' })
   const personal = await importTemplateToLibrary({ userDataPath, sourcePath, docType: '监理日志', scope: 'personal', projectType: '通用', name: '我的私人版本' })
   const professional = await importTemplateToLibrary({ userDataPath, sourcePath, docType: '监理日志', scope: 'professional', projectType: '通信工程', name: '通信专业版本' })
+  assert.equal(professional.layoutContract.schemaVersion, 2)
+  assert.equal(professional.layoutContract.status, 'ready')
+  assert.ok(professional.layoutContract.exactPlacementCount > 0)
   markTemplateRuleConfigured(userDataPath, global.id)
   markTemplateRuleConfigured(userDataPath, personal.id)
   markTemplateRuleConfigured(userDataPath, professional.id)
@@ -181,6 +184,20 @@ test('当前项目专业模板自动优先，私人模板仍可显式选择', as
   assert.equal(resolved.scope, 'professional')
   const selected = resolveLibraryTemplate(userDataPath, { docType: '监理日志', projectType: '通信工程', selectedTemplateId: personal.id })
   assert.equal(selected.id, personal.id)
+})
+
+test('XLSX 用户模板导入后也生成确定性字段地图', async t => {
+  const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'pms-xlsx-field-map-'))
+  t.after(() => fs.rmSync(userDataPath, { recursive: true, force: true }))
+  const sourcePath = path.resolve('templates/通用/11_总监理工程师任命书/总监理工程师任命书模板.xlsx')
+  const entry = await importTemplateToLibrary({
+    userDataPath, sourcePath, docType: '总监理工程师任命书', scope: 'personal', projectType: '通用',
+  })
+  assert.equal(entry.layoutContract.schemaVersion, 2)
+  assert.equal(entry.layoutContract.status, 'ready')
+  assert.equal(entry.layoutContract.fieldCount, 3)
+  assert.equal(entry.layoutContract.exactPlacementCount, 3)
+  assert.ok(fs.existsSync(entry.layoutContract.path))
 })
 
 test('站点资料包与普通专业模板独立存放，且只在显式选择时参与生成', async t => {

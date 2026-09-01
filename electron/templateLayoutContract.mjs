@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
-export const LAYOUT_CONTRACT_SCHEMA_VERSION = 1
+export const LAYOUT_CONTRACT_SCHEMA_VERSION = 2
 
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex')
@@ -11,6 +11,17 @@ function sha256(value) {
 export function getTemplateLayoutContractPath(templatePath) {
   const extension = path.extname(templatePath)
   return `${templatePath.slice(0, -extension.length)}.layout.json`
+}
+
+function hasCurrentPlacementShape(contract = {}) {
+  if (contract.mode !== 'docx') return true
+  const placements = Object.values(contract.fields || {}).flatMap(field => field?.placements || [])
+  return placements.length > 0 && placements.every(placement =>
+    placement?.exact === true
+    && Number.isInteger(placement.textOffset)
+    && placement.textOffset >= 0
+    && Number.isInteger(placement.occurrenceIndex)
+    && placement.occurrenceIndex >= 0)
 }
 
 function xmlText(value = '') {
@@ -40,10 +51,113 @@ export function extractTemplateChoiceGroups(documentXml = '') {
       label: plain.slice(Math.max(0, firstMark - 40), firstMark).trim(),
       options: [...new Set(options)],
       defaultValue: '合格',
+      activationPolicy: 'record-required',
+      uncheckedWhen: ['blank', 'pending', 'not-applicable'],
       source: 'template',
     })
   }
   return groups
+}
+
+function placeholderOccurrences(xml = '') {
+  const plain = xmlText(xml)
+  return [...plain.matchAll(/\{\{([^{}]{1,80})\}\}/g)]
+    .map((match, occurrenceIndex) => ({ field: match[1].trim(), textOffset: match.index || 0, occurrenceIndex }))
+    .filter(item => item.field)
+}
+
+function placementLabel(plain = '', fields = []) {
+  let label = String(plain || '')
+  for (const field of fields) label = label.replaceAll(`{{${field}}}`, '')
+  return label.replace(/\s+/g, ' ').trim().slice(0, 120)
+}
+
+function pushFieldPlacement(fields, field, placement, format) {
+  const current = fields[field] || {
+    mode: 'inherit',
+    source: 'template',
+    location: placement.kind,
+    format,
+    collapseBlankLines: true,
+    placements: [],
+    mappingConfidence: 1,
+  }
+  current.placements.push(placement)
+  if (current.location !== placement.kind) current.location = 'multiple'
+  fields[field] = current
+}
+
+/**
+ * 从 OOXML 本身建立字段坐标。模型只解释字段含义，写入位置始终以这里的坐标为准。
+ * paragraphIndex 在表格内表示当前单元格内的段落序号，在表格外表示正文段落序号。
+ */
+export function extractDocxFieldMap(documentXml = '') {
+  const fields = {}
+  const tableRanges = []
+  const tables = [...String(documentXml).matchAll(/<w:tbl\b[\s\S]*?<\/w:tbl>/g)]
+  for (const [tableIndex, tableMatch] of tables.entries()) {
+    const tableXml = tableMatch[0]
+    tableRanges.push([tableMatch.index, (tableMatch.index || 0) + tableXml.length])
+    const rows = [...tableXml.matchAll(/<w:tr\b[\s\S]*?<\/w:tr>/g)]
+    for (const [rowIndex, rowMatch] of rows.entries()) {
+      const cells = [...rowMatch[0].matchAll(/<w:tc\b[\s\S]*?<\/w:tc>/g)]
+      for (const [cellIndex, cellMatch] of cells.entries()) {
+        const paragraphs = [...cellMatch[0].matchAll(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g)]
+        for (const [paragraphIndex, paragraphMatch] of paragraphs.entries()) {
+          const occurrences = placeholderOccurrences(paragraphMatch[0])
+          const names = occurrences.map(item => item.field)
+          if (!occurrences.length) continue
+          const runs = paragraphMatch[0].match(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g) || []
+          const placeholderRun = runs.find(run => xmlText(run).includes('{{')) || runs[0] || ''
+          const format = extractParagraphFormat(paragraphMatch[0], placeholderRun)
+          const label = placementLabel(xmlText(paragraphMatch[0]), names)
+          for (const occurrence of occurrences) pushFieldPlacement(fields, occurrence.field, {
+            kind: 'table-cell', tableIndex, rowIndex, cellIndex, paragraphIndex,
+            textOffset: occurrence.textOffset, occurrenceIndex: occurrence.occurrenceIndex,
+            anchorText: label, exact: true,
+          }, format)
+        }
+      }
+    }
+  }
+
+  let bodyParagraphIndex = 0
+  for (const paragraphMatch of String(documentXml).matchAll(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g)) {
+    const start = paragraphMatch.index || 0
+    if (tableRanges.some(([from, to]) => start >= from && start < to)) continue
+    const paragraph = paragraphMatch[0]
+    const occurrences = placeholderOccurrences(paragraph)
+    const names = occurrences.map(item => item.field)
+    if (occurrences.length) {
+      const runs = paragraph.match(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g) || []
+      const placeholderRun = runs.find(run => xmlText(run).includes('{{')) || runs[0] || ''
+      const format = extractParagraphFormat(paragraph, placeholderRun)
+      const label = placementLabel(xmlText(paragraph), names)
+      for (const occurrence of occurrences) pushFieldPlacement(fields, occurrence.field, {
+        kind: 'paragraph', paragraphIndex: bodyParagraphIndex,
+        textOffset: occurrence.textOffset, occurrenceIndex: occurrence.occurrenceIndex,
+        anchorText: label, exact: true,
+      }, format)
+    }
+    bodyParagraphIndex += 1
+  }
+  return fields
+}
+
+export function assessTemplateFieldMap(contract = {}) {
+  const entries = Object.entries(contract.fields || {})
+  const placementCount = entries.reduce((sum, [, field]) => sum + (field.placements?.length || 0), 0)
+  const exactPlacementCount = entries.reduce((sum, [, field]) => sum + (field.placements || []).filter(item => item.exact === true).length, 0)
+  const unmappedFields = entries.filter(([, field]) => !field.placements?.length).map(([name]) => name)
+  const warnings = unmappedFields.map(field => `${field}：未建立确定性写入坐标`)
+  return {
+    fieldCount: entries.length,
+    placementCount,
+    exactPlacementCount,
+    unmappedFields,
+    mappingStatus: entries.length > 0 && unmappedFields.length === 0 ? 'ready' : entries.length ? 'needs-review' : 'empty',
+    warnings,
+  }
 }
 
 function attr(xml, name) {
@@ -121,25 +235,43 @@ export async function extractTemplateLayoutContract(templatePath, { docType = ''
     const documentXml = zip.file('word/document.xml')?.asText() || ''
     contract.protectedAssets = assetManifest(zip)
     contract.choiceGroups = extractTemplateChoiceGroups(documentXml)
-    for (const paragraph of documentXml.match(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g) || []) {
-      const plain = xmlText(paragraph)
-      const fields = [...plain.matchAll(/\{\{([^{}]{1,80})\}\}/g)].map(match => match[1].trim()).filter(Boolean)
-      if (!fields.length) continue
-      const runs = paragraph.match(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g) || []
-      const placeholderRun = runs.find(run => xmlText(run).includes('{{')) || runs[0] || ''
-      const format = extractParagraphFormat(paragraph, placeholderRun)
-      for (const field of fields) {
-        contract.fields[field] = {
-          mode: 'inherit',
-          source: 'template',
-          location: paragraph.includes('<w:tc>') ? 'table-cell' : 'paragraph',
-          format,
-          collapseBlankLines: true,
-        }
+    contract.fields = extractDocxFieldMap(documentXml)
+    if (!Object.keys(contract.fields).length) contract.warnings.push('未识别到占位符，需先完成模板字段分析')
+  }
+
+  if (extension === '.xlsx') {
+    const XLSX = await import('xlsx')
+    const workbook = XLSX.read(templateBuffer, { type: 'buffer', cellFormula: true })
+    for (const sheetName of workbook.SheetNames) {
+      const worksheet = workbook.Sheets[sheetName]
+      for (const [cell, cellData] of Object.entries(worksheet || {})) {
+        if (cell.startsWith('!')) continue
+        const names = [...String(cellData?.v ?? '').matchAll(/\{\{([^{}]{1,80})\}\}/g)].map(match => match[1].trim()).filter(Boolean)
+        for (const field of names) pushFieldPlacement(contract.fields, field, {
+          kind: 'worksheet-cell', sheet: sheetName, cell, anchorText: '', exact: true,
+        }, { numberFormat: cellData?.z || 'inherit', styleId: cellData?.s })
       }
     }
-    if (!Object.keys(contract.fields).length) contract.warnings.push('未识别到连续占位符，需检查占位符是否被拆分到多个文本节点')
+    const configPath = path.join(path.dirname(templatePath), 'config.json')
+    if (fs.existsSync(configPath)) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+        const names = Object.keys(config.placeholders || {}).map(value => value.replace(/^\{\{|\}\}$/g, '').trim())
+        for (const [index, field] of names.entries()) {
+          if (contract.fields[field]?.placements?.length || !config.placeholder_cells?.[index]) continue
+          pushFieldPlacement(contract.fields, field, {
+            kind: 'worksheet-cell', sheet: workbook.SheetNames[0] || 'Sheet1', cell: config.placeholder_cells[index], anchorText: '', exact: true,
+          }, {})
+        }
+      } catch {
+        contract.warnings.push('XLSX 映射配置读取失败')
+      }
+    }
   }
+
+  const assessment = assessTemplateFieldMap(contract)
+  contract.mapping = assessment
+  contract.warnings.push(...assessment.warnings)
 
   if (write) {
     const target = getTemplateLayoutContractPath(templatePath)
@@ -153,15 +285,31 @@ export async function extractTemplateLayoutContract(templatePath, { docType = ''
 export async function loadOrCreateTemplateLayoutContract(templatePath, options = {}) {
   const contractPath = getTemplateLayoutContractPath(templatePath)
   const currentHash = sha256(fs.readFileSync(templatePath))
+  let previous = null
   if (fs.existsSync(contractPath)) {
     try {
       const contract = JSON.parse(fs.readFileSync(contractPath, 'utf8'))
-      if (contract.schemaVersion === LAYOUT_CONTRACT_SCHEMA_VERSION && contract.templateHash === currentHash) {
+      previous = contract
+      if (contract.schemaVersion === LAYOUT_CONTRACT_SCHEMA_VERSION
+        && contract.templateHash === currentHash
+        && hasCurrentPlacementShape(contract)) {
         return { contract, contractPath, status: 'ready' }
       }
     } catch {}
   }
   const contract = await extractTemplateLayoutContract(templatePath, options)
+  // 模板内容或 schema 升级后重新提取坐标，但保留仍存在字段的人工版式和语义策略。
+  for (const [field, oldValue] of Object.entries(previous?.fields || {})) {
+    if (!contract.fields[field]) continue
+    contract.fields[field].mode = ALLOWED_FIELD_MODES.has(oldValue.mode) ? oldValue.mode : contract.fields[field].mode
+    contract.fields[field].collapseBlankLines = oldValue.collapseBlankLines !== false
+    contract.fields[field].override = oldValue.override || {}
+    if (oldValue.semanticPolicy) contract.fields[field].semanticPolicy = oldValue.semanticPolicy
+  }
+  if (previous) {
+    const target = getTemplateLayoutContractPath(templatePath)
+    fs.writeFileSync(target, JSON.stringify(contract, null, 2), 'utf8')
+  }
   return { contract, contractPath, status: fs.existsSync(contractPath) ? 'regenerated' : 'in_memory' }
 }
 
@@ -202,17 +350,44 @@ function normalizeOverride(value = {}) {
   return override
 }
 
+function normalizeSemanticPolicy(value = {}) {
+  if (!value || typeof value !== 'object') return undefined
+  const text = input => String(input || '').trim().slice(0, 2000)
+  const list = input => Array.isArray(input) ? input.map(text).filter(Boolean).slice(0, 20) : []
+  return {
+    semanticType: text(value.semanticType),
+    fillMode: text(value.fillMode),
+    expansionLevel: text(value.expansionLevel),
+    source: text(value.source),
+    requirement: text(value.requirement),
+    missingInfoPolicy: text(value.missingInfoPolicy),
+    sourcePriority: list(value.sourcePriority),
+    dependencies: list(value.dependencies),
+    forbiddenAssertions: list(value.forbiddenAssertions),
+    requiredForGeneration: value.requiredForGeneration === true,
+    requiredForDelivery: value.requiredForDelivery === true,
+    antiFabrication: value.antiFabrication !== false,
+  }
+}
+
 export async function saveTemplateLayoutContract(templatePath, changes = {}) {
   const loaded = await loadOrCreateTemplateLayoutContract(templatePath, { docType: changes.docType || '', write: true })
   const contract = loaded.contract
   const incoming = changes.fields && typeof changes.fields === 'object' ? changes.fields : {}
   for (const [field, update] of Object.entries(incoming)) {
     if (!contract.fields[field] || !update || typeof update !== 'object') continue
-    const mode = ALLOWED_FIELD_MODES.has(update.mode) ? update.mode : 'inherit'
+    const mode = ALLOWED_FIELD_MODES.has(update.mode) ? update.mode : contract.fields[field].mode || 'inherit'
     contract.fields[field].mode = mode
-    contract.fields[field].collapseBlankLines = update.collapseBlankLines !== false
-    contract.fields[field].override = mode === 'contract' ? normalizeOverride(update.override) : {}
+    if (typeof update.collapseBlankLines === 'boolean') contract.fields[field].collapseBlankLines = update.collapseBlankLines
+    if (update.override) contract.fields[field].override = mode === 'contract' ? normalizeOverride(update.override) : {}
+    const semanticPolicy = normalizeSemanticPolicy(update.semanticPolicy)
+    if (semanticPolicy) contract.fields[field].semanticPolicy = semanticPolicy
   }
+  contract.mapping = assessTemplateFieldMap(contract)
+  contract.warnings = [
+    ...(contract.warnings || []).filter(item => !/未建立确定性写入坐标/.test(item)),
+    ...contract.mapping.warnings,
+  ]
   contract.updatedAt = new Date().toISOString()
   const target = getTemplateLayoutContractPath(templatePath)
   const temporary = `${target}.${process.pid}.${Date.now()}.tmp`

@@ -4,7 +4,22 @@ import { fileURLToPath } from 'url'
 import { normalizeProjectType } from '../src/shared/projectProfile.mjs'
 import { getTemplateScopeDir, getTemplateWorkspaceRoot } from './templateWorkspace.mjs'
 import { isTemplateReady } from '../src/shared/templateReadiness.mjs'
-import { extractTemplateLayoutContract, getTemplateLayoutContractPath } from './templateLayoutContract.mjs'
+import { extractTemplateLayoutContract, getTemplateLayoutContractPath, loadOrCreateTemplateLayoutContract } from './templateLayoutContract.mjs'
+
+function summarizeLayoutContract(templatePath, layoutContract) {
+  if (!layoutContract) return undefined
+  return {
+    path: getTemplateLayoutContractPath(templatePath),
+    templateHash: layoutContract.templateHash,
+    schemaVersion: layoutContract.schemaVersion,
+    status: layoutContract.mapping?.mappingStatus === 'ready' ? 'ready' : 'needs-review',
+    warningCount: layoutContract.warnings.length,
+    choiceGroupCount: layoutContract.choiceGroups?.length || 0,
+    fieldCount: layoutContract.mapping?.fieldCount || 0,
+    placementCount: layoutContract.mapping?.placementCount || 0,
+    exactPlacementCount: layoutContract.mapping?.exactPlacementCount || 0,
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -71,6 +86,15 @@ export async function reconcileTemplateLibraryFiles(userDataPath) {
   const registry = readRegistry(userDataPath)
   const registeredPaths = new Set(registry.templates.map(item => item.path && path.resolve(item.path)).filter(Boolean))
   let added = 0
+  let refreshed = 0
+  // 升级时自动把旧“版式合同”迁移成带精确坐标的字段地图，避免要求用户逐份重导模板。
+  for (const entry of registry.templates) {
+    if (!entry.path || !fs.existsSync(entry.path) || !/\.(?:docx|xlsx)$/i.test(entry.path)) continue
+    const loaded = await loadOrCreateTemplateLayoutContract(entry.path, { docType: entry.docType, write: true })
+    const contract = loaded.contract
+    entry.layoutContract = summarizeLayoutContract(entry.path, contract)
+    if (loaded.status === 'regenerated') refreshed += 1
+  }
   for (const scope of ['professional', 'personal', 'other']) {
     const scopeRoot = getTemplateScopeDir(userDataPath, scope)
     if (!fs.existsSync(scopeRoot)) continue
@@ -87,6 +111,7 @@ export async function reconcileTemplateLibraryFiles(userDataPath) {
       const docType = cleanTemplateDocType(folderDocType)
       const { getTemplatePlaceholders } = await import('./templateService.mjs')
       const fields = await getTemplatePlaceholders(filePath)
+      const layoutContract = await extractTemplateLayoutContract(filePath, { docType, write: true })
       const now = new Date().toISOString()
       registry.templates.push({
         id: `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -99,6 +124,7 @@ export async function reconcileTemplateLibraryFiles(userDataPath) {
         sourceName: path.basename(filePath),
         resourceKind: 'document',
         fields,
+        layoutContract: summarizeLayoutContract(filePath, layoutContract),
         // 内置文种的规则按文种随应用交付。复制为私人副本后直接继承，
         // 只有新增自定义字段或自定义文种才需要重新配置。
         aiRuleConfiguredAt: BUILTIN_DOC_TYPES.has(docType) && fields.length ? now : undefined,
@@ -124,6 +150,7 @@ export async function reconcileTemplateLibraryFiles(userDataPath) {
       const docType = cleanTemplateDocType(folderDocType)
       const { getTemplatePlaceholders } = await import('./templateService.mjs')
       const fields = await getTemplatePlaceholders(filePath)
+      const layoutContract = await extractTemplateLayoutContract(filePath, { docType, write: true })
       const now = new Date().toISOString()
       registry.templates.push({
         id: `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -136,6 +163,7 @@ export async function reconcileTemplateLibraryFiles(userDataPath) {
         sourceName: path.basename(filePath),
         resourceKind: 'site-package',
         fields,
+        layoutContract: summarizeLayoutContract(filePath, layoutContract),
         aiRuleConfiguredAt: BUILTIN_DOC_TYPES.has(docType) && fields.length ? now : undefined,
         createdAt: now,
         updatedAt: now,
@@ -144,8 +172,8 @@ export async function reconcileTemplateLibraryFiles(userDataPath) {
       added++
     }
   }
-  if (added) writeRegistry(userDataPath, registry)
-  return { added }
+  if (added || refreshed) writeRegistry(userDataPath, registry)
+  return { added, refreshed }
 }
 
 /** 把旧版散落路径、英文 ID 文件名和同文种变体收敛为一份中文正式模板。 */
@@ -335,7 +363,7 @@ export async function updateTemplateInLibrary(userDataPath, id, { name, sourcePa
     const { getTemplatePlaceholders } = await import('./templateService.mjs')
     entry.fields = await getTemplatePlaceholders(entry.path)
     const layoutContract = await extractTemplateLayoutContract(entry.path, { docType: entry.docType, write: true })
-    entry.layoutContract = { path: getTemplateLayoutContractPath(entry.path), templateHash: layoutContract.templateHash, schemaVersion: layoutContract.schemaVersion, status: 'ready', warningCount: layoutContract.warnings.length, choiceGroupCount: layoutContract.choiceGroups?.length || 0 }
+    entry.layoutContract = summarizeLayoutContract(entry.path, layoutContract)
     entry.sourceName = path.basename(sourcePath)
     // 文件内容已替换，旧模板上的规则确认不能沿用；保留曾配置记录，供界面明确显示“需更新”。
     if (entry.aiRuleConfiguredAt) entry.aiRuleNeedsUpdate = true
@@ -420,9 +448,7 @@ export async function importTemplateToLibrary({ userDataPath, sourcePath, docTyp
   // 在导入时即扫描占位符：用户无需研究模板语法，也能判断模板是否可直接生成。
   const { getTemplatePlaceholders } = await import('./templateService.mjs')
   const fields = await getTemplatePlaceholders(targetPath)
-  const layoutContract = extension === '.docx'
-    ? await extractTemplateLayoutContract(targetPath, { docType, write: true })
-    : null
+  const layoutContract = await extractTemplateLayoutContract(targetPath, { docType, write: true })
   const entry = {
     id,
     name: safeDocType,
@@ -438,14 +464,7 @@ export async function importTemplateToLibrary({ userDataPath, sourcePath, docTyp
     sourceName: `${safeDocType}模板${extension}`,
     resourceKind,
     fields,
-    layoutContract: layoutContract ? {
-      path: getTemplateLayoutContractPath(targetPath),
-      templateHash: layoutContract.templateHash,
-      schemaVersion: layoutContract.schemaVersion,
-      status: 'ready',
-      warningCount: layoutContract.warnings.length,
-      choiceGroupCount: layoutContract.choiceGroups?.length || 0,
-    } : undefined,
+    layoutContract: summarizeLayoutContract(targetPath, layoutContract),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
@@ -464,10 +483,8 @@ export async function refreshTemplateLibraryEntry({ userDataPath, templateId }) 
   const { getTemplatePlaceholders } = await import('./templateService.mjs')
   const previousFields = Array.isArray(entry.fields) ? [...entry.fields].sort() : []
   entry.fields = await getTemplatePlaceholders(entry.path)
-  if (path.extname(entry.path).toLowerCase() === '.docx') {
-    const layoutContract = await extractTemplateLayoutContract(entry.path, { docType: entry.docType, write: true })
-    entry.layoutContract = { path: getTemplateLayoutContractPath(entry.path), templateHash: layoutContract.templateHash, schemaVersion: layoutContract.schemaVersion, status: 'ready', warningCount: layoutContract.warnings.length, choiceGroupCount: layoutContract.choiceGroups?.length || 0 }
-  }
+  const layoutContract = await extractTemplateLayoutContract(entry.path, { docType: entry.docType, write: true })
+  entry.layoutContract = summarizeLayoutContract(entry.path, layoutContract)
   const currentFields = [...entry.fields].sort()
   if (entry.aiRuleConfiguredAt && JSON.stringify(previousFields) !== JSON.stringify(currentFields)) entry.aiRuleNeedsUpdate = true
   entry.updatedAt = new Date().toISOString()

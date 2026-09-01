@@ -90,21 +90,21 @@ export function register(ipcMain) {
   }))
 
   ipcMain.handle('template:getLayoutContract', safeCall(async (_, { path: filePath, docType = '' }) => {
-    if (!filePath || !fs.existsSync(filePath) || path.extname(filePath).toLowerCase() !== '.docx') return { ok: false, error: '请选择有效的 DOCX 模板' }
+    if (!filePath || !fs.existsSync(filePath) || !/\.(?:docx|xlsx)$/i.test(filePath)) return { ok: false, error: '请选择有效的 DOCX 或 XLSX 模板' }
     if (!isPathSafe(filePath) && !isRuntimeSystemTemplate(filePath)) return { ok: false, error: '模板路径不安全' }
     const result = await loadOrCreateTemplateLayoutContract(filePath, { docType, write: true })
     return { ok: true, ...result }
   }))
 
   ipcMain.handle('template:saveLayoutContract', safeCall(async (_, { path: filePath, docType = '', fields = {} }) => {
-    if (!filePath || !fs.existsSync(filePath) || path.extname(filePath).toLowerCase() !== '.docx') return { ok: false, error: '请选择有效的 DOCX 模板' }
+    if (!filePath || !fs.existsSync(filePath) || !/\.(?:docx|xlsx)$/i.test(filePath)) return { ok: false, error: '请选择有效的 DOCX 或 XLSX 模板' }
     if (!isPathSafe(filePath)) return { ok: false, error: '模板路径不安全' }
     const contract = await saveTemplateLayoutContract(filePath, { docType, fields })
     return { ok: true, contract }
   }))
 
   ipcMain.handle('template:resetLayoutContract', safeCall(async (_, { path: filePath, docType = '' }) => {
-    if (!filePath || !fs.existsSync(filePath) || path.extname(filePath).toLowerCase() !== '.docx') return { ok: false, error: '请选择有效的 DOCX 模板' }
+    if (!filePath || !fs.existsSync(filePath) || !/\.(?:docx|xlsx)$/i.test(filePath)) return { ok: false, error: '请选择有效的 DOCX 或 XLSX 模板' }
     if (!isPathSafe(filePath)) return { ok: false, error: '模板路径不安全' }
     const contract = await resetTemplateLayoutContract(filePath, { docType })
     return { ok: true, contract }
@@ -199,9 +199,7 @@ export function register(ipcMain) {
 
     // 模板字段编辑会改变 document.xml 和模板指纹；写回完成后立即重建版式合同，
     // 避免用户第一次生成时才发现合同过期或编辑器仍展示旧字段。
-    if (ext === '.docx') {
-      await resetTemplateLayoutContract(targetPath, { docType: docType || clonedToLibrary?.docType || '' })
-    }
+    await resetTemplateLayoutContract(targetPath, { docType: docType || clonedToLibrary?.docType || '' })
 
     return { ok: true, path: targetPath, fields, clonedToLibrary }
   }))

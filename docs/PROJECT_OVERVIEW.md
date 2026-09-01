@@ -214,7 +214,7 @@ npm run build             # macOS dmg（本机）
 | **AI 文档生成** | ✅ 完整 | 18 类“模板 + 占位符 + AI 规则”完整内置 docType（`builtin-doc-types.json`）+ 字段合同 v2 + 事实池/自动取数/受控扩写 + 自定义 docType + 流式 SSE + 7 层反编造防线 |
 | **AI 多 Provider** | ✅ 完整 | `providerConfigs` 支持 deepseek / qwen 等；apiKey 主进程安全存储（v1.0.6 脱敏） |
 | **项目类型 SOP 路由** | ✅ 完整 | 7 类项目（土建/市政/房建/信息化/园林/钢结构/装饰）SOP JSON **全部已建**（`src/shared/sop/<type>/safety-notice.json`） |
-| **模板系统** | ✅ 完整（统一模板模型） | 18 个开箱即用通用模板 + 专业/私人/其他模板 + 项目级 override。内置文种规则保留并结构化为字段合同；用户模板经同一分析、编辑和兼容链路。普通字段缺失不阻止生成 |
+| **模板系统** | ✅ 完整（统一模板模型） | 18 个开箱即用通用模板 + 专业/私人/其他模板 + 项目级 override。字段地图 v2 对 DOCX 保存表/行/列/段落坐标、对 XLSX 保存工作表/单元格坐标；AI 语义策略与确定性位置分离持久化。普通字段缺失不阻止生成 |
 | **全文检索** | ✅ 完整 | FlexSearch 引擎，Docx/Xlsx 全文索引，跨项目搜索（`search:query/rebuild/status`） |
 | **往来函件台账** | ✅ 完整 | 6 类函件 + 5 维度检索 + 状态机（已发出/已回复/已复查/已关闭/超期）+ 自动归档 |
 | **隐患联动闭环** | ✅ 完整 | 巡检 → 隐患入台账 → 生成整改通知 → 回执关闭（`hazard` 表关联 `correspondence`） |

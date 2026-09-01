@@ -142,7 +142,7 @@ export function register(ipcMain) {
 
       const engine = template.config.engine || 'docx'
       let layoutContract = null
-      if (engine === 'docx') {
+      if (engine === 'docx' || engine === 'xlsx') {
         const { loadOrCreateTemplateLayoutContract } = await import('../templateLayoutContract.mjs')
         const layout = await loadOrCreateTemplateLayoutContract(template.templatePath, {
           docType,
@@ -150,6 +150,10 @@ export function register(ipcMain) {
           write: template.source !== 'global',
         })
         layoutContract = layout.contract
+        if (layoutContract.mapping?.mappingStatus !== 'ready') {
+          const fields = layoutContract.mapping?.unmappedFields || []
+          throw new Error(`模板字段地图尚未完成精准定位${fields.length ? `：${fields.slice(0, 6).join('、')}` : ''}，请先到模板中心复核`)
+        }
       }
 
       const data = buildPlaceholderData({

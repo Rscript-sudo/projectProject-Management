@@ -187,10 +187,11 @@ export function buildFactPool(input = '', { project = {}, autoValues = {}, prove
   }
   if (completedWork) {
     const workLabel = completedWork.replace(/^(?:当日|今日)(?:已)?完成/, '').trim()
+    const workPosition = section && !workLabel.includes(section) ? `${section}：${workLabel}` : workLabel
     Object.assign(structured, {
       施工情况: completedWork,
       施工当日完成主要工作量: completedWork,
-      ...(workLabel ? { 旁站监理的部位或工序: [section, workLabel].filter(Boolean).join('：') } : {}),
+      ...(workPosition ? { 旁站监理的部位或工序: workPosition } : {}),
     })
   }
   const quantities = []
@@ -352,7 +353,11 @@ function explicitlyMissing(field, source) {
   if (/(日期|时间)/.test(field) && /未提供[^。；\n]*(?:日期|时间)/.test(text)) return true
   if (/天气|气温|温度/.test(field) && /未提供[^。；\n]*(?:天气|气温|温度)/.test(text)) return true
   if (/人员|姓名|负责人|签字|签章/.test(field) && /未提供[^。；\n]*(?:人员|姓名)/.test(text)) return true
-  if (/旁站|检查记录|检查结论|发现情况|处理意见|安全|问题|跟踪/.test(field)
+  // “旁站监理的部位或工序”描述本次施工主线，不等同于旁站已经发生。
+  // 即使用户明确说未提供旁站时间、检查动作或其他检查事实，只要施工段落
+  // 和当日工作已经给出，仍应据此定位工序；时间、人员和结果继续保持空白。
+  if (!/^旁站监理的部位或工序$/.test(field)
+    && /旁站|检查记录|检查结论|发现情况|处理意见|安全|问题|跟踪/.test(field)
     && /未提供[^。；\n]*(?:其他检查事实|检查事实|检查动作|检测结果)/.test(text)) return true
   return false
 }

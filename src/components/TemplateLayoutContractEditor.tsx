@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, App, Button, Checkbox, Empty, Input, InputNumber, Modal, Popconfirm, Select, Space, Spin, Table, Tag, Typography } from 'antd'
+import { Alert, App, Button, Checkbox, Empty, Input, InputNumber, Modal, Popconfirm, Select, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd'
 
 const { Text } = Typography
 
@@ -8,6 +8,10 @@ type FieldContract = {
   format?: Record<string, any>
   override?: Record<string, any>
   collapseBlankLines?: boolean
+  location?: string
+  placements?: Array<{ kind: string; tableIndex?: number; rowIndex?: number; cellIndex?: number; paragraphIndex?: number; textOffset?: number; occurrenceIndex?: number; sheet?: string; cell?: string; exact?: boolean }>
+  mappingConfidence?: number
+  semanticPolicy?: Record<string, any>
 }
 
 type LayoutContract = {
@@ -19,6 +23,7 @@ type LayoutContract = {
   protectedAssets?: Record<string, string>
   fields: Record<string, FieldContract>
   choiceGroups?: Array<{ id: string; label: string; options: string[]; defaultValue?: string }>
+  mapping?: { fieldCount: number; placementCount: number; exactPlacementCount: number; mappingStatus: string; unmappedFields?: string[] }
 }
 
 interface Props {
@@ -137,6 +142,19 @@ export default function TemplateLayoutContractEditor({ open, template, onClose, 
   const columns: any[] = [
     { title: '字段', dataIndex: 'field', width: 130, fixed: 'left', render: (value: string) => <Text strong>{value}</Text> },
     {
+      title: '确定性写入位置', width: 230,
+      render: (_: any, row: any) => {
+        const placements = row.placements || []
+        if (!placements.length) return <Tag color="error">未定位</Tag>
+        const labels = placements.map((item: any) => item.kind === 'worksheet-cell'
+          ? `${item.sheet}!${item.cell}`
+          : item.kind === 'table-cell'
+            ? `表${item.tableIndex + 1}/行${item.rowIndex + 1}/列${item.cellIndex + 1}/段${(item.paragraphIndex || 0) + 1}@${item.textOffset || 0}`
+            : `正文段落${item.paragraphIndex + 1}@${item.textOffset || 0}`)
+        return <Tooltip title={labels.join('；')}><Tag color={placements.every((item: any) => item.exact) ? 'green' : 'orange'}>{labels[0]}{labels.length > 1 ? ` 等${labels.length}处` : ''}</Tag></Tooltip>
+      },
+    },
+    {
       title: '模板原格式', width: 210,
       render: (_: any, row: any) => <Text type="secondary" style={{ fontSize: 12 }}>{formatSummary(row.format)}</Text>,
     },
@@ -187,13 +205,14 @@ export default function TemplateLayoutContractEditor({ open, template, onClose, 
       {exceptions.length > 0 && <Alert type="warning" showIcon message={`发现 ${exceptions.length} 项需要关注`} description={<div style={{ maxHeight: 90, overflow: 'auto' }}>{exceptions.slice(0, 12).map(item => <div key={item}>• {item}</div>)}</div>} />}
       <Space wrap>
         <Tag color="cyan">字段 {Object.keys(contract.fields).length}</Tag>
+        <Tag color={contract.mapping?.mappingStatus === 'ready' ? 'green' : 'orange'}>精准定位 {contract.mapping?.exactPlacementCount || 0}/{contract.mapping?.placementCount || 0}</Tag>
         <Tag color="purple">选择项 {contract.choiceGroups?.length || 0}</Tag>
         <Tag color="green">受保护资产 {Object.keys(contract.protectedAssets || {}).length}</Tag>
         <Tag>合同 v{contract.schemaVersion}</Tag>
         <Text type="secondary" style={{ fontSize: 12 }}>模板指纹：{contract.templateHash.slice(0, 12)}</Text>
         <Input.Search allowClear placeholder="筛选字段" value={filter} onChange={event => setFilter(event.target.value)} style={{ width: 210 }} />
       </Space>
-      <Table size="small" rowKey="field" columns={columns} dataSource={rows} pagination={false} scroll={{ x: 1180, y: 430 }} />
+      <Table size="small" rowKey="field" columns={columns} dataSource={rows} pagination={false} scroll={{ x: 1410, y: 430 }} />
       <Alert type="success" showIcon message="预览对比" description="“模板原格式”与“当前生效格式”已并列显示。保存不会改动原模板文件，只更新旁车合同；Logo、页眉页脚、边框和签章区继续受强制保护。" />
     </Space>}
   </Modal>

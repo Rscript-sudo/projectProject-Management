@@ -770,6 +770,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
         source: stripThinkingContent(config.source).trim(),
         requirement: stripThinkingContent(config.requirement).trim(),
       })])) as Record<string, FieldConfig>
+      let contractTemplatePath = template?.path || ''
       const locked = fields.filter(field => cleanedConfigs[field]?.mode === 'ai')
       const lines = locked.map(field => {
         const c = cleanedConfigs[field] || defaultFieldConfig(field)
@@ -829,6 +830,7 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
               name: personalTemplateName.trim() || `${activeItem?.label || activeKey}私人模板`,
             })
             if (saveRes?.ok) {
+              contractTemplatePath = saveRes.path || contractTemplatePath
               // 系统模板会被克隆到企业库，更新 template 指向新路径
               if (saveRes.clonedToLibrary) {
                 const marked = await window.electronAPI.markTemplateRuleConfigured(saveRes.clonedToLibrary.id)
@@ -849,6 +851,36 @@ export default function DocTypePromptEditorV2({ initialDocType, templateId, onBa
             message.warning(`模板文件保存异常：${saveErr?.message || saveErr}（规则已保存，但模板文件未更新）`)
           }
         }
+      }
+
+      // 字段坐标由模板 OOXML/XLSX 确定性提取，AI 只补充语义策略。把两者保存到
+      // 同一个版式合同中，使模板分析真正“一次确认、长期复用”，而不是下次再猜。
+      if (contractTemplatePath && fields.length) {
+        const contractFields = Object.fromEntries(fields.map(field => {
+          const config = cleanedConfigs[field] || defaultFieldConfig(field)
+          return [field, {
+            semanticPolicy: {
+              semanticType: config.semanticType,
+              fillMode: config.fillMode,
+              expansionLevel: config.expansionLevel,
+              source: config.source,
+              requirement: config.requirement,
+              missingInfoPolicy: config.missingInfoPolicy,
+              sourcePriority: config.sourcePriority,
+              dependencies: config.dependencies,
+              forbiddenAssertions: config.forbiddenAssertions,
+              requiredForGeneration: config.requiredForGeneration === true,
+              requiredForDelivery: config.requiredForDelivery === true,
+              antiFabrication: config.antiFabrication !== false,
+            },
+          }]
+        }))
+        const contractResult = await window.electronAPI.saveTemplateLayoutContract(
+          contractTemplatePath,
+          activeItem?.label || activeKey,
+          contractFields,
+        )
+        if (!contractResult?.ok) throw new Error(contractResult?.error || '模板字段地图保存失败')
       }
 
       // 必须在模板文件和字段变更全部写回之后再确认规则版本；否则刷新字段会把刚保存的规则误判为过期。

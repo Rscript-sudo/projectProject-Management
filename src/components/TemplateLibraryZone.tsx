@@ -27,7 +27,7 @@ interface Tpl {
   id: string; name: string; docType: string; scope: string; projectType: string
   path: string; sourceName: string; fields?: string[]; readOnly?: boolean; missing?: boolean
   aiRuleConfiguredAt?: string
-  layoutContract?: { status?: string; warningCount?: number; choiceGroupCount?: number; schemaVersion?: number; templateHash?: string }
+  layoutContract?: { status?: string; warningCount?: number; choiceGroupCount?: number; schemaVersion?: number; templateHash?: string; fieldCount?: number; placementCount?: number; exactPlacementCount?: number }
   customDocTypeCode?: string
   projectTypeLabel?: string
   resourceKind?: 'document' | 'site-package'
@@ -358,10 +358,11 @@ export default function TemplateLibraryZone({ scope, projectType, title, onGoRul
         return <Space size={4} wrap style={{ justifyContent: 'center' }}>
           <Tag color="success" style={{ margin: 0 }}>可使用</Tag>
           {!r.readOnly && r.layoutContract?.status === 'ready' && (
-            <Tooltip title={r.layoutContract.warningCount ? `版式合同已生成，存在 ${r.layoutContract.warningCount} 项需复核` : '已自动提取占位符格式，并保护页眉、页脚和 Logo 资产'}>
-              <Tag color={r.layoutContract.warningCount ? 'orange' : 'cyan'} style={{ margin: 0 }}>版式已识别</Tag>
+            <Tooltip title={`字段地图已生成：${r.layoutContract.exactPlacementCount || 0}/${r.layoutContract.placementCount || 0} 个写入位置已确定性定位`}>
+              <Tag color="cyan" style={{ margin: 0 }}>精准定位 {r.layoutContract.exactPlacementCount || 0}</Tag>
             </Tooltip>
           )}
+          {!r.readOnly && r.layoutContract?.status === 'needs-review' && <Tag color="orange" style={{ margin: 0 }}>定位待复核</Tag>}
           {!!r.layoutContract?.choiceGroupCount && <Tag color="purple" style={{ margin: 0 }}>选择项 {r.layoutContract.choiceGroupCount}</Tag>}
         </Space>
       },
